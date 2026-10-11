@@ -71,6 +71,15 @@ final class HostContainersModel {
 
     var inspectorPresented = false
 
+    enum InspectorTab: String, CaseIterable, Identifiable, Hashable {
+        case events = "Events"
+        case describe = "Describe"
+        var id: Self { self }
+    }
+
+    /// The inspector's pane; events first, so a Pending pod's FailedScheduling is the first thing seen.
+    var inspectorTab = InspectorTab.events
+
     // MARK: Presentations
 
     /// The Logs sheet; `nil` when closed. Closing it stops any follow.

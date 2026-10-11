@@ -50,7 +50,7 @@ enum DebugLaunchOptions {
     ///   snapshot runs never touch `~/.aeroops`, the real hosts or the Keychain.
     @MainActor
     static func makeModel() -> AppModel? {
-        if Phase2SelfTest.isRequested {
+        if Phase2SelfTest.isRequested || Phase5SelfTest.isRequested {
             return Phase2SelfTest.makeModel()
         }
         guard let dataDirectory else { return nil }
@@ -90,6 +90,8 @@ enum DebugLaunchOptions {
         }
         if Phase2SelfTest.isRequested {
             await Phase2SelfTest(model: model).runAndQuit()
+        } else if Phase5SelfTest.isRequested {
+            await Phase5SelfTest(model: model).runAndQuit()
         }
     }
 }

@@ -221,25 +221,18 @@ private struct PodTable: View {
 
 /// Events and `kubectl describe` for the selected pod.
 struct PodInspectorView: View {
-    let containers: HostContainersModel
-    @State private var tab = Tab.events
-
-    enum Tab: String, CaseIterable, Identifiable {
-        case events = "Events"
-        case describe = "Describe"
-        var id: Self { self }
-    }
+    @Bindable var containers: HostContainersModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let detail = containers.podDetail {
                 header(detail)
-                Picker("View", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                Picker("View", selection: $containers.inspectorTab) {
+                    ForEach(HostContainersModel.InspectorTab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                switch tab {
+                switch containers.inspectorTab {
                 case .events: PodEventsList(detail: detail)
                 case .describe: PodDescribeView(detail: detail)
                 }
