@@ -69,8 +69,11 @@ public final class TerminalSession: Identifiable {
     /// PID of the wrapper `sh`, the root of the program's process tree.
     @ObservationIgnored private var rootPID: pid_t?
     @ObservationIgnored private var reportedExitCode: Int32?
-    /// Called when libghostty asks to close a surface whose program is still running
-    /// (its `close_surface` key binding); the manager removes the tab.
+    /// libghostty asked to close the surface because the program ended.
+    @ObservationIgnored private var programEndedCloseSeen = false
+    /// Called when the terminal asks to be closed: libghostty's `close_surface` key binding
+    /// while the program runs, or a key press after it ended ("Press any key to close the
+    /// terminal", which libghostty prints on every exit). The manager handles it.
     @ObservationIgnored var onCloseRequest: ((TerminalSession) -> Void)?
     @ObservationIgnored package private(set) var lastReapReport: ReapReport?
 
@@ -246,17 +249,24 @@ public final class TerminalSession: Identifiable {
 
     fileprivate func closeRequested(processAlive: Bool) {
         guard !isClosed else { return }
-        if processAlive {
-            if let onCloseRequest {
-                onCloseRequest(self)
-            } else {
-                close()
+        // While the program runs this is the close binding. After it ended, libghostty asks
+        // once when it ends and again on each key press: those are the user's. Both come from
+        // inside libghostty's key handling, so act once it has returned.
+        if processAlive || programEndedCloseSeen {
+            Task { [weak self] in
+                guard let self, !isClosed else { return }
+                if let onCloseRequest {
+                    onCloseRequest(self)
+                } else {
+                    close()
+                }
             }
             return
         }
         // The program ended. Keep the surface so its last output stays readable. The exit
         // report is output and this close is a process event, so they can arrive in either
         // order: give a late report a moment before settling without a code.
+        programEndedCloseSeen = true
         guard !state.isFinished else { return }
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -316,7 +326,7 @@ extension TerminalSession {
     /// PID of the wrapper shell once the program started.
     @_spi(AeroSelfTest) public var processRootPID: pid_t? { rootPID }
 
-    /// Types `text` as key presses (US layout); `\n` presses Return.
+    /// Types `text` as key presses (US layout); `\n` presses Return, `\u{7f}` Backspace.
     @discardableResult
     @_spi(AeroSelfTest) public func type(_ text: String) -> Bool {
         guard !isClosed else { return false }
@@ -324,6 +334,8 @@ extension TerminalSession {
             let sent: Bool
             if character == "\n" {
                 sent = terminalView.sendKey(.enter)
+            } else if character == "\u{7f}" {
+                sent = terminalView.sendKey(.backspace)
             } else if let press = TerminalKeyPress(typing: character) {
                 sent = terminalView.sendKey(press)
             } else {

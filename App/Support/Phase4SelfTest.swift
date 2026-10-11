@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import ImageIO
 import KeyAgent
+import Observation
 @preconcurrency import ScreenCaptureKit
 import SSHKit
 @_spi(AeroSelfTest) import TerminalKit
@@ -82,6 +83,8 @@ final class Phase4SelfTest {
     private var authorizeRan = false
     private var quitPathRan = false
     private var savedPasteboard: [[NSPasteboard.PasteboardType: Data]] = []
+    /// Moments the main window left the Terminals tab during the run, with who did it.
+    private var tabSwitches: [String] = []
 
     init(model: AppModel) {
         self.model = model
@@ -173,6 +176,7 @@ final class Phase4SelfTest {
         window.setContentSize(NSSize(width: 1180, height: 760))
         model.selection = hosts[0].id
         model.selectedTab = .terminals
+        watchSelectedTab()
         await pause(1.0)
         await capture("terminals-empty")
         let windowSize = window.frame.size
@@ -180,10 +184,15 @@ final class Phase4SelfTest {
         // 4. Five shell tabs: each host once (first contact), then two repeats.
         var shells: [TerminalSession] = []
         for (index, host) in (hosts + hosts.prefix(2)).enumerated() {
-            guard let session = await openShell(host, firstContact: index < 3, connectingShot: index == 3 ? "tabs-connecting" : nil) else { return }
+            guard let session = await openShell(host, firstContact: index < 3, connectingShot: index == 2 ? "tabs-connecting" : nil) else { return }
             let ready = await wait(25) { session.state == .running && self.hasPrompt(session) }
             let title = terminals.tab(for: session.id)?.title ?? "?"
-            step("tab \(index + 1) \(title)", ready, ready ? "remote prompt" : "state \(session.state); screen \(lines(session).filter { !$0.isEmpty }.suffix(4))")
+            step(
+                "tab \(index + 1) \(title)", ready,
+                ready ? "remote prompt" : "state \(session.state); screen \(lines(session).filter { !$0.isEmpty }.suffix(4)); "
+                    + "surface \(session.screenText() != nil), selected \(terminals.selectedSession?.id == session.id), "
+                    + "app tab \(model.selectedTab), window visible \(window.occlusionState.contains(.visible)), active \(NSApp.isActive)"
+            )
             guard ready else { return }
             shells.append(session)
         }
@@ -198,6 +207,7 @@ final class Phase4SelfTest {
         step("tab titles", report.tabTitles == expected, report.tabTitles.joined(separator: " | "))
 
         await show(shells[2])
+        clearSelection(shells[2])
         await pause(0.5)
         await capture("tabs")
         step("window keeps its size", window.frame.size == windowSize, "\(windowSize) -> \(window.frame.size) with \(terminals.sessions.count) tabs")
@@ -230,6 +240,8 @@ final class Phase4SelfTest {
 
         // 12. Quit path: a running tab closes before the agent stops.
         await checkQuitPath(hosts[1])
+
+        step("stays on Terminals", tabSwitches.isEmpty, tabSwitches.isEmpty ? "the window never left the Terminals tab" : tabSwitches.joined(separator: " | "))
     }
 
     // MARK: - Steps
@@ -293,8 +305,9 @@ final class Phase4SelfTest {
             return nil
         }
         if let connectingShot {
-            await pause(0.15)
+            let state = session.state
             await capture(connectingShot)
+            print("[selftest] \(connectingShot): tab state \(state) when captured")
         }
         return session
     }
@@ -352,11 +365,17 @@ final class Phase4SelfTest {
         let status = TerminalService.status(of: session.state)
         let text = lines(session).joined(separator: "\n")
         let shown = text.contains("Connection refused") || text.contains("connect to host")
-        terminals.requestClose(session.id)
-        let closed = terminals.session(id: session.id) == nil && terminals.closeConfirmation == nil
+        let pressAnyKey = text.contains("Press any key to close")
+        // libghostty's "Press any key to close the terminal": a key closes the ended tab.
+        let stillOpen = terminals.session(id: session.id) != nil
+        session.type("x")
+        let closed = await wait(5) {
+            self.terminals.session(id: session.id) == nil && self.terminals.tab(for: session.id) == nil
+                && self.terminals.closeConfirmation == nil && self.terminals.selectedID != session.id
+        }
         step(
-            "unreachable host", finished && session.state == .exited(code: 255) && status.text == "ssh failed (exit 255)" && status.hint != nil && shown && closed,
-            "state \(session.state), \"\(status.text)\", ssh error on screen \(shown), closed without asking \(closed)"
+            "unreachable host", finished && session.state == .exited(code: 255) && status.text == "ssh failed (exit 255)" && status.hint != nil && shown && stillOpen && closed,
+            "state \(session.state), \"\(status.text)\", ssh error on screen \(shown), stays open after exit \(stillOpen), \"Press any key\" shown \(pressAnyKey), a key press closed it without asking \(closed)"
         )
     }
 
@@ -388,8 +407,13 @@ final class Phase4SelfTest {
         // A lone ESC followed at once by more keys reads as an escape sequence to vi.
         await pause(0.3)
         session.type(":q!\n")
+        // Keys typed while vim still runs are encoded for it (it turns on modifyOtherKeys) and
+        // it flushes typed-ahead input when it restores the tty: wait for the shell's screen.
+        _ = await wait(5) { self.lines(session).filter { $0 == "~" }.count < 3 }
+        await pause(0.5)
         let back = await runCommand(session, "true", marker: "VI_DONE") != nil
-        step("vi", drawn && back, "drawn \(drawn), back at the prompt \(back)")
+        let screen = back ? "" : "; screen: \(lines(session).filter { !$0.isEmpty }.suffix(6))"
+        step("vi", drawn && back, "drawn \(drawn), back at the prompt \(back)\(screen)")
     }
 
     private func checkTop(_ session: TerminalSession) async {
@@ -410,7 +434,8 @@ final class Phase4SelfTest {
     /// The shown tab follows a window resize at once; a hidden one when it is shown again.
     private func checkResize(shown: TerminalSession, hidden: TerminalSession, window: NSWindow) async {
         await show(shown)
-        let original = window.contentLayoutRect.size
+        let originalFrame = window.frame
+        let original = window.contentRect(forFrameRect: originalFrame).size
         let shownBefore = shown.gridSize
         let hiddenBefore = hidden.gridSize
         window.setContentSize(NSSize(width: 1000, height: 640))
@@ -430,7 +455,7 @@ final class Phase4SelfTest {
             "resize", followed && shownSize != nil && shownSize == shownGrid && hiddenFollowed && hiddenSize != nil && hiddenSize == hiddenGrid,
             report.resize.joined(separator: "; ")
         )
-        window.setContentSize(original)
+        window.setFrame(originalFrame, display: true)
         await pause(0.8)
     }
 
@@ -482,15 +507,31 @@ final class Phase4SelfTest {
 
     /// App shortcuts reach the menus while the terminal has keyboard focus.
     private func checkShortcuts(focus session: TerminalSession, vm: RemoteHost, window: NSWindow, windowSize: NSSize) async {
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        // The menus act on the key window's scene, so the app must be frontmost. Activation
+        // is cooperative: ask again for a while if another app keeps it.
+        let active = await wait(20) {
+            if NSApp.isActive, window.isKeyWindow { return true }
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            return false
+        }
+        guard active else {
+            return step("shortcuts", false, "AeroOps never became the active app (another app kept the focus), so menu shortcuts cannot reach it")
+        }
         await show(session)
         func selectedIndex() -> Int? {
             terminals.sessions.firstIndex { $0.id == terminals.selectedSession?.id }
         }
         let start = selectedIndex() ?? 0
         let count = terminals.sessions.count
-        var results: [String: Bool] = [:]
+        var results: [String: Bool] = [:] {
+            didSet {
+                for (name, ok) in results where oldValue[name] == nil {
+                    print("[selftest]   \(name): \(ok)")
+                }
+            }
+        }
+        print("[selftest] shortcuts: app active \(NSApp.isActive), window key \(window.isKeyWindow), tab \(model.selectedTab)")
 
         press("\t", keyCode: 48, [.control])
         results["⌃Tab next tab"] = await wait(2) { selectedIndex() == (start + 1) % count }
@@ -510,8 +551,15 @@ final class Phase4SelfTest {
         press("0", keyCode: 29, [.command])
         results["⌘0 actual size"] = await wait(2) { session.fontSize == fontSize }
 
-        press("w", keyCode: 13, [.command])
-        results["⌘W asks before closing a running tab"] = await wait(2) { self.terminals.closeConfirmation == session.id }
+        // ⌘W on anything but a terminal tab closes the main window, which quits the app.
+        let closeItem = Self.menuItem(keyEquivalent: "w", modifiers: .command)
+        if closeItem?.title == "Close Tab", model.selectedTab == .terminals, window.isKeyWindow {
+            press("w", keyCode: 13, [.command])
+            results["⌘W asks before closing a running tab"] = await wait(2) { self.terminals.closeConfirmation == session.id }
+        } else {
+            print("[selftest] ⌘W skipped: menu item \(closeItem?.title ?? "none"), tab \(model.selectedTab), window key \(window.isKeyWindow)")
+            results["⌘W asks before closing a running tab"] = false
+        }
         await pause(0.6)
         await capture("close-confirm", sheet: window.attachedSheet != nil)
         terminals.closeConfirmation = nil
@@ -653,9 +701,19 @@ final class Phase4SelfTest {
 
     /// Selects the tab and gives its terminal focus.
     private func show(_ session: TerminalSession) async {
+        if model.selectedTab != .terminals {
+            print("[selftest] the window shows \(model.selectedTab), not Terminals; switching back")
+            model.selectedTab = .terminals
+        }
         terminals.selectedID = session.id
         _ = await wait(3) { session.focus() }
         await pause(0.3)
+    }
+
+    /// Reading the screen selects all of it; typing at a prompt clears that (a space, then
+    /// Backspace).
+    private func clearSelection(_ session: TerminalSession) {
+        session.type(" \u{7f}")
     }
 
     private func lines(_ session: TerminalSession) -> [String] {
@@ -702,14 +760,70 @@ final class Phase4SelfTest {
         }
     }
 
+    /// The main-menu item with this shortcut, searched through every submenu.
+    private static func menuItem(keyEquivalent: String, modifiers: NSEvent.ModifierFlags, in menu: NSMenu? = NSApp.mainMenu) -> NSMenuItem? {
+        for item in menu?.items ?? [] {
+            if item.keyEquivalent == keyEquivalent, item.keyEquivalentModifierMask == modifiers {
+                return item
+            }
+            if let found = menuItem(keyEquivalent: keyEquivalent, modifiers: modifiers, in: item.submenu) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// Records (with a call stack) every time the window leaves the Terminals tab.
+    private func watchSelectedTab() {
+        withObservationTracking {
+            _ = model.selectedTab
+        } onChange: { [weak self] in
+            // Called inside the setter: the stack shows who switched.
+            let stack = Thread.callStackSymbols.dropFirst(20).prefix(60).joined(separator: "\n")
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let tab = self.model.selectedTab
+                let after = self.report.steps.last?.name ?? "start"
+                if tab != .terminals {
+                    self.tabSwitches.append("\(tab) after \(after)")
+                    print("[selftest] selectedTab -> \(tab) after step \(after)\n\(stack)")
+                }
+                self.watchSelectedTab()
+            }
+        }
+    }
+
     /// `ps` lines (pid and arguments) of processes that mention the temporary root.
     private func processes() async -> [String] {
-        let (_, output) = await Phase2SelfTest.runProcess(URL(filePath: "/bin/ps"), arguments: ["-axww", "-o", "pid=,args="])
+        let output = await Self.processTable()
         let root = Phase2SelfTest.root.path(percentEncoded: false)
         let own = getpid()
         return output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.contains(root) }
             .filter { $0.split(separator: " ").first.flatMap { Int32($0) } != own }
+    }
+
+    /// `ps -axww -o pid=,args=`, read while it runs: the whole table can be larger than a pipe
+    /// buffer, so reading only after it exits would deadlock.
+    private nonisolated static func processTable() async -> String {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                let process = Process()
+                process.executableURL = URL(filePath: "/bin/ps")
+                process.arguments = ["-axww", "-o", "pid=,args="]
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = FileHandle.nullDevice
+                do {
+                    try process.run()
+                } catch {
+                    return continuation.resume(returning: "")
+                }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                continuation.resume(returning: String(decoding: data, as: UTF8.self))
+            }
+        }
     }
 
     /// ``processes()`` once `condition` holds, or after `seconds`.

@@ -72,6 +72,11 @@ final class TerminalService {
     init(ssh: SSHServices, hostLookup: @escaping @MainActor (RemoteHost.ID) -> RemoteHost?) {
         self.ssh = ssh
         self.hostLookup = hostLookup
+        // A key press in an ended tab ("Press any key to close the terminal") closes it like
+        // ⌘W, keeping the tab info and the selection in step.
+        manager.closeRequestHandler = { [weak self] session in
+            self?.requestClose(session.id)
+        }
     }
 
     // MARK: - Queries

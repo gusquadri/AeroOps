@@ -20,21 +20,17 @@ agent_pid=
 pub=
 cleanup() {
   [ -n "$agent_pid" ] && kill "$agent_pid" 2>/dev/null || true
+  # dev/add-key.sh authorizes the key on every dev server; remove-key.sh revokes it there.
   if [ -n "$pub" ]; then
-    docker exec -i aeroops-ssh sh -c '
-      f=/config/.ssh/authorized_keys; read -r k
-      grep -vxF "$k" "$f" > "$f.tmp" || true; cat "$f.tmp" > "$f"; rm -f "$f.tmp"
-    ' <<EOF || true
-$pub
-EOF
+    "$repo/dev/remove-key.sh" "$tmp/id_ed25519.pub" >/dev/null || true
   fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT INT TERM
 
 ssh-keygen -q -t ed25519 -N '' -C aeroops-terminalkit-selftest -f "$tmp/id_ed25519"
-"$repo/dev/add-key.sh" "$tmp/id_ed25519.pub" >/dev/null
 pub=$(cat "$tmp/id_ed25519.pub")
+"$repo/dev/add-key.sh" "$tmp/id_ed25519.pub" >/dev/null
 eval "$(ssh-agent -a "$tmp/agent.sock" -s)" >/dev/null
 agent_pid=$SSH_AGENT_PID
 SSH_AUTH_SOCK="$tmp/agent.sock" ssh-add -q "$tmp/id_ed25519"

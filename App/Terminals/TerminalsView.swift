@@ -100,21 +100,31 @@ struct TerminalTabStrip: View {
 
     var body: some View {
         let terminals = model.terminals
+        let selectedID = terminals.selectedSession?.id
         HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 4) {
-                    ForEach(terminals.sessions) { session in
-                        TerminalTabItem(
-                            session: session,
-                            tab: terminals.tab(for: session.id),
-                            isSelected: session.id == terminals.selectedSession?.id
-                        )
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 4) {
+                        ForEach(terminals.sessions) { session in
+                            TerminalTabItem(
+                                session: session,
+                                tab: terminals.tab(for: session.id),
+                                isSelected: session.id == selectedID
+                            )
+                            .id(session.id)
+                        }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .scrollIndicators(.never)
+                .fixedSize(horizontal: false, vertical: true)
+                // Keep the shown tab in view when it changes (⌃Tab, ⌘⌥9, a new tab). Next turn,
+                // so a tab added in the same update has been laid out.
+                .onChange(of: selectedID, initial: true) { _, id in
+                    guard let id else { return }
+                    Task { withAnimation(.snappy) { proxy.scrollTo(id) } }
+                }
             }
-            .scrollIndicators(.never)
-            .fixedSize(horizontal: false, vertical: true)
 
             if terminals.pendingOpens > 0 {
                 ProgressView()
