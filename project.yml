@@ -30,6 +30,14 @@ settings:
 packages:
   AeroKit:
     path: Packages/AeroKit
+  # MCP Swift SDK for aeroops-mcp, pinned exactly.
+  MCP:
+    url: https://github.com/modelcontextprotocol/swift-sdk
+    exactVersion: 0.12.1
+  # Already in the SDK's graph; declared because `Transport.logger` is a swift-log Logger.
+  swift-log:
+    url: https://github.com/apple/swift-log
+    from: 1.5.0
 
 targets:
   AeroOps:
@@ -78,7 +86,16 @@ targets:
     platform: macOS
     sources:
       - path: MCP
-    # Phase 7 adds the MCP Swift SDK as a package dependency here.
+    # Stdio MCP server that forwards tool calls to the app over ~/.aeroops/bridge.sock. The app
+    # only accepts it when it carries the app's team ID and this bundle identifier
+    # (AgentBridge's CodeSignaturePeerValidator), so it is signed like the app.
+    dependencies:
+      - package: MCP
+        product: MCP
+      - package: swift-log
+        product: Logging
+      - package: AeroKit
+        product: BridgeProtocol
     settings:
       base:
         PRODUCT_NAME: aeroops-mcp
@@ -103,6 +120,7 @@ schemes:
         - package: AeroKit/KeyAgentTests
         - package: AeroKit/CollectorsTests
         - package: AeroKit/TerminalKitTests
+        - package: AeroKit/BridgeProtocolTests
         - package: AeroKit/AgentBridgeTests
         - package: AeroKit/AeroThemeTests
     profile:
