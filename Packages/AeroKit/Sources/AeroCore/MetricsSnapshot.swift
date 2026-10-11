@@ -29,6 +29,10 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
     public var kernel: String
     /// When the app received this sample (local clock).
     public var sampledAt: Date
+    /// Total swap in bytes (SwapTotal), if reported. `0` means the host has no swap.
+    public var swapTotalBytes: Int64?
+    /// Used swap in bytes (SwapTotal − SwapFree), if both were reported.
+    public var swapUsedBytes: Int64?
 
     /// Creates a snapshot.
     public init(
@@ -43,7 +47,9 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
         load15: Double,
         hostname: String,
         kernel: String,
-        sampledAt: Date
+        sampledAt: Date,
+        swapTotalBytes: Int64? = nil,
+        swapUsedBytes: Int64? = nil
     ) {
         self.cpuPercent = cpuPercent
         self.cpuCount = cpuCount
@@ -57,11 +63,19 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
         self.hostname = hostname
         self.kernel = kernel
         self.sampledAt = sampledAt
+        self.swapTotalBytes = swapTotalBytes
+        self.swapUsedBytes = swapUsedBytes
     }
 
     /// Memory use as a fraction 0...1, or `nil` when the total is unknown (0).
     public var memUsedFraction: Double? {
         memTotalBytes > 0 ? Double(memUsedBytes) / Double(memTotalBytes) : nil
+    }
+
+    /// Swap use as a fraction 0...1, or `nil` when swap is unknown or absent.
+    public var swapUsedFraction: Double? {
+        guard let swapTotalBytes, swapTotalBytes > 0, let swapUsedBytes else { return nil }
+        return min(max(Double(swapUsedBytes) / Double(swapTotalBytes), 0), 1)
     }
 
     /// The disk mounted at `mount` (default `/`), if present.

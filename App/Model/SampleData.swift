@@ -1,4 +1,5 @@
 import AeroCore
+import Collectors
 import Foundation
 
 /// Sample hosts and states for SwiftUI previews and the DEBUG demo launch options.
@@ -40,6 +41,57 @@ enum SampleData {
         )
     }
 
+    /// A snapshot with swap and several mounts, as the detail panel shows them.
+    static func detailedMetrics(
+        cpu: Double? = 23, memory: Double = 0.41, disk: Double = 0.52, sampledAt: Date = .now, hostname: String = "web-01"
+    ) -> MetricsSnapshot {
+        let gib: Int64 = 1 << 30
+        return MetricsSnapshot(
+            cpuPercent: cpu, cpuCount: 8,
+            memUsedBytes: Int64(Double(16 * gib) * memory), memTotalBytes: 16 * gib,
+            disks: [
+                DiskUsage(mount: "/", device: "/dev/nvme0n1p2", usedBytes: Int64(Double(120 * gib) * disk), totalBytes: 120 * gib),
+                DiskUsage(mount: "/boot/efi", device: "/dev/nvme0n1p1", usedBytes: 6 << 20, totalBytes: 512 << 20),
+                DiskUsage(mount: "/var/lib/docker", device: "/dev/mapper/vg0-docker", usedBytes: 412 * gib, totalBytes: 480 * gib),
+                DiskUsage(mount: "/srv/backups/nightly-snapshots", device: "nas.local:/volume1/backups", usedBytes: 3_900 * gib, totalBytes: 4_000 * gib),
+            ],
+            uptimeSeconds: 1_036_800 + 14_400, load1: 1.42, load5: 0.98, load15: 0.71,
+            hostname: hostname, kernel: "Linux 6.8.0-45-generic x86_64", sampledAt: sampledAt,
+            swapTotalBytes: 4 * gib, swapUsedBytes: 310 << 20
+        )
+    }
+
+    /// Monitor updates for the six sample hosts, one per card state the dashboard draws:
+    /// online, stale (numbers dimmed), changed host key (blocked), first-contact key not trusted,
+    /// offline with old numbers, and unsupported OS.
+    static func liveUpdates(for hosts: [RemoteHost], now: Date = .now) -> [HostMonitorUpdate] {
+        hosts.enumerated().map { index, host in
+            let id = host.id
+            switch index % 6 {
+            case 0:
+                return HostMonitorUpdate(hostID: id, status: .online, snapshot: detailedMetrics(hostname: host.name), lastSuccessAt: now)
+            case 1:
+                let sampled = now.addingTimeInterval(-47)
+                return HostMonitorUpdate(
+                    hostID: id, status: .stale,
+                    snapshot: detailedMetrics(cpu: 64, memory: 0.83, disk: 0.71, sampledAt: sampled, hostname: host.name),
+                    lastError: .timeout, lastSuccessAt: sampled, consecutiveFailures: 1)
+            case 2:
+                return HostMonitorUpdate(hostID: id, status: .offline, hostKeyIssue: .changed(nil))
+            case 3:
+                return HostMonitorUpdate(hostID: id, status: .offline, hostKeyIssue: .unknown)
+            case 4:
+                let sampled = now.addingTimeInterval(-260)
+                return HostMonitorUpdate(
+                    hostID: id, status: .offline,
+                    snapshot: detailedMetrics(cpu: 8, memory: 0.22, disk: 0.97, sampledAt: sampled, hostname: host.name),
+                    lastError: .connectionRefused, lastSuccessAt: sampled, consecutiveFailures: 6)
+            default:
+                return HostMonitorUpdate(hostID: id, status: .unsupported, lastSuccessAt: now, unsupportedSystem: "FreeBSD 14.1-RELEASE amd64")
+            }
+        }
+    }
+
     private static func uuid(_ n: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", n))!
     }
@@ -62,6 +114,14 @@ extension AppModel {
         model.selection = nil
         model.applySampleStatuses(statuses, withMetrics: withMetrics)
         return model
+    }
+
+    /// Gives the hosts ``SampleData/liveUpdates(for:now:)``, as if their monitors had reported:
+    /// every card state with numbers. Used by previews and the DEBUG demo option.
+    func applySampleLiveStates() {
+        for update in SampleData.liveUpdates(for: hosts) {
+            displayStates[update.hostID]?.apply(update)
+        }
     }
 
     /// Gives host *i* status `statuses[i % count]`. Used by previews and the DEBUG demo option.

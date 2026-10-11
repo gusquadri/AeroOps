@@ -52,7 +52,7 @@ struct HostRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            StatusOrb(tone: keyBlock == nil ? state.status.orbTone : .error, size: 10)
+            StatusOrb(tone: state.orbTone(blocked: keyBlock != nil), size: 10)
             VStack(alignment: .leading, spacing: 3) {
                 Text(host.name)
                     .font(Aero.font(.body, weight: .medium))
@@ -68,7 +68,7 @@ struct HostRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(keyBlock == nil ? state.status.title : "Blocked: host key changed")
+        .accessibilityValue(keyBlock == nil ? state.title(blocked: false) : "Blocked: host key changed")
     }
 }
 

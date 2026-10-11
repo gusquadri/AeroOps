@@ -187,8 +187,12 @@ struct HostKeyChangedBanner: View {
 
     private var compact: some View {
         HStack(spacing: 8) {
-            title
-                .lineLimit(1)
+            // Narrow dashboard cards get a shorter title instead of a truncated one.
+            ViewThatFits(in: .horizontal) {
+                compactTitle("Host key changed · blocked")
+                compactTitle("Key changed · blocked")
+                compactTitle("Key changed")
+            }
             Spacer(minLength: 8)
             Button("Review…", action: onReview)
                 .buttonStyle(.aquaSecondary)
@@ -197,6 +201,19 @@ struct HostKeyChangedBanner: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .help(block.helpText)
+    }
+
+    private func compactTitle(_ text: String) -> some View {
+        Label {
+            Text(text)
+                .font(Aero.font(.callout, weight: .semibold))
+                .foregroundStyle(Aero.text.primary)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .foregroundStyle(Aero.coral)
+        }
+        .fixedSize()
     }
 
     private var full: some View {

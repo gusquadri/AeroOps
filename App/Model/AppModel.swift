@@ -16,9 +16,11 @@ import SSHKit
 /// `ssh_config`; ``availableKeys`` come from its key store; Test connection goes through
 /// ``SSHConnectionTester``.
 ///
+/// Phase 3 wiring: ``monitoring`` (``MonitorService``) is the second ``HostInventoryObserver``
+/// (after ``ssh``, so `ssh_config` is current); it runs one Collectors `HostMonitor` per host and
+/// copies their updates into ``displayStates``. See `AppModel+Monitoring.swift`.
+///
 /// Plug-in points for later phases (no view changes needed):
-/// - Phase 3: register the Collectors monitor pool as an observer; its `HostMonitor` actors call
-///   ``updateState(of:status:metrics:message:)`` on the main actor.
 /// - Phase 4: make ``canOpenSSH(_:)`` / ``openSSH(_:)`` open TerminalKit tabs.
 @MainActor
 @Observable
@@ -48,6 +50,8 @@ final class AppModel {
     let ssh: SSHServices
     /// Runs Settings › Hosts' Test connection: ``SSHConnectionTester`` unless injected.
     let connectionTester: any ConnectionTester
+    /// Live metrics: one monitor per host, feeding ``displayStates`` (Phase 3).
+    let monitoring: MonitorService
 
     /// Keys offered by the host editor's key picker.
     var availableKeys: [KeySummary] {
@@ -71,26 +75,36 @@ final class AppModel {
         self.hostStore = hostStore
         self.ssh = ssh
         self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
+        monitoring = MonitorService(ssh: ssh)
         hostsDidChange()
         addInventoryObserver(ssh)
+        bindMonitoring()
     }
 
-    /// Starts the SSH services (agent, key files, `ssh_config`). Called once at launch.
+    /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring. Called once at launch.
     func startServices() async {
         await ssh.start()
+        monitoring.start()
     }
 
-    /// Stops the agent and closes shared SSH connections. Called before the app quits.
+    /// Stops monitoring, the agent and shared SSH connections. Called before the app quits.
     /// Returns how many ControlMaster connections were closed.
     @discardableResult
     func shutdownServices() async -> Int {
-        await ssh.shutdown()
+        await monitoring.beginShutdown()?()
+        return await ssh.shutdown()
     }
 
     /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
+    /// Monitors stop first, so no poll opens a connection while the masters close.
     func beginShutdown() -> (@Sendable () async -> Void)? {
-        guard let work = ssh.beginShutdown() else { return nil }
-        return { _ = await work() }
+        let monitors = monitoring.beginShutdown()
+        let ssh = ssh.beginShutdown()
+        guard monitors != nil || ssh != nil else { return nil }
+        return {
+            await monitors?()
+            _ = await ssh?()
+        }
     }
 
     /// The changed-key block for a host, if connections to it are refused.
@@ -156,7 +170,8 @@ final class AppModel {
 
     // MARK: - Live state
 
-    /// Records a new status (and optionally metrics) for a host. Called by Phase 3 monitors.
+    /// Records a new status (and optionally metrics) for a host: previews and demo launches.
+    /// Live polls go through ``MonitorService`` (``HostDisplayState/apply(_:)``).
     /// Ignored for hosts no longer in the inventory, so a late poll result can't resurrect one.
     func updateState(of id: RemoteHost.ID, status: HostStatus, metrics: MetricsSnapshot? = nil, message: String? = nil) {
         guard let state = displayStates[id] else { return }

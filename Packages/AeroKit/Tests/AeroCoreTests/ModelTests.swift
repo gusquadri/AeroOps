@@ -92,6 +92,29 @@ struct ModelTests {
         #expect(snapshot.disk(mountedAt: "/boot")?.usedFraction == nil)
         let decoded = try JSONDecoder().decode(MetricsSnapshot.self, from: JSONEncoder().encode(snapshot))
         #expect(decoded == snapshot)
+        #expect(snapshot.swapUsedFraction == nil)
+    }
+
+    @Test("MetricsSnapshot swap: fraction, no swap, and JSON without swap fields")
+    func metricsSwap() throws {
+        var snapshot = MetricsSnapshot(
+            cpuPercent: 12, memUsedBytes: 1, memTotalBytes: 2, disks: [],
+            uptimeSeconds: 1, load1: 0, load5: 0, load15: 0, hostname: "h", kernel: "Linux",
+            sampledAt: Date(timeIntervalSince1970: 0), swapTotalBytes: 400, swapUsedBytes: 100
+        )
+        #expect(snapshot.swapUsedFraction == 0.25)
+        let roundTrip = try JSONDecoder().decode(MetricsSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(roundTrip == snapshot)
+        snapshot.swapTotalBytes = 0
+        snapshot.swapUsedBytes = 0
+        #expect(snapshot.swapUsedFraction == nil)
+
+        // Snapshots encoded before the swap fields existed still decode.
+        let json = #"{"cpuPercent":5,"memUsedBytes":1,"memTotalBytes":2,"disks":[],"uptimeSeconds":1,"load1":0,"load5":0,"load15":0,"hostname":"h","kernel":"Linux","sampledAt":0}"#
+        let old = try JSONDecoder().decode(MetricsSnapshot.self, from: Data(json.utf8))
+        #expect(old.swapTotalBytes == nil)
+        #expect(old.swapUsedBytes == nil)
+        #expect(old.cpuPercent == 5)
     }
 
     @Test("LogRequest clamps tail, defaults fields and validates names")
