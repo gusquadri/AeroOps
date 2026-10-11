@@ -1,5 +1,6 @@
 import AeroCore
 import AeroTheme
+import SSHKit
 import SwiftUI
 
 /// Dashboard tab: one card per host. Gauges show a dash until Phase 3 feeds live metrics into
@@ -29,7 +30,9 @@ struct DashboardView: View {
                                 state: model.displayState(for: host.id),
                                 isSelected: model.selection == host.id,
                                 canOpenSSH: model.canOpenSSH(host.id),
-                                onOpenSSH: { model.openSSH(host.id) }
+                                onOpenSSH: { model.openSSH(host.id) },
+                                keyBlock: model.hostKeyBlock(for: host.id),
+                                onReviewKey: { model.requestEdit(host.id) }
                             )
                             .onTapGesture { model.selection = host.id }
                         }
@@ -65,12 +68,19 @@ struct HostCard: View {
     var isSelected = false
     var canOpenSSH = false
     var onOpenSSH: () -> Void = {}
+    /// Set when the host's key changed: the card shows the blocked banner.
+    var keyBlock: HostKeyBlock?
+    /// Opens the host editor, where the full banner offers Trust New Key.
+    var onReviewKey: () -> Void = {}
 
     var body: some View {
         let metrics = state.metrics
         AeroCard {
             VStack(alignment: .leading, spacing: 14) {
                 header
+                if let keyBlock {
+                    HostKeyChangedBanner(host: host, block: keyBlock, style: .compact, onReview: onReviewKey)
+                }
                 HStack(alignment: .top) {
                     GlossyGauge(value: metrics?.cpuPercent.map { $0 / 100 }, label: "CPU")
                     Spacer(minLength: 8)
@@ -105,13 +115,13 @@ struct HostCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                StatusOrb(tone: state.status.orbTone, size: 14)
+                StatusOrb(tone: keyBlock == nil ? state.status.orbTone : .error, size: 14)
                 Text(host.name)
                     .font(Aero.font(.title3, weight: .semibold))
                     .foregroundStyle(Aero.text.primary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Text(state.status.title)
+                Text(keyBlock == nil ? state.status.title : "Blocked")
                     .font(Aero.font(.caption, weight: .medium))
                     .foregroundStyle(Aero.text.secondary)
             }

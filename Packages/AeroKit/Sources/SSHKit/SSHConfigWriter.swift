@@ -29,6 +29,9 @@ import Foundation
 ///   `-o BatchMode=yes` for background commands.
 /// - A host without a key gets `IdentityFile none`: ssh then offers no public key at all (neither
 ///   agent keys nor `~/.ssh/id_*`), so only interactive methods remain, in a terminal tab.
+/// - With ``SSHContext/AgentChoice/system`` every host gets `IdentityAgent SSH_AUTH_SOCK`,
+///   `IdentityFile none` and `IdentitiesOnly no`: ssh offers the keys the system agent holds and
+///   reads no key files.
 /// - Every value is validated; newlines, control characters, quotes, backslashes and `$` are
 ///   rejected, `%` is escaped as `%%` where ssh expands tokens, and anything outside a plain
 ///   character set is double-quoted. An invalid host is left out and reported in
@@ -127,7 +130,13 @@ public struct SSHConfigWriter: Sendable {
         let paths = context.paths
         let identityAgent: String
         let identityFile: String
+        var identitiesOnly = "yes"
         switch identity {
+        case .agent where context.agent == .system:
+            if let keyId = host.keyId, !HostValidation.isValidKeyID(keyId) { throw .invalidKeyID(keyId) }
+            identityAgent = "SSH_AUTH_SOCK"
+            identityFile = "none"
+            identitiesOnly = "no"
         case .agent:
             identityAgent = try ConfigValue.path(context.agentSocket)
             if let keyId = host.keyId {
@@ -149,7 +158,7 @@ public struct SSHConfigWriter: Sendable {
             ("Port", String(host.port)),
             ("IdentityAgent", identityAgent),
             ("IdentityFile", identityFile),
-            ("IdentitiesOnly", "yes"),
+            ("IdentitiesOnly", identitiesOnly),
             ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile)),
             ("StrictHostKeyChecking", "yes"),
             ("ControlMaster", "auto"),

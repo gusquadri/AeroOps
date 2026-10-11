@@ -33,7 +33,7 @@ struct HostsSettingsPane: View {
         VStack(spacing: 0) {
             List(selection: $selection) {
                 ForEach(model.hosts) { host in
-                    HostRow(host: host, state: model.displayState(for: host.id))
+                    HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
                         .contextMenu {
                             HostContextMenu(
                                 host: host,

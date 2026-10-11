@@ -1,5 +1,6 @@
 import AeroCore
 import AeroTheme
+import SSHKit
 import SwiftUI
 
 /// Add / edit form for every ``RemoteHost`` field, with inline validation and Test connection.
@@ -21,11 +22,19 @@ struct HostEditorForm: View {
     @State private var saveError: HostStoreError?
     @State private var test = TestState.idle
     @State private var testTask: Task<Void, Never>?
+    @State private var trustRequest: TrustRequest?
 
     private enum TestState: Equatable {
         case idle
         case running
         case finished(ConnectionTestResult)
+    }
+
+    /// First contact: the keys to show in ``HostKeyTrustSheet``.
+    private struct TrustRequest: Identifiable {
+        let id = UUID()
+        let host: RemoteHost
+        let offered: [HostKey]
     }
 
     /// - Parameters:
@@ -53,8 +62,15 @@ struct HostEditorForm: View {
 
     var body: some View {
         let validation = draft.validate(otherHostNames: model.hosts.lazy.filter { $0.id != draft.id }.map(\.name))
+        let keyHost = draft.makeHost()
+        let keyBlock = model.ssh.hostKeyBlock(for: keyHost)
         VStack(spacing: 0) {
             Form {
+                if let keyBlock {
+                    Section {
+                        HostKeyChangedBanner(host: keyHost, block: keyBlock)
+                    }
+                }
                 Section("Connection") {
                     field(.name, validation) {
                         TextField("Name", text: $draft.name, prompt: Text("web-01"))
@@ -110,7 +126,30 @@ struct HostEditorForm: View {
             footer(validation)
         }
         .onChange(of: connectionKey) { resetTest() }
+        // Trusting the new key lifts the block: the old "key changed" result no longer applies.
+        .onChange(of: keyBlock == nil) { _, unblocked in
+            if unblocked { resetTest() }
+        }
         .onDisappear { testTask?.cancel() }
+        .sheet(item: $trustRequest) { request in
+            HostKeyTrustSheet(
+                host: request.host,
+                offered: request.offered,
+                onTrust: {
+                    try await model.ssh.trust(request.offered, for: request.host, replacingPinned: false)
+                    trustRequest = nil
+                    runTest()
+                },
+                onCancel: {
+                    trustRequest = nil
+                    test = .finished(ConnectionTestResult(
+                        outcome: .failure,
+                        message: "Not connected: the host key was not trusted.",
+                        elapsed: .zero
+                    ))
+                }
+            )
+        }
     }
 
     // MARK: - Rows
@@ -153,38 +192,64 @@ struct HostEditorForm: View {
             }
         } label: {
             Text("Key")
-            Text(model.availableKeys.isEmpty
-                 ? "Keys you create or import in Settings › Keys will be offered here."
-                 : "The key AeroOps’ agent offers to this host.")
+            if let selected = model.availableKeys.first(where: { $0.id == draft.keyId }) {
+                Text(selected.detail)
+            } else {
+                Text(model.availableKeys.isEmpty
+                     ? "Keys you create or import in Settings › Keys will be offered here."
+                     : "The key AeroOps’ agent offers to this host.")
+            }
         }
         .disabled(model.availableKeys.isEmpty && draft.keyId == nil)
     }
 
     @ViewBuilder
     private func testRow(_ validation: HostDraft.Validation) -> some View {
-        HStack(spacing: 10) {
-            Button("Test Connection", systemImage: "bolt.horizontal.circle") { runTest() }
-                .buttonStyle(.aquaSecondary)
-                .disabled(!validation.canTestConnection || test == .running)
-            Group {
-                switch test {
-                case .idle:
-                    Text(validation.canTestConnection
-                         ? "Checks that AeroOps can sign in with these settings."
-                         : "Enter a valid address, port and user first.")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Button("Test Connection", systemImage: "bolt.horizontal.circle") { runTest() }
+                    .buttonStyle(.aquaSecondary)
+                    .disabled(!validation.canTestConnection || test == .running)
+                Group {
+                    switch test {
+                    case .idle:
+                        Text(validation.canTestConnection
+                             ? "Checks that AeroOps can sign in with these settings."
+                             : "Enter a valid address, port and user first.")
+                            .foregroundStyle(Aero.text.secondary)
+                    case .running:
+                        ProgressView().controlSize(.small)
+                        Text("Testing…").foregroundStyle(Aero.text.secondary)
+                    case .finished(let result):
+                        StatusOrb(tone: Self.tone(of: result.outcome), size: 10)
+                        Text(result.message)
+                            .textSelection(.enabled)
+                    }
+                }
+                .font(Aero.font(.callout))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if case .finished(let result) = test {
+                if let hint = result.hint {
+                    Text(hint)
+                        .font(Aero.font(.caption))
                         .foregroundStyle(Aero.text.secondary)
-                case .running:
-                    ProgressView().controlSize(.small)
-                    Text("Testing…").foregroundStyle(Aero.text.secondary)
-                case .finished(let result):
-                    StatusOrb(tone: result.succeeded ? .healthy : .error, size: 10)
-                    Text(result.message)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let keyID = result.keyToAuthorize, let key = model.ssh.keys.first(where: { $0.id == keyID }) {
+                    CopyAuthorizedKeysButton(key: key)
                 }
             }
-            .font(Aero.font(.callout))
-            .fixedSize(horizontal: false, vertical: true)
         }
         .animation(.default, value: test)
+    }
+
+    private static func tone(of outcome: ConnectionTestResult.Outcome) -> OrbTone {
+        switch outcome {
+        case .success: .healthy
+        case .hostKeyUnknown: .warning
+        case .failure, .hostKeyChanged: .error
+        }
     }
 
     private func footer(_ validation: HostDraft.Validation) -> some View {
@@ -254,6 +319,9 @@ struct HostEditorForm: View {
             let result = await tester.testConnection(to: host)
             guard !Task.isCancelled else { return }
             test = .finished(result)
+            if case .hostKeyUnknown(let offered) = result.outcome, !offered.isEmpty {
+                trustRequest = TrustRequest(host: host, offered: offered)
+            }
         }
     }
 

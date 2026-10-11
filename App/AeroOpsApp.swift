@@ -1,5 +1,6 @@
 import AeroCore
 import AeroTheme
+import KeyAgent
 import SwiftUI
 
 /// App entry point. Owns the ``AppModel`` and injects it into the main window and Settings.
@@ -10,20 +11,33 @@ import SwiftUI
 struct AeroOpsApp: App {
     static let mainWindowID = "main"
 
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
 
     init() {
         #if DEBUG
-        let directory = DebugLaunchOptions.dataDirectory ?? AeroPaths.standard.applicationSupport
-        #else
-        let directory = AeroPaths.standard.applicationSupport
-        #endif
-        // Host inventory persisted in ~/Library/Application Support/AeroOps/hosts.json.
-        let model = AppModel(hostStore: HostStore(directory: directory))
-        #if DEBUG
+        let model = DebugLaunchOptions.makeModel() ?? Self.makeModel()
         DebugLaunchOptions.apply(to: model)
+        #else
+        let model = Self.makeModel()
         #endif
         _model = State(initialValue: model)
+        AppDelegate.launchHandler = {
+            await model.startServices()
+            #if DEBUG
+            await DebugLaunchOptions.servicesDidStart(model)
+            #endif
+        }
+        AppDelegate.shutdownHandler = { model.beginShutdown() }
+    }
+
+    /// The real app: hosts in `~/Library/Application Support/AeroOps/hosts.json`, keys in the
+    /// login Keychain, runtime files in `~/.aeroops/`.
+    @MainActor
+    static func makeModel() -> AppModel {
+        let paths = AeroPaths.standard
+        let ssh = SSHServices(paths: paths, secretStore: KeychainSecretStore(), defaults: .standard)
+        return AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
     }
 
     var body: some Scene {

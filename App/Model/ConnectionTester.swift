@@ -1,15 +1,16 @@
 import AeroCore
 import Foundation
+import SSHKit
 
 /// Checks that a host is reachable with its configured address, port, user and key.
 /// Settings › Hosts' **Test connection** button calls it with the (possibly unsaved) draft.
 ///
-/// Phase 1 ships ``SimulatedConnectionTester``. Phase 2 adds an SSHKit-backed implementation
-/// (`ssh -F ~/.aeroops/ssh_config aero-<id> true` through the in-app agent) and passes it to
-/// ``AppModel/init(hostStore:connectionTester:)`` in `AeroOpsApp`; no view changes.
+/// The app uses ``SSHConnectionTester`` (`ssh … uname -sr` through SSHKit and the in-app agent);
+/// previews use ``SimulatedConnectionTester``.
 ///
 /// Implementations must honour task cancellation: the editor cancels a running test when the
-/// connection fields change or the form goes away.
+/// connection fields change or the form goes away. They must not retry on their own: OpenSSH 9.8+
+/// (`PerSourcePenalties`) bans addresses that fail authentication repeatedly.
 protocol ConnectionTester: Sendable {
     func testConnection(to host: RemoteHost) async -> ConnectionTestResult
 }
@@ -19,6 +20,12 @@ struct ConnectionTestResult: Sendable, Hashable {
     enum Outcome: Sendable, Hashable {
         case success
         case failure
+        /// First contact: nothing is pinned for the host yet. The editor shows the offered keys
+        /// for the user to trust or cancel; no login was attempted.
+        case hostKeyUnknown(offered: [HostKey])
+        /// The host presented a key other than the pinned one. The host is blocked until the user
+        /// reviews the change.
+        case hostKeyChanged(HostKeyBlock)
     }
 
     var outcome: Outcome
@@ -26,15 +33,19 @@ struct ConnectionTestResult: Sendable, Hashable {
     var message: String
     /// Wall-clock time the test took.
     var elapsed: Duration
+    /// A follow-up suggestion shown under the message.
+    var hint: String? = nil
+    /// Set when the server rejected the key: the editor offers "Copy authorized_keys line".
+    var keyToAuthorize: UUID? = nil
 
     var succeeded: Bool { outcome == .success }
 }
 
-/// Phase 1 stand-in for the real SSH test: waits a moment, then reports a simulated result
+/// Stand-in for the real SSH test in previews: waits a moment, then reports a simulated result
 /// without opening any connection.
 ///
 /// Addresses under the reserved `.invalid` and `.test` TLDs (RFC 2606) simulate a failure, so
-/// the failure path can be seen in previews and by hand.
+/// the failure path can be seen in previews.
 struct SimulatedConnectionTester: ConnectionTester {
     /// How long the simulated test takes.
     var delay: Duration = .milliseconds(1200)
@@ -58,7 +69,7 @@ struct SimulatedConnectionTester: ConnectionTester {
         }
         return ConnectionTestResult(
             outcome: .success,
-            message: "Simulated success for \(host.user)@\(host.address):\(host.port). No SSH connection was made; real tests arrive with SSH key support.",
+            message: "Simulated success for \(host.user)@\(host.address):\(host.port). No SSH connection was made.",
             elapsed: elapsed
         )
     }

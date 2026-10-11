@@ -1,5 +1,6 @@
 import AeroCore
 import AeroTheme
+import SSHKit
 import SwiftUI
 
 /// The main window's sidebar: every host with its status orb, name and tags, an Add Host
@@ -13,7 +14,7 @@ struct HostSidebar: View {
         List(selection: $model.selection) {
             Section("Hosts") {
                 ForEach(model.hosts) { host in
-                    HostRow(host: host, state: model.displayState(for: host.id))
+                    HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
                         .contextMenu {
                             HostContextMenu(
                                 host: host,
@@ -42,18 +43,24 @@ struct HostSidebar: View {
     }
 }
 
-/// One host in a list: status orb, name, and tags underneath.
+/// One host in a list: status orb, name, and tags underneath. A host whose key changed gets a
+/// red orb and a "Key changed" tag; hovering shows the old and new fingerprints.
 struct HostRow: View {
     let host: RemoteHost
     let state: HostDisplayState
+    var keyBlock: HostKeyBlock?
 
     var body: some View {
         HStack(spacing: 8) {
-            StatusOrb(tone: state.status.orbTone, size: 10)
+            StatusOrb(tone: keyBlock == nil ? state.status.orbTone : .error, size: 10)
             VStack(alignment: .leading, spacing: 3) {
                 Text(host.name)
                     .font(Aero.font(.body, weight: .medium))
                     .lineLimit(1)
+                if let keyBlock {
+                    AeroTag("Key changed", systemImage: "exclamationmark.octagon.fill", tint: Aero.coral)
+                        .help(keyBlock.helpText)
+                }
                 if !host.tags.isEmpty {
                     TagRow(tags: host.tags)
                 }
@@ -61,7 +68,7 @@ struct HostRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(state.status.title)
+        .accessibilityValue(keyBlock == nil ? state.status.title : "Blocked: host key changed")
     }
 }
 

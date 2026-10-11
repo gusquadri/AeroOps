@@ -147,8 +147,9 @@ struct HostDraft: Hashable, Sendable {
 
     private static let addressCharacters = CharacterSet(
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:%")
+    /// The same set SSHKit's config writer accepts (no `$`: ssh_config would expand it).
     private static let userCharacters = CharacterSet(
-        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@$")
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@")
     private static let tagCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.:/"))
 
     private static func only(_ text: String, in allowed: CharacterSet) -> Bool {
@@ -173,6 +174,7 @@ struct HostDraft: Hashable, Sendable {
     static func addressIssue(_ address: String) -> String? {
         if address.isEmpty { return "Enter a host name or IP address." }
         if address.hasPrefix("-") { return "An address can't start with “-”." }
+        if address.hasPrefix(".") { return "An address can't start with “.”." }
         if address.count > maxAddressLength { return "Use \(maxAddressLength) characters or fewer." }
         if !only(address, in: addressCharacters) {
             return "Use a host name or IP address: letters, digits, “.”, “-”, “_”, “:” or “%”, no spaces."
@@ -185,7 +187,7 @@ struct HostDraft: Hashable, Sendable {
         if user.hasPrefix("-") { return "A user name can't start with “-”." }
         if user.count > maxUserLength { return "Use \(maxUserLength) characters or fewer." }
         if !only(user, in: userCharacters) {
-            return "Use letters, digits, “.”, “_”, “-”, “@” or “$”, no spaces."
+            return "Use letters, digits, “.”, “_”, “-” or “@”, no spaces."
         }
         return nil
     }

@@ -13,6 +13,19 @@ public struct SSHContext: Sendable, Hashable {
     public var sshExecutable: URL
     /// `ssh-keyscan`, used for the first-contact host-key fetch.
     public var keyscanExecutable: URL
+    /// Which ssh-agent signs for hosts. ``AgentChoice/inApp`` unless the user turned on the
+    /// "Use system ssh-agent instead" fallback in Settings.
+    public var agent: AgentChoice
+
+    /// The agent ssh talks to.
+    public enum AgentChoice: String, Sendable, Hashable, Codable, CaseIterable {
+        /// KeyAgent on `~/.aeroops/agent.sock`, with the app's Keychain and Secure Enclave keys.
+        case inApp
+        /// Whatever `SSH_AUTH_SOCK` the app inherited (launchd's agent on macOS). A fallback for
+        /// in-app agent bugs. The app's own keys are not in that
+        /// agent, so ssh offers whatever keys it holds.
+        case system
+    }
 
     /// The system OpenSSH client.
     public static let systemSSH = URL(filePath: "/usr/bin/ssh")
@@ -24,15 +37,21 @@ public struct SSHContext: Sendable, Hashable {
     public init(
         paths: AeroPaths = .standard,
         sshExecutable: URL = SSHContext.systemSSH,
-        keyscanExecutable: URL = SSHContext.systemKeyscan
+        keyscanExecutable: URL = SSHContext.systemKeyscan,
+        agent: AgentChoice = .inApp
     ) {
         self.paths = paths
         self.sshExecutable = sshExecutable
         self.keyscanExecutable = keyscanExecutable
+        self.agent = agent
     }
 
-    /// `~/.aeroops/ssh_config`.
-    public var configFile: URL { paths.sshConfig }
+    /// A different config file for one-off runs, e.g. testing an unsaved host draft against a
+    /// throwaway config. `nil` (the default) means ``AeroPaths/sshConfig``.
+    public var configFileOverride: URL?
+
+    /// `~/.aeroops/ssh_config`, unless ``configFileOverride`` is set.
+    public var configFile: URL { configFileOverride ?? paths.sshConfig }
     /// `~/.aeroops/agent.sock`, exported to every `ssh` as `SSH_AUTH_SOCK`.
     public var agentSocket: URL { paths.agentSocket }
     /// `~/.aeroops/known_hosts`.
@@ -44,8 +63,12 @@ public struct SSHContext: Sendable, Hashable {
     ///
     /// The generated config also sets `IdentityAgent`, which takes precedence; `SSH_AUTH_SOCK`
     /// covers anything that ignores the config (and nested `ssh` started by ProxyJump).
+    /// With ``AgentChoice/system`` nothing is overridden: ssh keeps the inherited `SSH_AUTH_SOCK`.
     public var environmentOverrides: [String: String] {
-        ["SSH_AUTH_SOCK": agentSocket.filePath]
+        switch agent {
+        case .inApp: ["SSH_AUTH_SOCK": agentSocket.filePath]
+        case .system: [:]
+        }
     }
 
     /// The command a terminal tab runs for `host`: `/usr/bin/ssh -F <config> aero-<id>`.

@@ -200,6 +200,49 @@ struct SSHConfigWriterTests {
         #expect(command.environment == ["SSH_AUTH_SOCK": "/tmp/aero-golden/.aeroops/agent.sock"])
     }
 
+    @Test("system ssh-agent fallback: IdentityAgent SSH_AUTH_SOCK, no key files, no SSH_AUTH_SOCK override")
+    func systemAgent() async throws {
+        let scratch = try ScratchDirectory()
+        let paths = scratch.paths()
+        let context = SSHContext(paths: paths, agent: .system)
+        let writer = SSHConfigWriter(context: context)
+        let rendering = try writer.write([Self.hostA, Self.hostB])
+        #expect(rendering.rejected.isEmpty)
+        #expect(!rendering.text.contains("agent.sock"))
+        #expect(!rendering.text.contains("/pub/"))
+        let block = rendering.text.components(separatedBy: "\n\n")[1]
+        #expect(block.contains("\n  IdentityAgent SSH_AUTH_SOCK\n"))
+        #expect(block.contains("\n  IdentityFile none\n"))
+        #expect(block.contains("\n  IdentitiesOnly no\n"))
+        #expect(block.contains("\n  StrictHostKeyChecking yes\n"))
+        #expect(context.environmentOverrides.isEmpty)
+        #expect(context.terminalCommand(for: Self.hostA).environment.isEmpty)
+
+        // ssh resolves the token from its own environment.
+        let result = try await runTool(
+            "/usr/bin/env", ["SSH_AUTH_SOCK=/tmp/sys-agent.sock", "/usr/bin/ssh", "-G", "-F", paths.sshConfig.filePath, Self.hostA.sshAlias]
+        )
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.contains("\nidentityagent SSH_AUTH_SOCK\n") || result.stdout.contains("\nidentityagent /tmp/sys-agent.sock\n"), "\(result.stdout)")
+        #expect(result.stdout.contains("\nidentitiesonly no\n"))
+
+        // Key ids are still validated, so a bad one cannot hide while the fallback is on.
+        let bad = RemoteHost.test(keyId: "../x")
+        #expect(throws: SSHConfigError.invalidKeyID("../x")) { try writer.validate(bad) }
+    }
+
+    @Test("a config file override redirects both the writer and the runner's -F")
+    func configFileOverride() throws {
+        let scratch = try ScratchDirectory()
+        var context = SSHContext(paths: scratch.paths())
+        context.configFileOverride = scratch.file("probe_config")
+        try SSHConfigWriter(context: context).write([Self.hostA])
+        #expect(scratch.read("probe_config")?.contains("Host \(Self.hostA.sshAlias)") == true)
+        #expect(!FileManager.default.fileExists(atPath: context.paths.sshConfig.filePath))
+        let argv = SSHRunner(context: context).commandLine("true", on: Self.hostA).arguments
+        #expect(Array(argv.prefix(2)) == ["-F", scratch.file("probe_config").filePath])
+    }
+
     @Test("known_hosts names follow ssh: lower case, [host]:port unless 22")
     func knownHostsNames() {
         #expect(RemoteHost.test(address: "Example.COM", port: 22).knownHostsName == "example.com")
