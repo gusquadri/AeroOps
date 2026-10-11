@@ -2,9 +2,8 @@ import Foundation
 
 /// One Kubernetes pod, from `kubectl get pods -A -o json`.
 ///
-/// Data shape only; the parser lives in Collectors. Also the row type of the MCP `list_pods`
-/// tool. Only the fields the plan reads are kept: namespace, name, phase, container statuses,
-/// node and creation time.
+/// Built by ``KubernetesParser``. Also the row type of the MCP `list_pods` tool. Only the fields
+/// the plan reads are kept: namespace, name, phase, container statuses, node and creation time.
 public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
     /// Namespace.
     public var namespace: String
@@ -12,7 +11,8 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
     public var name: String
     /// `status.phase`.
     public var phase: PodPhase
-    /// `status.containerStatuses[]`, in spec order.
+    /// One entry per `spec.containers[]`, in spec order, merged with its `status.containerStatuses[]`
+    /// entry. Containers without a status yet (e.g. an unscheduled pod) are not ready, with 0 restarts.
     public var containers: [PodContainerStatus]
     /// `spec.nodeName`; `nil` while unscheduled.
     public var nodeName: String?
@@ -56,14 +56,33 @@ public struct PodContainerStatus: Codable, Sendable, Hashable {
     public var restartCount: Int
     /// `state.waiting.reason`, e.g. `CrashLoopBackOff`, `ImagePullBackOff`, `ContainerCreating`.
     public var waitingReason: String?
+    /// `state.terminated.reason`, e.g. `Completed`, `Error`, `OOMKilled`.
+    public var terminatedReason: String?
+    /// `state.terminated.exitCode`; `nil` unless the container is currently terminated.
+    public var exitCode: Int?
 
     /// Creates a container status.
-    public init(name: String, ready: Bool, restartCount: Int = 0, waitingReason: String? = nil) {
+    public init(
+        name: String,
+        ready: Bool,
+        restartCount: Int = 0,
+        waitingReason: String? = nil,
+        terminatedReason: String? = nil,
+        exitCode: Int? = nil
+    ) {
         self.name = name
         self.ready = ready
         self.restartCount = restartCount
         self.waitingReason = waitingReason
+        self.terminatedReason = terminatedReason
+        self.exitCode = exitCode
     }
+
+    /// `true` when the container is currently terminated (it has an exit code or a terminated reason).
+    public var isTerminated: Bool { exitCode != nil || terminatedReason != nil }
+
+    /// `true` when a previous instance exists, so `kubectl logs --previous` can work.
+    public var hasPreviousInstance: Bool { restartCount > 0 }
 }
 
 /// Kubernetes pod phase. Raw values match `status.phase`.
