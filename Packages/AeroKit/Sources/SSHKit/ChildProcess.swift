@@ -38,11 +38,14 @@ struct CappedOutput: Sendable, Hashable {
 
     var truncated: Bool { totalBytes > data.count }
 
-    mutating func append(_ bytes: UnsafeRawBufferPointer) {
-        guard let base = bytes.baseAddress, !bytes.isEmpty else { return }
+    /// Returns how many leading bytes of `bytes` were kept.
+    @discardableResult
+    mutating func append(_ bytes: UnsafeRawBufferPointer) -> Int {
+        guard let base = bytes.baseAddress, !bytes.isEmpty else { return 0 }
         totalBytes += bytes.count
         let room = min(limit - data.count, bytes.count)
         if room > 0 { data.append(base.assumingMemoryBound(to: UInt8.self), count: room) }
+        return max(0, room)
     }
 }
 
@@ -110,12 +113,17 @@ struct ChildLaunchError: Error, Sendable, CustomStringConvertible {
 /// - All mutable state is confined to a private serial queue.
 final class ChildProcess: @unchecked Sendable {
     typealias LineHandler = @Sendable (String) -> Void
+    /// `isStdout`, then the bytes.
+    typealias ChunkHandler = @Sendable (Bool, Data) -> Void
 
     enum OutputMode: Sendable {
         /// Keep stdout and stderr, each capped at ``ChildSpec/outputLimit``.
         case collect
         /// Deliver stdout line by line (on the child's queue); stderr is still collected.
         case lines(maxLength: Int, handler: LineHandler)
+        /// Like ``collect``, and also hand every kept piece of either stream to `handler` as it
+        /// arrives (on the child's queue). Bytes beyond the cap are neither kept nor delivered.
+        case observe(handler: ChunkHandler)
     }
 
     let pid: pid_t
@@ -123,6 +131,7 @@ final class ChildProcess: @unchecked Sendable {
     private let queue: DispatchQueue
     private let completion: @Sendable (ChildOutcome) -> Void
     private let lineHandler: LineHandler?
+    private let chunkHandler: ChunkHandler?
     private let startedAt: ContinuousClock.Instant
     private let readBuffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 1)
 
@@ -161,10 +170,16 @@ final class ChildProcess: @unchecked Sendable {
         switch mode {
         case .collect:
             lineHandler = nil
+            chunkHandler = nil
             splitter = nil
         case .lines(let maxLength, let handler):
             lineHandler = handler
+            chunkHandler = nil
             splitter = LineSplitter(maxLength: maxLength)
+        case .observe(let handler):
+            lineHandler = nil
+            chunkHandler = handler
+            splitter = nil
         }
     }
 
@@ -333,14 +348,18 @@ final class ChildProcess: @unchecked Sendable {
     }
 
     private func consume(_ bytes: UnsafeRawBufferPointer, isStdout: Bool) {
+        let kept: Int
         if isStdout {
             if let handler = lineHandler {
                 splitter?.append(bytes, emit: handler)
-            } else {
-                stdout.append(bytes)
+                return
             }
+            kept = stdout.append(bytes)
         } else {
-            stderr.append(bytes)
+            kept = stderr.append(bytes)
+        }
+        if let chunkHandler, kept > 0 {
+            chunkHandler(isStdout, Data(UnsafeRawBufferPointer(rebasing: bytes[0..<kept])))
         }
     }
 

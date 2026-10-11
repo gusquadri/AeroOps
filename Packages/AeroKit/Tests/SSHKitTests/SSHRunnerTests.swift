@@ -1,6 +1,7 @@
 import AeroCore
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 @testable import SSHKit
 
@@ -65,6 +66,34 @@ struct SSHRunnerTests {
         // A child that never reads stdin must not wedge the writer.
         let ignored = try await runner.run("exit 0", alias: "aero-test", stdin: payload)
         #expect(ignored.exitCode == 0)
+    }
+
+    @Test("delivers live output while the command runs, capped like the collected output")
+    func liveOutput() async throws {
+        let chunks = Mutex<[(SSHOutputStream, Data)]>([])
+        let host = RemoteHost.test()
+        let runner = self.runner
+        let task = Task {
+            try await runner.run("echo first; echo warn >&2; sleep 30", on: host, timeout: .seconds(60)) { stream, data in
+                chunks.withLock { $0.append((stream, data)) }
+            }
+        }
+        // Both pieces arrive before the command ends.
+        #expect(await eventually(timeout: .seconds(5)) {
+            chunks.withLock { list in
+                list.contains { $0.0 == .stdout && $0.1 == Data("first\n".utf8) }
+                    && list.contains { $0.0 == .stderr && $0.1 == Data("warn\n".utf8) }
+            }
+        })
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+
+        let capped = Mutex(Data())
+        let result = try await runner.run("head -c 5000 /dev/zero; echo done", on: host, outputLimit: 1000) { stream, data in
+            if stream == .stdout { capped.withLock { $0.append(data) } }
+        }
+        #expect(result.exitCode == 0 && result.stdout.count == 1000 && result.stdoutTruncated)
+        #expect(capped.withLock { $0 } == result.stdout)
     }
 
     @Test("caps each stream and flags truncation, while draining everything")

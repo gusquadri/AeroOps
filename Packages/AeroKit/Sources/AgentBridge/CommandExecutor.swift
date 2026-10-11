@@ -63,8 +63,7 @@ public protocol RemoteCommandRunner: Sendable {
 
 /// ``RemoteCommandRunner`` over SSHKit (system ssh, the generated ssh_config and the in-app agent).
 ///
-/// SSHKit has no API that streams output *and* returns the exit status yet, so the output is
-/// delivered once, when the command ends.
+/// Output is delivered live, piece by piece, as ssh reads it (up to `outputLimit` per stream).
 public struct SSHCommandRunner: RemoteCommandRunner {
     public let runner: SSHRunner
 
@@ -81,12 +80,12 @@ public struct SSHCommandRunner: RemoteCommandRunner {
     ) async throws -> RemoteCommandOutcome {
         let result: SSHResult
         do {
-            result = try await runner.run(remoteCommand, on: host, stdin: nil, timeout: timeout, outputLimit: outputLimit)
+            result = try await runner.run(remoteCommand, on: host, stdin: nil, timeout: timeout, outputLimit: outputLimit) { stream, data in
+                output(CommandOutputChunk(stream: stream == .stdout ? .stdout : .stderr, data: data))
+            }
         } catch let error as SSHError {
             return RemoteCommandOutcome(exitCode: 255, transportFailure: error.errorDescription ?? "ssh failed")
         }
-        if !result.stdout.isEmpty { output(CommandOutputChunk(stream: .stdout, data: result.stdout)) }
-        if !result.stderr.isEmpty { output(CommandOutputChunk(stream: .stderr, data: result.stderr)) }
         return RemoteCommandOutcome(
             exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr,
             stdoutTruncated: result.stdoutTruncated, stderrTruncated: result.stderrTruncated,
