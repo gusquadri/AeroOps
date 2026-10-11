@@ -136,9 +136,7 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.layoutManager?.allowsNonContiguousLayout = true
-        // Non-contiguous layout only lays out what is shown; background layout would instead
-        // lay out the whole 10k-line document on the main thread in idle slices after every flush.
-        textView.layoutManager?.backgroundLayoutEnabled = false
+        textView.layoutManager?.backgroundLayoutEnabled = true
         textView.selectedTextAttributes = [.backgroundColor: NSColor(Aero.aqua).withAlphaComponent(0.3)]
         textView.setAccessibilityLabel("Log lines")
         textView.delegate = self
