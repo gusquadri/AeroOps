@@ -2,8 +2,8 @@ import Foundation
 
 /// One Docker container, merged from `docker ps` and `docker stats`.
 ///
-/// Data shape only; the parser lives in Collectors. Also the row type of the MCP
-/// `list_containers` tool. Names and images are untrusted remote text.
+/// Built by ``DockerParser``. Also the row type of the MCP `list_containers` tool. Names and
+/// images are untrusted remote text.
 public struct ContainerInfo: Identifiable, Codable, Sendable, Hashable {
     /// Full container ID (`docker ps --no-trunc`).
     public var id: String
@@ -23,6 +23,13 @@ public struct ContainerInfo: Identifiable, Codable, Sendable, Hashable {
     public var memLimitBytes: Int64?
     /// Creation time (`CreatedAt`), used for the age column. `nil` when unparsable.
     public var createdAt: Date?
+    /// Published ports as Docker prints them (`Ports`), e.g. `0.0.0.0:8080->80/tcp, [::]:8080->80/tcp`.
+    /// `nil` when none.
+    public var ports: String?
+    /// Docker's own relative age text (`RunningFor`), e.g. `7 minutes ago`. `nil` when absent.
+    public var runningFor: String?
+    /// Restart count. Only `docker inspect` reports it, so `nil` for rows built from `docker ps`.
+    public var restartCount: Int?
 
     /// Creates a container row.
     public init(
@@ -34,7 +41,10 @@ public struct ContainerInfo: Identifiable, Codable, Sendable, Hashable {
         cpuPercent: Double? = nil,
         memUsedBytes: Int64? = nil,
         memLimitBytes: Int64? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        ports: String? = nil,
+        runningFor: String? = nil,
+        restartCount: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -45,6 +55,9 @@ public struct ContainerInfo: Identifiable, Codable, Sendable, Hashable {
         self.memUsedBytes = memUsedBytes
         self.memLimitBytes = memLimitBytes
         self.createdAt = createdAt
+        self.ports = ports
+        self.runningFor = runningFor
+        self.restartCount = restartCount
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// One poll of a host's metrics, as parsed from `Scripts/remote/metrics.sh` output.
 ///
-/// Data shape only; the parser lives elsewhere. Also the payload of the MCP `get_host_metrics` tool.
+/// Built by ``MetricsParser``. Also the payload of the MCP `get_host_metrics` tool.
 public struct MetricsSnapshot: Codable, Sendable, Hashable {
     /// Busy CPU percentage (0...100) across all cores since the previous poll.
     /// `nil` on the first poll, because CPU % needs two `/proc/stat` samples.
@@ -80,20 +80,32 @@ public struct DiskUsage: Identifiable, Codable, Sendable, Hashable {
     public var usedBytes: Int64
     /// Total size in bytes.
     public var totalBytes: Int64
+    /// Bytes available to unprivileged users (df's `Available`), if known. Smaller than
+    /// `totalBytes - usedBytes` when the filesystem reserves blocks for root (ext4) or shares a
+    /// container with other volumes (APFS).
+    public var availableBytes: Int64?
 
     /// Identity is the mount point.
     public var id: String { mount }
 
     /// Creates a disk usage row.
-    public init(mount: String, device: String, usedBytes: Int64, totalBytes: Int64) {
+    public init(mount: String, device: String, usedBytes: Int64, totalBytes: Int64, availableBytes: Int64? = nil) {
         self.mount = mount
         self.device = device
         self.usedBytes = usedBytes
         self.totalBytes = totalBytes
+        self.availableBytes = availableBytes
     }
 
-    /// Used space as a fraction 0...1, or `nil` when the total is 0.
+    /// Used space as a fraction 0...1, or `nil` when unknown.
+    ///
+    /// With ``availableBytes`` this is used ÷ (used + available), the same basis as df's
+    /// `Capacity` column; otherwise used ÷ total.
     public var usedFraction: Double? {
-        totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : nil
+        if let availableBytes {
+            let usable = Double(usedBytes) + Double(availableBytes)
+            if usable > 0 { return min(max(Double(usedBytes) / usable, 0), 1) }
+        }
+        return totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : nil
     }
 }
