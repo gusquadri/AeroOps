@@ -1,0 +1,67 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "action": "Scheduling",
+            "apiVersion": "v1",
+            "eventTime": "2026-10-11T06:55:06.048068Z",
+            "firstTimestamp": null,
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "pending-55687bcf9d-h9f9k",
+                "namespace": "demo",
+                "resourceVersion": "411",
+                "uid": "d97ad28c-b6fc-44dd-8d9b-c15d6cec24cd"
+            },
+            "kind": "Event",
+            "lastTimestamp": null,
+            "message": "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:06Z",
+                "name": "pending-55687bcf9d-h9f9k.18dd67357474f619",
+                "namespace": "demo",
+                "resourceVersion": "422",
+                "uid": "46f5b507-8418-47b9-b4c0-123416e7e372"
+            },
+            "reason": "FailedScheduling",
+            "reportingComponent": "default-scheduler",
+            "reportingInstance": "default-scheduler-aeroops-vm",
+            "source": {},
+            "type": "Warning"
+        },
+        {
+            "action": "Scheduling",
+            "apiVersion": "v1",
+            "eventTime": "2026-10-11T07:00:33.663307Z",
+            "firstTimestamp": null,
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "pending-55687bcf9d-h9f9k",
+                "namespace": "demo",
+                "resourceVersion": "420",
+                "uid": "d97ad28c-b6fc-44dd-8d9b-c15d6cec24cd"
+            },
+            "kind": "Event",
+            "lastTimestamp": null,
+            "message": "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T07:00:33Z",
+                "name": "pending-55687bcf9d-h9f9k.18dd6781bbd96629",
+                "namespace": "demo",
+                "resourceVersion": "770",
+                "uid": "546c9e68-7de7-47ff-bd56-b356ec21d3ec"
+            },
+            "reason": "FailedScheduling",
+            "reportingComponent": "default-scheduler",
+            "reportingInstance": "default-scheduler-aeroops-vm",
+            "source": {},
+            "type": "Warning"
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

@@ -1,0 +1,50 @@
+2026-10-11T07:02:42.893066459Z [33mWARN[0m  slow query took 746ms (threshold 500ms)
+2026-10-11T07:02:43.393546094Z [1;34mDEBUG[0m cache hit ratio=0.59 entries=2577
+2026-10-11T07:02:43.895904365Z plain line 860 without colour codes
+2026-10-11T07:02:44.396522959Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 861
+2026-10-11T07:02:44.899863485Z unicode line 862: café ✓ 日本
+2026-10-11T07:02:45.401610835Z [32mINFO[0m  POST /api/orders 201 id=863
+2026-10-11T07:02:45.902640473Z [31mERROR[0m request 864 failed: upstream timeout after 3000ms
+2026-10-11T07:02:46.404266614Z [32mINFO[0m  GET /api/items/865 200 28ms
+2026-10-11T07:02:46.905705463Z [33mWARN[0m  slow query took 1042ms (threshold 500ms)
+2026-10-11T07:02:47.407153187Z [1;34mDEBUG[0m cache hit ratio=0.67 entries=2601
+2026-10-11T07:02:47.909489249Z plain line 868 without colour codes
+2026-10-11T07:02:48.413476112Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 869
+2026-10-11T07:02:48.915145337Z unicode line 870: café ✓ 日本
+2026-10-11T07:02:49.416614894Z [32mINFO[0m  POST /api/orders 201 id=871
+2026-10-11T07:02:49.917210696Z [31mERROR[0m request 872 failed: upstream timeout after 3000ms
+2026-10-11T07:02:50.423067487Z [32mINFO[0m  GET /api/items/873 200 36ms
+2026-10-11T07:02:50.925433174Z [33mWARN[0m  slow query took 1338ms (threshold 500ms)
+2026-10-11T07:02:51.425609015Z [1;34mDEBUG[0m cache hit ratio=0.75 entries=2625
+2026-10-11T07:02:51.925793565Z plain line 876 without colour codes
+2026-10-11T07:02:52.426756578Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 877
+2026-10-11T07:02:52.927115378Z unicode line 878: café ✓ 日本
+2026-10-11T07:02:53.427719889Z [32mINFO[0m  POST /api/orders 201 id=879
+2026-10-11T07:02:53.928198315Z [31mERROR[0m request 880 failed: upstream timeout after 3000ms
+2026-10-11T07:02:54.430134958Z [32mINFO[0m  GET /api/items/881 200 4ms
+2026-10-11T07:02:54.932436145Z [33mWARN[0m  slow query took 734ms (threshold 500ms)
+2026-10-11T07:02:55.433136573Z [1;34mDEBUG[0m cache hit ratio=0.83 entries=2649
+2026-10-11T07:02:55.934070460Z plain line 884 without colour codes
+2026-10-11T07:02:56.436127896Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 885
+2026-10-11T07:02:56.937064700Z unicode line 886: café ✓ 日本
+2026-10-11T07:02:57.437608376Z [32mINFO[0m  POST /api/orders 201 id=887
+2026-10-11T07:02:57.938406388Z [31mERROR[0m request 888 failed: upstream timeout after 3000ms
+2026-10-11T07:02:58.439186566Z [32mINFO[0m  GET /api/items/889 200 12ms
+2026-10-11T07:02:58.943329597Z [33mWARN[0m  slow query took 1030ms (threshold 500ms)
+2026-10-11T07:02:59.444659195Z [1;34mDEBUG[0m cache hit ratio=0.91 entries=2673
+2026-10-11T07:02:59.946807172Z plain line 892 without colour codes
+2026-10-11T07:03:00.449850280Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 893
+2026-10-11T07:03:00.949093450Z unicode line 894: café ✓ 日本
+2026-10-11T07:03:01.450073254Z [32mINFO[0m  POST /api/orders 201 id=895
+2026-10-11T07:03:01.953985950Z [31mERROR[0m request 896 failed: upstream timeout after 3000ms
+2026-10-11T07:03:02.454391543Z [32mINFO[0m  GET /api/items/897 200 20ms
+2026-10-11T07:03:02.956717605Z [33mWARN[0m  slow query took 1326ms (threshold 500ms)
+2026-10-11T07:03:03.459353210Z [1;34mDEBUG[0m cache hit ratio=0.99 entries=2697
+2026-10-11T07:03:03.959489760Z plain line 900 without colour codes
+2026-10-11T07:03:04.464209252Z [38;5;208mNOTICE[0m 256-colour line, [1mbold[0m and [4munderline[0m 901
+2026-10-11T07:03:04.964878930Z unicode line 902: café ✓ 日本
+2026-10-11T07:03:05.469983258Z [32mINFO[0m  POST /api/orders 201 id=903
+2026-10-11T07:03:05.970815144Z [31mERROR[0m request 904 failed: upstream timeout after 3000ms
+2026-10-11T07:03:06.476148015Z [32mINFO[0m  GET /api/items/905 200 28ms
+2026-10-11T07:03:06.978622370Z [33mWARN[0m  slow query took 722ms (threshold 500ms)
+2026-10-11T07:03:07.479392798Z [1;34mDEBUG[0m cache hit ratio=0.07 entries=2721

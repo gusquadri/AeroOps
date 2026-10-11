@@ -1,0 +1,5 @@
+docker
+kubectl
+k3s
+docker-ok
+kube-ok

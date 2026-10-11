@@ -1,0 +1,26 @@
+@@stat
+cpu  4677059 3181 3663498 716940456 232915 0 688397 0 0 0
+@@cpus
+10
+@@mem
+MemTotal:        3052020 kB
+MemFree:          811760 kB
+MemAvailable:    1516064 kB
+Buffers:             168 kB
+Cached:           930092 kB
+SwapTotal:       4100588 kB
+SwapFree:        3557968 kB
+@@uptime
+727307.92 7169404.58
+@@load
+1.80 2.20 2.90 1/982 796
+@@df
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+overlay           51904512 22392144  29512368      44% /
+Filesystem     1024-blocks      Used Available Capacity Mounted on
+mac              976629760 120183496 856446264      13% /pubkeys
+/dev/vdb1         51904512  22392144  29512368      44% /config
+@@host
+Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64
+aeroops-dev
+@@end

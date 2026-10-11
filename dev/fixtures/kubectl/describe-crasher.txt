@@ -1,0 +1,76 @@
+Name:             crasher-89b4b56b4-djl5b
+Namespace:        demo
+Priority:         0
+Service Account:  default
+Node:             aeroops-vm/192.168.139.143
+Start Time:       Sun, 11 Oct 2026 03:55:07 -0300
+Labels:           app=crasher
+                  pod-template-hash=89b4b56b4
+Annotations:      <none>
+Status:           Running
+IP:               10.42.0.7
+IPs:
+  IP:           10.42.0.7
+Controlled By:  ReplicaSet/crasher-89b4b56b4
+Containers:
+  crasher:
+    Container ID:  containerd://16bb8157dde84792ce2e1e27dad1592bf9cf2adc1a508c0b58f4c39fb4ca2784
+    Image:         busybox:1.36
+    Image ID:      docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      sh
+      -c
+      echo "crasher starting (attempt at $(date -u +%H:%M:%S))"
+      echo "loading config from /etc/demo/config.yaml"
+      echo "connecting to postgres at db.demo.svc:5432"
+      sleep 3
+      echo "FATAL: connection refused (db.demo.svc:5432)" >&2
+      exit 1
+      
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    1
+      Started:      Sun, 11 Oct 2026 04:01:14 -0300
+      Finished:     Sun, 11 Oct 2026 04:01:17 -0300
+    Ready:          False
+    Restart Count:  6
+    Limits:
+      memory:  32Mi
+    Requests:
+      cpu:        5m
+      memory:     8Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-z5kp2 (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       False 
+  ContainersReady             False 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-z5kp2:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age                   From               Message
+  ----     ------     ----                  ----               -------
+  Normal   Scheduled  8m2s                  default-scheduler  Successfully assigned demo/crasher-89b4b56b4-djl5b to aeroops-vm
+  Normal   Pulling    7m54s                 kubelet            spec.containers{crasher}: Pulling image "busybox:1.36"
+  Normal   Pulled     7m43s                 kubelet            spec.containers{crasher}: Successfully pulled image "busybox:1.36" in 11.587s (11.588s including waiting). Image size: 1906887 bytes.
+  Normal   Created    116s (x7 over 7m42s)  kubelet            spec.containers{crasher}: Container created
+  Normal   Started    116s (x7 over 7m42s)  kubelet            spec.containers{crasher}: Container started
+  Normal   Pulled     116s (x6 over 7m38s)  kubelet            spec.containers{crasher}: Container image "busybox:1.36" already present on machine and can be accessed by the pod
+  Warning  BackOff    40s (x9 over 7m34s)   kubelet            spec.containers{crasher}: Back-off restarting failed container crasher in pod crasher-89b4b56b4-djl5b_demo(65ccbfde-66eb-403f-b5aa-5c346406712e)

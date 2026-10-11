@@ -1,0 +1,28 @@
+@@stat
+@@cpus
+@@mem
+@@uptime
+@@load
+@@df
+Filesystem     1024-blocks      Used Available Capacity  Mounted on
+/dev/disk3s1s1   239362496  13338596  31105088    31%    /
+Filesystem                                                                                         1024-blocks      Used  Available Capacity  Mounted on
+/dev/disk3s1s1                                                                                       239362496  13338596   31105088    31%    /
+devfs                                                                                                      357       357          0   100%    /dev
+/dev/disk3s6                                                                                         239362496   9437556   31105088    24%    /System/Volumes/VM
+/dev/disk3s2                                                                                         239362496  10641264   31105088    26%    /System/Volumes/Preboot
+/dev/disk3s4                                                                                         239362496     28108   31105088     1%    /System/Volumes/Update
+/dev/disk1s2                                                                                            512000      6164     490068     2%    /System/Volumes/xarts
+/dev/disk1s1                                                                                            512000      6132     490068     2%    /System/Volumes/iSCPreboot
+/dev/disk1s3                                                                                            512000      4776     490068     1%    /System/Volumes/Hardware
+/dev/disk3s5                                                                                         239362496 173171080   31105088    85%    /System/Volumes/Data
+map auto_home                                                                                                0         0          0   100%    /System/Volumes/Data/home
+/dev/disk5s1                                                                                         976629760 119974272  856453180    13%    /Volumes/External1
+/dev/disk3s3                                                                                         239362496   1506740   31105088     5%    /Volumes/External2
+/dev/disk7s1                                                                                          17338368  16844300     448848    98%    /Library/Developer/CoreSimulator/Volumes/iOS_23D8133
+devices -- file:///Users/dev/Library/Containers/com.apple.CoreDevice.CoreDeviceService/Data/  1073741824         0 1073741824     0%    /Users/dev/Library/Developer/CoreDevice/DeviceFS
+OrbStack:/OrbStack                                                                                    51904512  22392100   29512412    44%    /Users/dev/OrbStack
+@@host
+Darwin 27.0.0 arm64
+mac-fixture.local
+@@end

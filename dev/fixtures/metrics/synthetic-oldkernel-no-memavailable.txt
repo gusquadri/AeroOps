@@ -1,0 +1,24 @@
+@@stat
+cpu  4677037 3181 3663477 716938233 232915 0 688390 0 0 0
+@@cpus
+10
+@@mem
+MemTotal:        3052020 kB
+MemFree:          821496 kB
+Buffers:             168 kB
+Cached:           914268 kB
+SwapTotal:       4100588 kB
+SwapFree:        3557896 kB
+@@uptime
+727305.64 7169382.37
+@@load
+1.80 2.20 2.90 1/982 9213
+@@df
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+/dev/vdb1         51904512 22392144  29512368      44% /
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+/dev/vdb1         51904512 22392144  29512368      44% /
+@@host
+Linux 3.10.0-1160.el7.x86_64 x86_64
+oldkernel-fixture
+@@end

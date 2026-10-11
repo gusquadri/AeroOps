@@ -1,0 +1,37 @@
+@@stat
+cpu  4677129 3181 3663559 716944780 232915 0 688413 0 0 0
+@@cpus
+10
+@@mem
+MemTotal:        3052020 kB
+MemFree:          795544 kB
+MemAvailable:    1524088 kB
+Buffers:             168 kB
+Cached:           954504 kB
+SwapTotal:       4100588 kB
+SwapFree:        3558092 kB
+@@uptime
+727312.42 7169447.82
+@@load
+1.65 2.17 2.89 1/982 262
+@@df
+Filesystem           1024-blocks    Used Available Capacity Mounted on
+overlay               51904512  22392144  29512368  43% /
+Filesystem           1024-blocks    Used Available Capacity Mounted on
+overlay               51904512  22392144  29512368  43% /
+tmpfs                    65536         0     65536   0% /dev
+shm                    1525760         0   1525760   0% /dev/shm
+mac                  976629760 120177456 856452304  12% /pubkeys
+/dev/vdb1             51904512  22392144  29512368  43% /etc/resolv.conf
+/dev/vdb1             51904512  22392144  29512368  43% /etc/hostname
+/dev/vdb1             51904512  22392144  29512368  43% /etc/hosts
+/dev/vdb1             51904512  22392144  29512368  43% /etc/ssh/hostkeys
+tmpfs                        4         0         4   0% /proc/asound
+tmpfs                    65536         0     65536   0% /proc/interrupts
+tmpfs                    65536         0     65536   0% /proc/keys
+tmpfs                    65536         0     65536   0% /proc/timer_list
+tmpfs                        4         0         4   0% /sys/firmware
+@@host
+Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64
+aeroops-alpine
+@@end

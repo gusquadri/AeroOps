@@ -1,0 +1,5 @@
+head: /proc/stat: No such file or directory
+grep: /proc/cpuinfo: No such file or directory
+grep: /proc/meminfo: No such file or directory
+cat: /proc/uptime: No such file or directory
+cat: /proc/loadavg: No such file or directory

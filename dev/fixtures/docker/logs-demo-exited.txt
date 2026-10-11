@@ -1,0 +1,3 @@
+2026-10-11T06:55:30.580562985Z batch job starting
+2026-10-11T06:55:30.580591485Z processed 42 records
+2026-10-11T06:55:30.580619277Z fatal: /etc/job/config.yaml not found

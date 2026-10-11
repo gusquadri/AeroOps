@@ -1,0 +1,2 @@
+sudo: a password is required
+[exit status 1]

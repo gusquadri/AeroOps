@@ -1,0 +1,236 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "action": "Binding",
+            "apiVersion": "v1",
+            "eventTime": "2026-10-11T06:55:07.379521Z",
+            "firstTimestamp": null,
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "424",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": null,
+            "message": "Successfully assigned demo/crasher-89b4b56b4-djl5b to aeroops-vm",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:07Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd6735c3d15fa6",
+                "namespace": "demo",
+                "resourceVersion": "447",
+                "uid": "b6452066-86a6-4b31-8f9a-fc93176c11f7"
+            },
+            "reason": "Scheduled",
+            "reportingComponent": "default-scheduler",
+            "reportingInstance": "default-scheduler-aeroops-vm",
+            "source": {},
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 1,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:16Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T06:55:16Z",
+            "message": "Pulling image \"busybox:1.36\"",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:16Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd6737cc328df0",
+                "namespace": "demo",
+                "resourceVersion": "471",
+                "uid": "7cf00c32-de28-4581-bcc9-d1e7c5726f83"
+            },
+            "reason": "Pulling",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 1,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:27Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T06:55:27Z",
+            "message": "Successfully pulled image \"busybox:1.36\" in 11.587s (11.588s including waiting). Image size: 1906887 bytes.",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:27Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd673a7ef62f5e",
+                "namespace": "demo",
+                "resourceVersion": "492",
+                "uid": "9e6897dc-214e-4598-b00e-ec2ded0b3f5b"
+            },
+            "reason": "Pulled",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 7,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:28Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T07:01:14Z",
+            "message": "Container created",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:28Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd673ab9752263",
+                "namespace": "demo",
+                "resourceVersion": "791",
+                "uid": "934c1c22-3211-47d1-ab1f-ea175c89b835"
+            },
+            "reason": "Created",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 7,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:28Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T07:01:14Z",
+            "message": "Container started",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:28Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd673ac5be2bea",
+                "namespace": "demo",
+                "resourceVersion": "792",
+                "uid": "c66051b7-f460-4c6a-8d0b-949b30fe3a5d"
+            },
+            "reason": "Started",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 6,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:32Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T07:01:14Z",
+            "message": "Container image \"busybox:1.36\" already present on machine and can be accessed by the pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:32Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd673b9a60aab8",
+                "namespace": "demo",
+                "resourceVersion": "789",
+                "uid": "3549ad61-6fd4-4e8f-a542-128ac3cf0021"
+            },
+            "reason": "Pulled",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 9,
+            "eventTime": null,
+            "firstTimestamp": "2026-10-11T06:55:36Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "fieldPath": "spec.containers{crasher}",
+                "kind": "Pod",
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "resourceVersion": "439",
+                "uid": "65ccbfde-66eb-403f-b5aa-5c346406712e"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-11T07:02:30Z",
+            "message": "Back-off restarting failed container crasher in pod crasher-89b4b56b4-djl5b_demo(65ccbfde-66eb-403f-b5aa-5c346406712e)",
+            "metadata": {
+                "creationTimestamp": "2026-10-11T06:55:36Z",
+                "name": "crasher-89b4b56b4-djl5b.18dd673c895a1188",
+                "namespace": "demo",
+                "resourceVersion": "831",
+                "uid": "951058d3-be5c-4a05-a3f8-e0d7ac5142e5"
+            },
+            "reason": "BackOff",
+            "reportingComponent": "kubelet",
+            "reportingInstance": "aeroops-vm",
+            "source": {
+                "component": "kubelet",
+                "host": "aeroops-vm"
+            },
+            "type": "Warning"
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

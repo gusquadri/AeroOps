@@ -1,6 +1,8 @@
-# Local SSH test server: dev@localhost:2222
+# Local SSH test servers:
+#   ssh     dev@localhost:2222  linuxserver/openssh-server (Alpine + GNU coreutils)
+#   alpine  dev@localhost:2223  pure BusyBox Alpine (df, grep, head... are BusyBox)
 # Public keys in dev/keys/*.pub are authorized at container start;
-# use dev/add-key.sh to authorize a key on a running container.
+# use dev/add-key.sh to authorize a key on every running dev server.
 name: aeroops-dev
 services:
   ssh:
@@ -19,3 +21,16 @@ services:
     ports:
       - "2222:2222"
     restart: unless-stopped
+  alpine:
+    build: ./alpine
+    image: aeroops-dev-alpine:latest
+    container_name: aeroops-alpine
+    hostname: aeroops-alpine
+    volumes:
+      - ./keys:/pubkeys:ro
+      - alpine-hostkeys:/etc/ssh/hostkeys
+    ports:
+      - "2223:22"
+    restart: unless-stopped
+volumes:
+  alpine-hostkeys:

@@ -1,0 +1,141 @@
+# AeroOps demo workloads for the test VM's k3s (namespace "demo").
+#   web       Running, 2/2 ready, two containers (nginx + log-sidecar): container picker
+#   crasher   CrashLoopBackOff: prints a few lines, then exits 1; restartCount grows
+#   pending   Pending forever: nodeSelector no node has (FailedScheduling events)
+#   bad-image ImagePullBackOff: image on a registry that cannot resolve
+#   hello     Job pod that runs once and Succeeds
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: demo
+  labels: {app: web}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: {path: /, port: 80}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+        - name: log-sidecar
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              while true; do
+                i=$((i + 1))
+                echo "sidecar heartbeat $i: upstream nginx ok"
+                sleep 5
+              done
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {memory: 32Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crasher
+  namespace: demo
+  labels: {app: crasher}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: crasher}
+  template:
+    metadata:
+      labels: {app: crasher}
+    spec:
+      containers:
+        - name: crasher
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "crasher starting (attempt at $(date -u +%H:%M:%S))"
+              echo "loading config from /etc/demo/config.yaml"
+              echo "connecting to postgres at db.demo.svc:5432"
+              sleep 3
+              echo "FATAL: connection refused (db.demo.svc:5432)" >&2
+              exit 1
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {memory: 32Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pending
+  namespace: demo
+  labels: {app: pending}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: pending}
+  template:
+    metadata:
+      labels: {app: pending}
+    spec:
+      nodeSelector:
+        aeroops.dev/no-such-node: "true"
+      containers:
+        - name: app
+          image: nginx:1.27-alpine
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-image
+  namespace: demo
+  labels: {app: bad-image}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: bad-image}
+  template:
+    metadata:
+      labels: {app: bad-image}
+    spec:
+      containers:
+        - name: app
+          image: registry.invalid/aeroops/does-not-exist:0.0.0
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hello
+  namespace: demo
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: hello
+          image: busybox:1.36
+          command: [sh, -c, 'echo "hello from the demo job"; echo "done"']
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}

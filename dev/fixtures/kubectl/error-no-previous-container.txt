@@ -1,0 +1,2 @@
+Error from server (BadRequest): previous terminated container "nginx" in pod "web-7b56d94874-b8t9q" not found
+[exit status 1]
