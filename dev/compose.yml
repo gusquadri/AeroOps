@@ -1,0 +1,21 @@
+# Local SSH test server: dev@localhost:2222
+# Public keys in dev/keys/*.pub are authorized at container start;
+# use dev/add-key.sh to authorize a key on a running container.
+name: aeroops-dev
+services:
+  ssh:
+    image: lscr.io/linuxserver/openssh-server:latest
+    container_name: aeroops-ssh
+    hostname: aeroops-dev
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - USER_NAME=dev
+      - PUBLIC_KEY_DIR=/pubkeys
+      - PASSWORD_ACCESS=false
+      - SUDO_ACCESS=false
+    volumes:
+      - ./keys:/pubkeys:ro
+    ports:
+      - "2222:2222"
+    restart: unless-stopped
