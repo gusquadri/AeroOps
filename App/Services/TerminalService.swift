@@ -220,7 +220,9 @@ final class TerminalService {
     }
 
     private func nextOrdinal(for baseTitle: String) -> Int {
-        let used = Set(tabs.values.filter { $0.baseTitle == baseTitle }.map(\.ordinal))
+        // Only tabs whose session is still open (libghostty can close one on its own).
+        let open = manager.sessions.compactMap { tabs[$0.id] }
+        let used = Set(open.filter { $0.baseTitle == baseTitle }.map(\.ordinal))
         var ordinal = 1
         while used.contains(ordinal) { ordinal += 1 }
         return ordinal
