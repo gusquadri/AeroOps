@@ -241,7 +241,12 @@ struct SSHRunnerTests {
 
     @Test("stream timeout ends with SSHError.timeout")
     func streamTimeout() async throws {
-        let stream = try runner.stream("echo first; sleep 30", alias: "aero-test", timeout: .milliseconds(300))
+        // The deadline runs from spawn. Under a loaded full-suite run, a 300 ms budget was
+        // occasionally spent before the fake ssh had even printed its first line, so give the
+        // child ample time to start and prove the timeout by the elapsed time instead: the
+        // stream must end with `.timeout` long before `sleep 30` could finish on its own.
+        let start = ContinuousClock.now
+        let stream = try runner.stream("echo first; sleep 30", alias: "aero-test", timeout: .seconds(3))
         var lines: [String] = []
         do {
             for try await line in stream { lines.append(line) }
@@ -249,7 +254,10 @@ struct SSHRunnerTests {
         } catch {
             #expect(error as? SSHError == .timeout)
         }
+        let elapsed = ContinuousClock.now - start
         #expect(lines == ["first"])
+        #expect(elapsed >= .seconds(3), "ended after \(elapsed), before the deadline")
+        #expect(elapsed < .seconds(10), "took \(elapsed): the timeout did not cut sleep 30 short")
     }
 
     @Test("long lines are split at maxLineLength")

@@ -2,7 +2,9 @@
 import AeroCore
 import AppKit
 import ImageIO
+import KeyAgent
 @preconcurrency import ScreenCaptureKit
+import SSHKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -11,10 +13,16 @@ import UniformTypeIdentifiers
 ///
 /// ```sh
 /// AeroOps.app/Contents/MacOS/AeroOps \
-///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json lives here instead of Application Support
+///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json, keys.json and the ~/.aeroops files
+///                                                # (in <dir>/dot) live here; keys stay in memory
+///   -AeroOpsDemoHosts YES \                      # an empty data directory gets the six sample hosts
 ///   -AeroOpsDemoStatuses YES \                   # give hosts every HostStatus so all orb tones show
+///   -AeroOpsDemoKeys YES \                       # sample keys, and a changed host key on the third host
 ///   -AeroOpsSnapshotDirectory build/snapshots \  # write PNGs of every tab, the editor and Settings, then quit
 ///   -AeroOpsSnapshotPrefix many                  # file name prefix for the PNGs (default "main")
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase2 -AeroSelfTestOutput /tmp/st.json \
+///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase2SelfTest
 /// ```
 enum DebugLaunchOptions {
     private static var defaults: UserDefaults { .standard }
@@ -25,16 +33,63 @@ enum DebugLaunchOptions {
 
     static var demoStatuses: Bool { defaults.bool(forKey: "AeroOpsDemoStatuses") }
 
+    static var demoKeys: Bool { defaults.bool(forKey: "AeroOpsDemoKeys") }
+
+    static var demoHosts: Bool { defaults.bool(forKey: "AeroOpsDemoHosts") }
+
     static var snapshotDirectory: URL? {
         defaults.string(forKey: "AeroOpsSnapshotDirectory").map { URL(filePath: $0, directoryHint: .isDirectory) }
     }
 
     static var snapshotPrefix: String { defaults.string(forKey: "AeroOpsSnapshotPrefix") ?? "main" }
 
+    /// A model for a debug launch, or `nil` for the real one.
+    ///
+    /// - `-AeroSelfTest`: a fresh temporary root (see ``Phase2SelfTest``).
+    /// - `-AeroOpsDataDirectory`: everything under that directory, keys in memory, so demo and
+    ///   snapshot runs never touch `~/.aeroops`, the real hosts or the Keychain.
+    @MainActor
+    static func makeModel() -> AppModel? {
+        if Phase2SelfTest.isRequested {
+            return Phase2SelfTest.makeModel()
+        }
+        guard let dataDirectory else { return nil }
+        let paths = AeroPaths(
+            dotDirectory: dataDirectory.appending(path: "dot", directoryHint: .isDirectory),
+            applicationSupport: dataDirectory
+        )
+        let ssh = SSHServices(paths: paths, secretStore: InMemorySecretStore(), defaults: nil)
+        return AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
+    }
+
     @MainActor
     static func apply(to model: AppModel) {
+        if demoHosts, dataDirectory != nil, model.hosts.isEmpty {
+            for host in SampleData.hosts {
+                try? model.addHost(host)
+            }
+            model.selection = nil
+        }
         if demoStatuses {
             model.applySampleStatuses()
+        }
+    }
+
+    /// Runs after ``AppModel/startServices()``: demo keys and the self-test.
+    @MainActor
+    static func servicesDidStart(_ model: AppModel) async {
+        if demoKeys, dataDirectory != nil {
+            await model.ssh.loadSampleData(blocking: model.hosts.dropFirst(2).first)
+            // Give hosts without a key one of the sample keys, so the editor and Keys pane show usage.
+            let keys = model.ssh.keys
+            for (index, host) in model.hosts.enumerated() where host.keyId == nil && !keys.isEmpty {
+                var host = host
+                host.keyId = keys[index % keys.count].id.uuidString
+                try? model.updateHost(host)
+            }
+        }
+        if Phase2SelfTest.isRequested {
+            await Phase2SelfTest(model: model).runAndQuit()
         }
     }
 }
@@ -97,6 +152,8 @@ private struct DebugSnapshotter {
         model.editorRequest = nil
         await pause(0.8)
 
+        await captureTrustSheet()
+
         let before = Set(NSApp.windows.map(ObjectIdentifier.init))
         openSettings()
         await pause(1.2)
@@ -112,6 +169,38 @@ private struct DebugSnapshotter {
             log("no settings window")
         }
         NSApp.terminate(nil)
+    }
+
+    /// The first-contact sheet, hosted in a temporary window (it normally appears over the host
+    /// editor after a Test connection, which a snapshot run can't trigger).
+    private func captureTrustSheet() async {
+        guard let host = model.hosts.first else { return }
+        let sheet = HostKeyTrustSheet(
+            host: host,
+            offered: [SampleHostKeys.ed25519(seed: 4), SampleHostKeys.ecdsa(seed: 5)],
+            onTrust: {},
+            onCancel: {}
+        )
+        await captureStandalone(sheet, title: "Trust host key", name: "\(prefix)-trust-sheet")
+        // The editor of a blocked host, full size (sheets capture small and dimmed).
+        if let blocked = model.hosts.first(where: { model.hostKeyBlock(for: $0.id) != nil }) {
+            await captureStandalone(HostEditorSheet(request: .edit(blocked.id)), title: "Edit \(blocked.name)", name: "\(prefix)-editor-blocked")
+        }
+        // Settings › Keys tall enough to show the agent section without scrolling.
+        await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
+    }
+
+    /// Shows `view` in a temporary window, captures it and closes the window.
+    private func captureStandalone(_ view: some View, title: String, name: String) async {
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view.aeroAppearance().environment(model)))
+        window.title = title
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        await pause(1.0)
+        await capture(window, name: name)
+        window.close()
+        await pause(0.4)
     }
 
     private func pause(_ seconds: Double) async {

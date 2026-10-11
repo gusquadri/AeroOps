@@ -15,14 +15,14 @@ protocol HostInventoryObserver: AnyObject {
 /// A key the host editor's key picker can offer. Only an identifier and labels: key material
 /// never leaves KeyAgent.
 ///
-/// Phase 2 fills ``AppModel/availableKeys`` from KeyAgent's key store; until then the picker
-/// shows "None" and keeps any `keyId` already in `hosts.json`.
+/// ``AppModel/availableKeys`` builds them from KeyAgent's key store (via ``SSHServices``). The
+/// picker keeps a `keyId` whose key was deleted, labelled "Unknown key".
 struct KeySummary: Identifiable, Hashable, Sendable {
     /// The KeyAgent key identifier stored in ``RemoteHost/keyId``.
     var id: String
     /// Display name, e.g. "MacBook Secure Enclave".
     var name: String
-    /// Secondary line, e.g. "ecdsa-sha2-nistp256 · SHA256:…".
+    /// Secondary line, e.g. "Ed25519 · SHA256:…".
     var detail: String
 }
 

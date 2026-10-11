@@ -13,16 +13,7 @@ struct SettingsView: View {
                 HostsSettingsPane()
             }
             Tab(SettingsPane.keys.title, systemImage: SettingsPane.keys.systemImage, value: .keys) {
-                SettingsPlaceholderPane(
-                    systemImage: "key.horizontal",
-                    title: "SSH keys",
-                    message: "Generate Ed25519 or Secure Enclave keys, or import existing OpenSSH keys. Private keys stay in the Keychain and are served only by AeroOps’ own ssh-agent.",
-                    plans: [
-                        "Generate, import, export and delete keys",
-                        "Touch ID policy per key",
-                        "Copy a key’s authorized_keys line",
-                    ]
-                )
+                KeysSettingsPane()
             }
             Tab(SettingsPane.mcp.title, systemImage: SettingsPane.mcp.systemImage, value: .mcp) {
                 SettingsPlaceholderPane(

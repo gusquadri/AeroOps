@@ -1,6 +1,7 @@
 import AeroCore
 import Foundation
 import Observation
+import SSHKit
 
 /// The app's root state: host inventory, navigation and per-host live state.
 ///
@@ -11,9 +12,11 @@ import Observation
 /// ``reloadHosts()`` rather than on ``hostStore`` directly, so per-host state and
 /// ``HostInventoryObserver``s stay in sync.
 ///
+/// Phase 2 wiring: ``ssh`` (``SSHServices``) is a ``HostInventoryObserver`` that rewrites
+/// `ssh_config`; ``availableKeys`` come from its key store; Test connection goes through
+/// ``SSHConnectionTester``.
+///
 /// Plug-in points for later phases (no view changes needed):
-/// - Phase 2: pass an SSHKit ``ConnectionTester`` to ``init(hostStore:connectionTester:)``, fill
-///   ``availableKeys`` from KeyAgent, register an ssh_config writer as a ``HostInventoryObserver``.
 /// - Phase 3: register the Collectors monitor pool as an observer; its `HostMonitor` actors call
 ///   ``updateState(of:status:metrics:message:)`` on the main actor.
 /// - Phase 4: make ``canOpenSSH(_:)`` / ``openSSH(_:)`` open TerminalKit tabs.
@@ -41,10 +44,17 @@ final class AppModel {
 
     // MARK: Services
 
-    /// Runs Settings › Hosts' Test connection. Phase 1: ``SimulatedConnectionTester``.
+    /// Keys, the in-app agent, `ssh_config` and host-key trust (Phase 2).
+    let ssh: SSHServices
+    /// Runs Settings › Hosts' Test connection: ``SSHConnectionTester`` unless injected.
     let connectionTester: any ConnectionTester
-    /// Keys offered by the host editor. Empty until Phase 2 wires KeyAgent's key store.
-    var availableKeys: [KeySummary] = []
+
+    /// Keys offered by the host editor's key picker.
+    var availableKeys: [KeySummary] {
+        ssh.keys.map {
+            KeySummary(id: $0.id.uuidString, name: $0.name, detail: "\($0.algorithm.displayName) · \($0.fingerprint)")
+        }
+    }
 
     // MARK: Per-host state
 
@@ -53,10 +63,39 @@ final class AppModel {
 
     @ObservationIgnored private var inventoryObservers: [any HostInventoryObserver] = []
 
-    init(hostStore: HostStore, connectionTester: any ConnectionTester = SimulatedConnectionTester()) {
+    /// - Parameters:
+    ///   - ssh: The SSH services; `nil` gives in-memory preview services that are never started.
+    ///   - connectionTester: `nil` tests through `ssh`.
+    init(hostStore: HostStore, ssh: SSHServices? = nil, connectionTester: (any ConnectionTester)? = nil) {
+        let ssh = ssh ?? SSHServices.preview()
         self.hostStore = hostStore
-        self.connectionTester = connectionTester
+        self.ssh = ssh
+        self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
         hostsDidChange()
+        addInventoryObserver(ssh)
+    }
+
+    /// Starts the SSH services (agent, key files, `ssh_config`). Called once at launch.
+    func startServices() async {
+        await ssh.start()
+    }
+
+    /// Stops the agent and closes shared SSH connections. Called before the app quits.
+    /// Returns how many ControlMaster connections were closed.
+    @discardableResult
+    func shutdownServices() async -> Int {
+        await ssh.shutdown()
+    }
+
+    /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
+    func beginShutdown() -> (@Sendable () async -> Void)? {
+        guard let work = ssh.beginShutdown() else { return nil }
+        return { _ = await work() }
+    }
+
+    /// The changed-key block for a host, if connections to it are refused.
+    func hostKeyBlock(for id: RemoteHost.ID) -> HostKeyBlock? {
+        host(id: id).flatMap(ssh.hostKeyBlock(for:))
     }
 
     // MARK: - Queries
@@ -141,9 +180,11 @@ final class AppModel {
 
     // MARK: - Terminals
 
-    /// Whether Open SSH is available for the host. Always `false` until Phase 4 (TerminalKit).
+    /// Whether Open SSH is available for the host. Always `false` until Phase 4 (TerminalKit);
+    /// never for a host blocked by a changed host key.
     func canOpenSSH(_ id: RemoteHost.ID) -> Bool {
-        false
+        guard hostKeyBlock(for: id) == nil else { return false }
+        return false
     }
 
     /// Opens a terminal tab for the host. Phase 4 creates a TerminalKit session here and

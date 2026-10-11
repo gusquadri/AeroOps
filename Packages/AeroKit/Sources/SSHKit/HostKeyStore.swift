@@ -113,6 +113,13 @@ public struct HostKeyBlock: Sendable, Hashable {
     /// Keys the server offered, when known (empty if ssh detected the change on its own).
     public var offered: [HostKey]
     public var detectedAt: Date
+
+    public init(knownHostsName: String, pinned: [HostKey], offered: [HostKey], detectedAt: Date = .now) {
+        self.knownHostsName = knownHostsName
+        self.pinned = pinned
+        self.offered = offered
+        self.detectedAt = detectedAt
+    }
 }
 
 /// Trust-on-first-use host keys in `~/.aeroops/known_hosts`.
