@@ -19,7 +19,8 @@ import SSHKit
 /// Plug-in points for later phases (no view changes needed):
 /// - Phase 3: register the Collectors monitor pool as an observer; its `HostMonitor` actors call
 ///   ``updateState(of:status:metrics:message:)`` on the main actor.
-/// - Phase 4: make ``canOpenSSH(_:)`` / ``openSSH(_:)`` open TerminalKit tabs.
+/// - Phase 4: ``terminals`` (``TerminalService``) holds the terminal tabs; ``openSSH(_:)`` and
+///   ``openSSH(_:remoteCommand:title:)`` open them.
 @MainActor
 @Observable
 final class AppModel {
@@ -48,6 +49,8 @@ final class AppModel {
     let ssh: SSHServices
     /// Runs Settings › Hosts' Test connection: ``SSHConnectionTester`` unless injected.
     let connectionTester: any ConnectionTester
+    /// Terminal tabs (Phase 4).
+    let terminals: TerminalService
 
     /// Keys offered by the host editor's key picker.
     var availableKeys: [KeySummary] {
@@ -71,6 +74,7 @@ final class AppModel {
         self.hostStore = hostStore
         self.ssh = ssh
         self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
+        terminals = TerminalService(ssh: ssh) { hostStore.host(id: $0) }
         hostsDidChange()
         addInventoryObserver(ssh)
     }
@@ -88,7 +92,9 @@ final class AppModel {
     }
 
     /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
+    /// Terminal tabs close first, so no ssh session outlives the agent that signs for it.
     func beginShutdown() -> (@Sendable () async -> Void)? {
+        terminals.closeAll()
         guard let work = ssh.beginShutdown() else { return nil }
         return { _ = await work() }
     }
@@ -180,18 +186,38 @@ final class AppModel {
 
     // MARK: - Terminals
 
-    /// Whether Open SSH is available for the host. Always `false` until Phase 4 (TerminalKit);
-    /// never for a host blocked by a changed host key.
+    /// Whether Open SSH is available for the host: it exists, renders into `ssh_config`, is not
+    /// blocked by a changed host key, and has its key with the agent running (or the system
+    /// agent option is on).
     func canOpenSSH(_ id: RemoteHost.ID) -> Bool {
-        guard hostKeyBlock(for: id) == nil else { return false }
-        return false
+        guard let host = host(id: id) else { return false }
+        return terminals.canOpen(host)
     }
 
-    /// Opens a terminal tab for the host. Phase 4 creates a TerminalKit session here and
-    /// switches to ``AppTab/terminals``.
+    /// Opens an interactive ssh tab to the host and shows it in ``AppTab/terminals``. A host
+    /// with no pinned host key first shows the trust sheet there.
     func openSSH(_ id: RemoteHost.ID) {
-        guard canOpenSSH(id) else { return }
+        guard let host = host(id: id), terminals.canOpen(host) else { return }
         selectedTab = .terminals
+        terminals.open(host, kind: .shell)
+    }
+
+    /// Opens a tab running `remoteCommand` on the host (`ssh -t aero-<id> -- <remoteCommand>`),
+    /// titled "<host> · <title>". `remoteCommand` must already be quoted with `ShellQuote`; it is
+    /// passed to ssh as one argument, unchanged. The tab shows the exit status when it ends.
+    func openSSH(_ id: RemoteHost.ID, remoteCommand: String, title: String? = nil) {
+        guard let host = host(id: id), terminals.canOpen(host) else { return }
+        selectedTab = .terminals
+        terminals.open(host, kind: .remoteCommand(remoteCommand, title: title))
+    }
+
+    /// ⌘T: a new tab for the sidebar's host, else for the shown tab's host.
+    var newTerminalTabHost: RemoteHost.ID? {
+        if let selection, canOpenSSH(selection) { return selection }
+        if let session = terminals.selectedSession, let tab = terminals.tab(for: session.id), canOpenSSH(tab.hostID) {
+            return tab.hostID
+        }
+        return nil
     }
 
     // MARK: - Sync
