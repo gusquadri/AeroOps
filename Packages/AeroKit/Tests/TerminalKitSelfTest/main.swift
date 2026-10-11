@@ -11,7 +11,7 @@ import Darwin
 import Foundation
 import GhosttyTerminal
 import SwiftUI
-import TerminalKit
+@_spi(AeroSelfTest) import TerminalKit
 
 struct Options {
     var sshConfig = ""

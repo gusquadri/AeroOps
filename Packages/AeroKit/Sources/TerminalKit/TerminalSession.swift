@@ -307,15 +307,18 @@ public final class TerminalSession: Identifiable {
     }
 }
 
-// MARK: - Test and self-test hooks (same package only)
+// MARK: - Self-test hooks
 
+/// Drive a session without a keyboard. SPI, so only code that opts in with
+/// `@_spi(AeroSelfTest) import TerminalKit` (the package self-test and the app's DEBUG
+/// self-tests) sees them.
 extension TerminalSession {
     /// PID of the wrapper shell once the program started.
-    package var processRootPID: pid_t? { rootPID }
+    @_spi(AeroSelfTest) public var processRootPID: pid_t? { rootPID }
 
     /// Types `text` as key presses (US layout); `\n` presses Return.
     @discardableResult
-    package func type(_ text: String) -> Bool {
+    @_spi(AeroSelfTest) public func type(_ text: String) -> Bool {
         guard !isClosed else { return false }
         for character in text {
             let sent: Bool
@@ -333,13 +336,13 @@ extension TerminalSession {
 
     /// Presses Escape.
     @discardableResult
-    package func pressEscape() -> Bool {
+    @_spi(AeroSelfTest) public func pressEscape() -> Bool {
         guard !isClosed else { return false }
         return terminalView.sendKey(.escape)
     }
 
     /// Screen plus scrollback as text (selects all, reads the selection).
-    package func screenText() -> String? {
+    @_spi(AeroSelfTest) public func screenText() -> String? {
         guard !isClosed, let surface else { return nil }
         _ = surface.performBindingAction("select_all")
         return surface.readSelection()
