@@ -1,0 +1,294 @@
+import AeroCore
+import Foundation
+
+/// Runs non-interactive commands on hosts through the system ssh:
+///
+/// ```text
+/// /usr/bin/ssh -F ~/.aeroops/ssh_config -o BatchMode=yes -- aero-<id> <command>
+/// ```
+///
+/// - `BatchMode=yes`: ssh never prompts, so a missing key or an
+///   unknown host key fails fast instead of hanging.
+/// - `--` ends ssh's options, so a command starting with `-` can never be read as one.
+/// - `SSH_AUTH_SOCK` is the in-app agent's socket (the config's `IdentityAgent` wins anyway).
+/// - The command is one remote shell string. Quote every interpolated value with
+///   `ShellQuote.quote`, or use ``run(arguments:on:stdin:timeout:outputLimit:)``.
+///
+/// With a ``HostKeyStore``, hosts whose key changed are refused before ssh starts, and a
+/// changed key reported by ssh blocks the host.
+public struct SSHRunner: Sendable {
+    public let context: SSHContext
+    public let hostKeys: HostKeyStore?
+
+    public static let defaultTimeout: Duration = .seconds(30)
+    public static let defaultOutputLimit = 64 * 1024
+    /// Longest line a stream delivers in one piece.
+    public static let maxLineLength = 64 * 1024
+
+    public init(context: SSHContext = .standard, hostKeys: HostKeyStore? = nil) {
+        self.context = context
+        self.hostKeys = hostKeys
+    }
+
+    /// The full invocation for `command` on `host` (useful for logging argv, never secrets).
+    public func commandLine(_ command: String, on host: RemoteHost) -> SSHCommandLine {
+        commandLine(command, alias: host.sshAlias)
+    }
+
+    func commandLine(_ command: String, alias: String) -> SSHCommandLine {
+        SSHCommandLine(
+            executable: context.sshExecutable,
+            arguments: ["-F", context.configFile.filePath, "-o", "BatchMode=yes", "--", alias, command],
+            environment: context.environmentOverrides
+        )
+    }
+
+    // MARK: - Run to completion
+
+    /// Runs `command` and collects its output.
+    ///
+    /// Failures of ssh itself are reported in ``SSHResult/transportError``, the remote status in
+    /// ``SSHResult/exitCode``; use ``SSHResult/checked()`` to turn either into a thrown
+    /// ``SSHError``. Throws only for requests that never reach ssh: a blocked host
+    /// (``SSHError/hostKeyChanged``), an invalid command, a launch failure, or task cancellation
+    /// (`CancellationError`, after the process group was killed).
+    ///
+    /// - Parameters:
+    ///   - stdin: written to the remote command's stdin; `nil` means `/dev/null`.
+    ///   - timeout: kills ssh (and its process group) when exceeded; the result has `timedOut`.
+    ///   - outputLimit: bytes kept per stream; the rest is discarded and flagged as truncated.
+    public func run(
+        _ command: String,
+        on host: RemoteHost,
+        stdin: Data? = nil,
+        timeout: Duration = SSHRunner.defaultTimeout,
+        outputLimit: Int = SSHRunner.defaultOutputLimit
+    ) async throws -> SSHResult {
+        try await refuseIfBlocked(host)
+        let result = try await run(command, alias: host.sshAlias, stdin: stdin, timeout: timeout, outputLimit: outputLimit)
+        if result.transportError == .hostKeyChanged { await hostKeys?.block(host) }
+        return result
+    }
+
+    /// Runs `arguments` as one remote command, each argument quoted with `ShellQuote.quote`.
+    public func run(
+        arguments: [String],
+        on host: RemoteHost,
+        stdin: Data? = nil,
+        timeout: Duration = SSHRunner.defaultTimeout,
+        outputLimit: Int = SSHRunner.defaultOutputLimit
+    ) async throws -> SSHResult {
+        try await run(ShellQuote.join(arguments), on: host, stdin: stdin, timeout: timeout, outputLimit: outputLimit)
+    }
+
+    func run(
+        _ command: String,
+        alias: String,
+        stdin: Data? = nil,
+        timeout: Duration = SSHRunner.defaultTimeout,
+        outputLimit: Int = SSHRunner.defaultOutputLimit
+    ) async throws -> SSHResult {
+        let spec = try spec(command, alias: alias, stdin: stdin, timeout: timeout, outputLimit: outputLimit)
+        do {
+            return SSHResult(try await ChildProcess.run(spec))
+        } catch let error as ChildLaunchError {
+            throw SSHError.launchFailed(error.message)
+        }
+    }
+
+    // MARK: - Streaming
+
+    /// Runs `command` and yields its stdout line by line (without line terminators).
+    ///
+    /// The stream finishes normally on exit status 0 and throws ``SSHError`` otherwise
+    /// (``SSHError/remoteCommandFailed(exitCode:stderr:)`` for a remote failure). Cancelling the
+    /// consuming task, breaking out of the loop or dropping the stream terminates ssh and its
+    /// process group. When the consumer falls behind, the oldest of `maxBufferedLines` are dropped.
+    ///
+    /// - Parameter timeout: `nil` (the default) for long-running commands such as `logs -f`.
+    public func stream(
+        _ command: String,
+        on host: RemoteHost,
+        stdin: Data? = nil,
+        timeout: Duration? = nil,
+        maxBufferedLines: Int = 10_000
+    ) async throws -> AsyncThrowingStream<String, any Error> {
+        try await refuseIfBlocked(host)
+        let store = hostKeys
+        return try stream(command, alias: host.sshAlias, stdin: stdin, timeout: timeout, maxBufferedLines: maxBufferedLines) { error in
+            if error == .hostKeyChanged, let store {
+                Task { await store.block(host) }
+            }
+        }
+    }
+
+    func stream(
+        _ command: String,
+        alias: String,
+        stdin: Data? = nil,
+        timeout: Duration? = nil,
+        maxBufferedLines: Int = 10_000,
+        onTransportError: @escaping @Sendable (SSHError) -> Void = { _ in }
+    ) throws -> AsyncThrowingStream<String, any Error> {
+        try Task.checkCancellation()
+        let spec = try spec(command, alias: alias, stdin: stdin, timeout: timeout, outputLimit: Self.defaultOutputLimit)
+        let (stream, continuation) = AsyncThrowingStream<String, any Error>.makeStream(
+            bufferingPolicy: .bufferingNewest(max(1, maxBufferedLines))
+        )
+        let mode = ChildProcess.OutputMode.lines(maxLength: Self.maxLineLength) { line in
+            continuation.yield(line)
+        }
+        let child: ChildProcess
+        do {
+            child = try ChildProcess.launch(spec, mode: mode) { outcome in
+                if outcome.cancelled {
+                    continuation.finish()
+                    return
+                }
+                let result = SSHResult(outcome)
+                if let error = result.transportError {
+                    onTransportError(error)
+                    continuation.finish(throwing: error)
+                } else if result.exitCode != 0 {
+                    continuation.finish(throwing: SSHError.remoteCommandFailed(
+                        exitCode: result.exitCode, stderr: SSHError.trimmed(result.stderrString)
+                    ))
+                } else {
+                    continuation.finish()
+                }
+            }
+        } catch {
+            throw SSHError.launchFailed(error.message)
+        }
+        continuation.onTermination = { _ in child.terminate() }
+        return stream
+    }
+
+    // MARK: - Helpers
+
+    private func refuseIfBlocked(_ host: RemoteHost) async throws {
+        try Task.checkCancellation()
+        if let hostKeys, await hostKeys.isBlocked(host) { throw SSHError.hostKeyChanged }
+    }
+
+    private func spec(
+        _ command: String,
+        alias: String,
+        stdin: Data?,
+        timeout: Duration?,
+        outputLimit: Int
+    ) throws(SSHError) -> ChildSpec {
+        guard !command.isEmpty else { throw .invalidRequest("empty remote command") }
+        guard !command.utf8.contains(0) else { throw .invalidRequest("remote command contains a NUL byte") }
+        guard Self.isValidAlias(alias) else { throw .invalidRequest("invalid host alias “\(alias)”") }
+        let line = commandLine(command, alias: alias)
+        var environment = ProcessInfo.processInfo.environment
+        environment.merge(line.environment) { _, override in override }
+        return ChildSpec(
+            executable: line.executable.filePath,
+            arguments: line.arguments,
+            environment: environment,
+            stdin: stdin,
+            timeout: timeout,
+            outputLimit: outputLimit
+        )
+    }
+
+    /// Lower-case letters, digits, `.`, `_`, `-`; not starting with `-`.
+    static func isValidAlias(_ alias: String) -> Bool {
+        guard let first = alias.utf8.first, first != UInt8(ascii: "-") else { return false }
+        return alias.utf8.allSatisfy { byte in
+            switch byte {
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "0")...UInt8(ascii: "9"),
+                 UInt8(ascii: "."), UInt8(ascii: "_"), UInt8(ascii: "-"):
+                true
+            default:
+                false
+            }
+        }
+    }
+}
+
+/// The outcome of ``SSHRunner/run(_:on:stdin:timeout:outputLimit:)``.
+public struct SSHResult: Sendable, Hashable {
+    /// The exit status: the remote command's, or 255 for ssh errors; `128 + signal` if ssh was killed.
+    public var exitCode: Int32
+    /// The signal that killed the local ssh process, if any.
+    public var signal: Int32?
+    /// Up to `outputLimit` bytes of stdout.
+    public var stdout: Data
+    /// Up to `outputLimit` bytes of stderr.
+    public var stderr: Data
+    /// stdout produced more than `outputLimit` bytes.
+    public var stdoutTruncated: Bool
+    /// stderr produced more than `outputLimit` bytes.
+    public var stderrTruncated: Bool
+    /// From spawn to exit.
+    public var duration: Duration
+    /// SSHKit killed ssh because the timeout expired.
+    public var timedOut: Bool
+
+    public init(
+        exitCode: Int32,
+        signal: Int32? = nil,
+        stdout: Data = Data(),
+        stderr: Data = Data(),
+        stdoutTruncated: Bool = false,
+        stderrTruncated: Bool = false,
+        duration: Duration = .zero,
+        timedOut: Bool = false
+    ) {
+        self.exitCode = exitCode
+        self.signal = signal
+        self.stdout = stdout
+        self.stderr = stderr
+        self.stdoutTruncated = stdoutTruncated
+        self.stderrTruncated = stderrTruncated
+        self.duration = duration
+        self.timedOut = timedOut
+    }
+
+    init(_ outcome: ChildOutcome) {
+        switch outcome.termination {
+        case .exited(let code):
+            exitCode = code
+            signal = nil
+        case .signaled(let signal):
+            exitCode = 128 + signal
+            self.signal = signal
+        }
+        stdout = outcome.stdout.data
+        stderr = outcome.stderr.data
+        stdoutTruncated = outcome.stdout.truncated
+        stderrTruncated = outcome.stderr.truncated
+        duration = outcome.duration
+        timedOut = outcome.timedOut
+    }
+
+    /// stdout as UTF-8 (invalid bytes replaced).
+    public var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
+    /// stderr as UTF-8 (invalid bytes replaced).
+    public var stderrString: String { String(decoding: stderr, as: UTF8.self) }
+
+    /// Why ssh itself failed, or `nil` if the remote command ran (whatever its exit status).
+    ///
+    /// Timeouts map to ``SSHError/timeout``; exit status 255 is classified from stderr.
+    public var transportError: SSHError? {
+        if timedOut { return .timeout }
+        if let signal { return .other("ssh was terminated by signal \(signal)") }
+        if exitCode == 255 { return SSHError.classify(stderr: stderrString) }
+        return nil
+    }
+
+    /// The command ran and exited 0.
+    public var succeeded: Bool { transportError == nil && exitCode == 0 }
+
+    /// Returns `self` if the command succeeded, otherwise throws ``transportError`` or
+    /// ``SSHError/remoteCommandFailed(exitCode:stderr:)``.
+    @discardableResult
+    public func checked() throws(SSHError) -> SSHResult {
+        if let transportError { throw transportError }
+        if exitCode != 0 { throw .remoteCommandFailed(exitCode: exitCode, stderr: SSHError.trimmed(stderrString)) }
+        return self
+    }
+}
