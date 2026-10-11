@@ -18,7 +18,7 @@ struct HostKeyList: View {
                     HStack(spacing: 6) {
                         AeroTag(key.displayType, tint: tint)
                         if let bits = key.bits {
-                            Text("\(bits) bits")
+                            Text("\(String(bits)) bits")
                                 .font(Aero.font(.caption))
                                 .foregroundStyle(Aero.text.secondary)
                         }
