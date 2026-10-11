@@ -21,9 +21,20 @@ public enum OrbTone: String, Sendable, Hashable, CaseIterable {
         case .neutral: Aero.neutral
         }
     }
+
+    /// A darker shade of ``color`` for rims and the orb's lower edge.
+    var deepColor: Color {
+        switch self {
+        case .healthy: Aero.leafDeep
+        case .warning: Aero.sunDeep
+        case .error: Aero.coralDeep
+        case .neutral: Aero.neutralDeep
+        }
+    }
 }
 
-/// A small glossy sphere in the colour of an ``OrbTone``.
+/// A small glossy sphere in the colour of an ``OrbTone``: lit from within at the bottom,
+/// with a white specular cap on top and a darker rim.
 ///
 /// ```swift
 /// StatusOrb(tone: .healthy)
@@ -34,6 +45,8 @@ public struct StatusOrb: View {
     /// Diameter in points.
     public let size: CGFloat
 
+    private var accessibility = AeroAccessibility()
+
     /// Creates an orb of `size` points (default 12).
     public init(tone: OrbTone, size: CGFloat = 12) {
         self.tone = tone
@@ -42,23 +55,61 @@ public struct StatusOrb: View {
 
     /// The orb.
     public var body: some View {
-        Circle()
-            .fill(RadialGradient(
-                colors: [tone.color.mix(with: .white, by: 0.45), tone.color],
-                center: UnitPoint(x: 0.35, y: 0.3),
-                startRadius: 0, endRadius: size * 0.7
+        let strong = accessibility.increaseContrast
+        ZStack {
+            // Body: light pools at the bottom, the edge darkens.
+            Circle().fill(RadialGradient(
+                stops: [
+                    .init(color: tone.color.mix(with: .white, by: 0.45), location: 0),
+                    .init(color: tone.color, location: 0.55),
+                    .init(color: tone.deepColor, location: 1),
+                ],
+                center: UnitPoint(x: 0.5, y: 0.92),
+                startRadius: 0, endRadius: size * 0.95
             ))
-            .overlay(alignment: .top) {
-                // Specular highlight.
-                Ellipse()
-                    .fill(Aero.glass.rimTop)
-                    .frame(width: size * 0.55, height: size * 0.3)
-                    .padding(.top, size * 0.08)
-                    .opacity(0.8)
-            }
-            .overlay { Circle().strokeBorder(tone.color.mix(with: .black, by: 0.2), lineWidth: 0.5) }
-            .frame(width: size, height: size)
-            .accessibilityElement()
-            .accessibilityLabel(tone.rawValue.capitalized)
+            // Specular cap.
+            Ellipse()
+                .fill(LinearGradient(
+                    colors: [.white.opacity(0.95), .white.opacity(0.1)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .frame(width: size * 0.68, height: size * 0.46)
+                .offset(y: -size * 0.2)
+            Circle().strokeBorder(
+                tone.deepColor.opacity(strong ? 1 : 0.7),
+                lineWidth: strong ? max(1, size * 0.08) : max(0.5, size * 0.05)
+            )
+        }
+        .frame(width: size, height: size)
+        .shadow(color: tone.deepColor.opacity(0.35), radius: size * 0.12, x: 0, y: size * 0.06)
+        .accessibilityElement()
+        .accessibilityLabel(tone.rawValue.capitalized)
     }
+}
+
+// MARK: - Previews
+
+#Preview("StatusOrb: every tone and size") {
+    VStack(spacing: 18) {
+        ForEach([12.0, 20, 36], id: \.self) { size in
+            HStack(spacing: 18) {
+                ForEach(OrbTone.allCases, id: \.self) { tone in
+                    StatusOrb(tone: tone, size: size)
+                }
+            }
+        }
+    }
+    .padding(40)
+    .background { SkyBackground() }
+}
+
+#Preview("StatusOrb: Increase Contrast") {
+    HStack(spacing: 18) {
+        ForEach(OrbTone.allCases, id: \.self) { tone in
+            StatusOrb(tone: tone, size: 20)
+        }
+    }
+    .padding(40)
+    .background { SkyBackground() }
+    .environment(\.aeroAccessibilityOverride, .all)
 }
