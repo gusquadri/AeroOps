@@ -172,7 +172,14 @@ final class LogViewerModel: Identifiable {
 
     // MARK: - Search and copy
 
+    /// The search field's text. The sheet applies it, debounced, with ``search(_:)``.
+    var searchText = ""
+
+    /// Highlights `query` (and shows it in the search field). Re-applying the current query is
+    /// a no-op: appended lines are highlighted as they arrive.
     func search(_ query: String) {
+        searchText = query
+        guard query != text.query else { return }
         text.setQuery(query)
     }
 

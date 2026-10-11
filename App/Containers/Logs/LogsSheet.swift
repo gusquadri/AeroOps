@@ -8,7 +8,6 @@ struct LogsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let viewer: LogViewerModel
     let containers: HostContainersModel
-    @State private var query = ""
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -42,7 +41,8 @@ struct LogsSheet: View {
         .background { SkyBackground() }
         .onAppear { viewer.start() }
         .onDisappear { viewer.stop() }
-        .task(id: query) {
+        .task(id: viewer.searchText) {
+            let query = viewer.searchText
             // Debounce typing; highlighting 10k lines on every keystroke would stutter.
             if !query.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
             guard !Task.isCancelled else { return }
@@ -145,12 +145,12 @@ struct LogsSheet: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Aero.text.secondary)
                 .accessibilityHidden(true)
-            TextField("Search", text: $query)
+            TextField("Search", text: Bindable(viewer).searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .frame(minWidth: 120, maxWidth: 200)
                 .onSubmit { viewer.nextMatch() }
-            if !query.isEmpty {
+            if !viewer.searchText.isEmpty {
                 Text(matchText)
                     .font(Aero.font(.caption))
                     .monospacedDigit()

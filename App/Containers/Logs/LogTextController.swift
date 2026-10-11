@@ -63,8 +63,9 @@ struct LogLine: Sendable, Hashable {
     }
 }
 
-/// The log text view: an `NSTextView` (TextKit 1, non-contiguous layout) that holds at most
-/// ``maxLines`` lines, appends batches without re-laying out what is already there, highlights
+/// The log text view: an `NSTextView` (TextKit 1, non-contiguous layout) that keeps the newest
+/// ``maxLines`` lines (``trimSlack`` more before it trims), appends batches without re-laying
+/// out what is already there, highlights
 /// search matches and keeps the view pinned to the bottom while the user is there.
 ///
 /// It is the single owner of the lines, so toggling timestamps re-renders from the raw text.
@@ -74,8 +75,10 @@ struct LogLine: Sendable, Hashable {
 final class LogTextController: NSObject, NSTextViewDelegate {
     /// Oldest lines are dropped beyond this many.
     nonisolated static let maxLines = 10_000
-    /// Lines over ``maxLines`` tolerated before trimming, so trimming happens in chunks.
-    static let trimSlack = 500
+    /// Lines over ``maxLines`` tolerated before trimming, so trimming happens in chunks: a cut at
+    /// the start invalidates layout for the whole text, so it should not happen on every flush
+    /// of a busy stream.
+    static let trimSlack = 2_000
     /// Matches highlighted at most (the count stops there too).
     nonisolated static let maxMatches = 5_000
 
@@ -133,7 +136,9 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.layoutManager?.allowsNonContiguousLayout = true
-        textView.layoutManager?.backgroundLayoutEnabled = true
+        // Non-contiguous layout only lays out what is shown; background layout would instead
+        // lay out the whole 10k-line document on the main thread in idle slices after every flush.
+        textView.layoutManager?.backgroundLayoutEnabled = false
         textView.selectedTextAttributes = [.backgroundColor: NSColor(Aero.aqua).withAlphaComponent(0.3)]
         textView.setAccessibilityLabel("Log lines")
         textView.delegate = self

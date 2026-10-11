@@ -66,38 +66,38 @@ private struct DockerTable: View {
                     }
                     .help(container.id)
                 }
-                .width(min: 120, ideal: 170)
+                .width(min: 100, ideal: 140)
                 TableColumn("Image") { container in
                     Text(container.image)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(container.image)
                 }
-                .width(min: 100, ideal: 170)
+                .width(min: 80, ideal: 120)
                 TableColumn("State") { container in
                     AeroTag(container.state.rawValue.capitalized, tone: container.health.workloadTone)
                 }
-                .width(min: 80, ideal: 92, max: 120)
+                .width(min: 72, ideal: 84, max: 120)
                 TableColumn("Status") { container in
                     Text(container.status)
                         .lineLimit(1)
                         .foregroundStyle(Aero.text.secondary)
                         .help(container.status)
                 }
-                .width(min: 100, ideal: 160)
+                .width(min: 80, ideal: 110)
                 TableColumn("CPU") { container in
                     Text(container.cpuText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .width(min: 50, ideal: 60, max: 80)
+                .width(min: 44, ideal: 52, max: 80)
                 TableColumn("Memory") { container in
                     Text(container.memoryText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .help(container.memoryHelp ?? "")
                 }
-                .width(min: 64, ideal: 80, max: 110)
+                .width(min: 60, ideal: 68, max: 110)
                 TableColumn("Ports") { container in
                     Text(container.portsText)
                         .lineLimit(1)
@@ -105,7 +105,7 @@ private struct DockerTable: View {
                         .foregroundStyle(Aero.text.secondary)
                         .help(container.ports ?? "")
                 }
-                .width(min: 80, ideal: 150)
+                .width(min: 60, ideal: 80)
                 TableColumn("") { container in
                     HStack(spacing: 10) {
                         RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {

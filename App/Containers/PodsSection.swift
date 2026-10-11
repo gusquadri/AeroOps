@@ -38,19 +38,24 @@ struct PodsSection: View {
             .help("Namespace")
             WorkloadSearchField(prompt: "Filter pods", text: $containers.podSearch)
             Spacer(minLength: 8)
+            // The tag, count and button keep their size; the search field gives way when the
+            // inspector narrows the column.
             if crashLooping > 0 {
                 AeroTag("\(crashLooping) crash-looping", tone: .error)
+                    .fixedSize()
             }
             Text(countText)
                 .font(Aero.font(.caption))
                 .foregroundStyle(Aero.text.secondary)
                 .monospacedDigit()
+                .fixedSize()
             Button {
                 containers.inspectorPresented.toggle()
             } label: {
                 Label("Details", systemImage: "sidebar.trailing")
             }
             .buttonStyle(.aquaSecondary)
+            .fixedSize()
             .help("Show the selected pod's events and describe output")
         }
     }
@@ -86,7 +91,7 @@ private struct PodTable: View {
                         .lineLimit(1)
                         .foregroundStyle(Aero.text.secondary)
                 }
-                .width(min: 70, ideal: 100)
+                .width(min: 64, ideal: 84)
                 TableColumn("Name") { pod in
                     HStack(spacing: 8) {
                         StatusOrb(tone: pod.health.workloadTone, size: 10)
@@ -97,34 +102,34 @@ private struct PodTable: View {
                     }
                     .help(pod.id)
                 }
-                .width(min: 140, ideal: 230)
+                .width(min: 120, ideal: 190)
                 TableColumn("Ready") { pod in
                     Text("\(pod.readyCount)/\(pod.containerCount)")
                         .monospacedDigit()
                 }
-                .width(min: 40, ideal: 48, max: 60)
+                .width(min: 40, ideal: 44, max: 60)
                 TableColumn("Status") { pod in
                     AeroTag(pod.displayStatus, tone: pod.health.workloadTone)
                         .help(statusHelp(pod))
                 }
-                .width(min: 90, ideal: 140)
+                .width(min: 90, ideal: 120)
                 TableColumn("Restarts") { pod in
                     restarts(pod)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .width(min: 56, ideal: 64, max: 90)
+                .width(min: 56, ideal: 60, max: 90)
                 TableColumn("Age") { pod in
                     Text(pod.age() ?? MetricText.missing)
                         .monospacedDigit()
                         .foregroundStyle(Aero.text.secondary)
                 }
-                .width(min: 36, ideal: 44, max: 60)
+                .width(min: 36, ideal: 40, max: 60)
                 TableColumn("Node") { pod in
                     Text(pod.nodeName ?? MetricText.missing)
                         .lineLimit(1)
                         .foregroundStyle(Aero.text.secondary)
                 }
-                .width(min: 60, ideal: 110)
+                .width(min: 60, ideal: 90)
                 TableColumn("") { pod in
                     HStack(spacing: 10) {
                         RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {

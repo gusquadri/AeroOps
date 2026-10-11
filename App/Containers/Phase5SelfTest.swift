@@ -127,6 +127,10 @@ struct Phase5SelfTest {
             }
         }
         Self.log("[phase5] \(report.ok ? "OK" : "FAILED")")
+        guard report.ok else {
+            // Services are already shut down in finish(); a failed run must not look like success.
+            exit(1)
+        }
         NSApp.terminate(nil)
     }
 

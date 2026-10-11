@@ -111,6 +111,7 @@ private struct ContainersHeader: View {
                     }
                     updatedLabel
                 }
+                .lineLimit(1)
             }
             Spacer(minLength: 12)
             if containers.availableSections.count > 1 {
