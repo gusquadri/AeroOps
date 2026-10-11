@@ -17,8 +17,9 @@ let package = Package(
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
     ],
     dependencies: [
-        // Phase 4 adds the libghostty wrapper
-        // (pinned to an exact version) and wires it into TerminalKit below.
+        // libghostty wrapper, pinned exactly.
+        // Only TerminalKit links it; the app gets it transitively through the TerminalKit product.
+        .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "2.2.2026101003"),
     ],
     targets: [
         // Models, parsers, ShellQuote, HostStore, runtime paths. Depends on nothing.
@@ -33,9 +34,22 @@ let package = Package(
         // Metrics script + parser, Docker, Kubernetes, one polling actor per host.
         .target(name: "Collectors", dependencies: ["SSHKit", "AeroCore"]),
 
-        // libghostty surface wrapper and tab model.
-        // Phase 4: add the GhosttyKit product here, e.g. .product(name: "GhosttyKit", package: "...").
-        .target(name: "TerminalKit", dependencies: ["SSHKit"]),
+        // libghostty surface wrapper and tab model. Takes a generic launch spec (executable +
+        // arguments), so it does not depend on SSHKit; the app builds the ssh command line.
+        .target(
+            name: "TerminalKit",
+            dependencies: ["AeroCore", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+        ),
+
+        // Interactive self-test for TerminalKit against the dev SSH container (needs a window
+        // server). Not a product, so it never ships in the app. Run via
+        // Tests/TerminalKitSelfTest/run-selftest.sh.
+        .executableTarget(
+            name: "TerminalKitSelfTest",
+            dependencies: ["TerminalKit", .product(name: "GhosttyTerminal", package: "libghostty-spm")],
+            path: "Tests/TerminalKitSelfTest",
+            exclude: ["run-selftest.sh"]
+        ),
 
         // bridge.sock server for aeroops-mcp, PolicyEngine, ApprovalCenter, AuditLog.
         .target(name: "AgentBridge", dependencies: ["Collectors", "SSHKit", "AeroCore"]),
@@ -51,6 +65,7 @@ let package = Package(
         .testTarget(name: "SSHKitTests", dependencies: ["SSHKit", "AeroTestSupport"]),
         .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AeroTestSupport"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
+        .testTarget(name: "TerminalKitTests", dependencies: ["TerminalKit", "AeroCore"]),
         .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "AeroTestSupport"]),
         .testTarget(name: "AeroThemeTests", dependencies: ["AeroTheme"]),
     ]
