@@ -1,0 +1,177 @@
+#if DEBUG
+import AeroCore
+import AppKit
+import ImageIO
+@preconcurrency import ScreenCaptureKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// Developer-only launch arguments, read from the `UserDefaults` argument domain. Compiled out
+/// of Release builds.
+///
+/// ```sh
+/// AeroOps.app/Contents/MacOS/AeroOps \
+///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json lives here instead of Application Support
+///   -AeroOpsDemoStatuses YES \                   # give hosts every HostStatus so all orb tones show
+///   -AeroOpsSnapshotDirectory build/snapshots \  # write PNGs of every tab, the editor and Settings, then quit
+///   -AeroOpsSnapshotPrefix many                  # file name prefix for the PNGs (default "main")
+/// ```
+enum DebugLaunchOptions {
+    private static var defaults: UserDefaults { .standard }
+
+    static var dataDirectory: URL? {
+        defaults.string(forKey: "AeroOpsDataDirectory").map { URL(filePath: $0, directoryHint: .isDirectory) }
+    }
+
+    static var demoStatuses: Bool { defaults.bool(forKey: "AeroOpsDemoStatuses") }
+
+    static var snapshotDirectory: URL? {
+        defaults.string(forKey: "AeroOpsSnapshotDirectory").map { URL(filePath: $0, directoryHint: .isDirectory) }
+    }
+
+    static var snapshotPrefix: String { defaults.string(forKey: "AeroOpsSnapshotPrefix") ?? "main" }
+
+    @MainActor
+    static func apply(to model: AppModel) {
+        if demoStatuses {
+            model.applySampleStatuses()
+        }
+    }
+}
+
+extension View {
+    /// With `-AeroOpsSnapshotDirectory`, captures every main-window tab, the host editor sheet
+    /// and every Settings pane to PNGs, then quits. Otherwise does nothing.
+    func debugSnapshotHarness() -> some View {
+        modifier(DebugSnapshotHarness())
+    }
+}
+
+private struct DebugSnapshotHarness: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
+
+    func body(content: Content) -> some View {
+        content.task {
+            guard let directory = DebugLaunchOptions.snapshotDirectory else { return }
+            await DebugSnapshotter(model: model, directory: directory, prefix: DebugLaunchOptions.snapshotPrefix)
+                .run(openSettings: { openSettings() })
+        }
+    }
+}
+
+/// Captures the app's own windows with ScreenCaptureKit's current-process content, which needs
+/// no Screen Recording permission.
+@MainActor
+private struct DebugSnapshotter {
+    let model: AppModel
+    let directory: URL
+    let prefix: String
+
+    func run(openSettings: () -> Void) async {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        await pause(1.5)
+        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && !$0.isSheet }) else {
+            log("no main window")
+            return NSApp.terminate(nil)
+        }
+        if model.selection == nil, model.hosts.count > 1 {
+            model.selection = model.hosts[min(2, model.hosts.count - 1)].id
+        }
+        NSApp.activate()
+        main.makeKeyAndOrderFront(nil)
+        for tab in AppTab.allCases {
+            model.selectedTab = tab
+            await pause(0.8)
+            await capture(main, name: "\(prefix)-\(tab.rawValue)")
+        }
+        model.selectedTab = .dashboard
+        await pause(0.8)
+        await capture(main, name: "\(prefix)-dashboard-again")
+
+        model.editorRequest = model.hosts.dropFirst(2).first.map { .edit($0.id) } ?? .new
+        await pause(1.2)
+        if let sheet = main.attachedSheet {
+            await capture(sheet, name: "\(prefix)-editor-sheet")
+        }
+        model.editorRequest = nil
+        await pause(0.8)
+
+        let before = Set(NSApp.windows.map(ObjectIdentifier.init))
+        openSettings()
+        await pause(1.2)
+        let settings = NSApp.windows.first { !before.contains(ObjectIdentifier($0)) && $0.isVisible }
+            ?? NSApp.windows.first { $0.isVisible && $0 !== main && !$0.isSheet }
+        if let settings {
+            for pane in SettingsPane.allCases {
+                model.settingsPane = pane
+                await pause(0.8)
+                await capture(settings, name: "\(prefix)-settings-\(pane.rawValue)")
+            }
+        } else {
+            log("no settings window")
+        }
+        NSApp.terminate(nil)
+    }
+
+    private func pause(_ seconds: Double) async {
+        try? await Task.sleep(for: .seconds(seconds))
+    }
+
+    /// Describes the sidebar and flags a split view taller than the window. (Wrapped text in a
+    /// non-scrolling detail once raised the minimum height and pushed the sidebar out of view.)
+    private func describeSplit(in window: NSWindow) -> String? {
+        func find(_ view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView { return split }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        guard let root = window.contentView?.superview ?? window.contentView, let split = find(root),
+              let sidebar = split.arrangedSubviews.first else { return nil }
+        let overflow = split.frame.height > root.frame.height + 1 ? " OVERFLOW" : ""
+        return "sidebar collapsed=\(split.isSubviewCollapsed(sidebar)) width=\(Int(sidebar.frame.width)) "
+            + "split height=\(Int(split.frame.height)) window height=\(Int(root.frame.height))\(overflow)"
+    }
+
+    private func capture(_ window: NSWindow, name: String) async {
+        if let layout = describeSplit(in: window) { log("\(name): \(layout)") }
+        do {
+            let content = try await SCShareableContent.currentProcess
+            guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
+                return log("window \(window.windowNumber) not shareable for \(name)")
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let config = SCStreamConfiguration()
+            let scale = CGFloat(filter.pointPixelScale)
+            config.width = Int(filter.contentRect.width * scale)
+            config.height = Int(filter.contentRect.height * scale)
+            config.showsCursor = false
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            write(image, name: name)
+        } catch {
+            // Sheets can't always be captured as independent windows; draw the view tree instead
+            // (no glass or materials, but controls and layout are faithful).
+            log("capture \(name) failed (\(error.localizedDescription)); drawing the view instead")
+            guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            if let image = rep.cgImage {
+                write(image, name: name)
+            }
+        }
+    }
+
+    private func write(_ image: CGImage, name: String) {
+        let url = directory.appending(path: "\(name).png")
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            return log("cannot create \(url.path)")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        if CGImageDestinationFinalize(destination) {
+            log("wrote \(url.path)")
+        }
+    }
+
+    private func log(_ message: String) {
+        print("[snapshot] \(message)")
+    }
+}
+#endif
