@@ -1,0 +1,48 @@
+# Throwaway Phase 0 spike: one SwiftUI window with one libghostty surface
+# running /usr/bin/ssh against the dev container. Generate with `xcodegen generate`.
+name: GhosttySpike
+options:
+  bundleIdPrefix: dev.aeroops.spike
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: YES
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO
+packages:
+  libghostty-spm:
+    url: https://github.com/Lakr233/libghostty-spm
+    exactVersion: 2.2.2026101003
+targets:
+  GhosttySpike:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    dependencies:
+      - package: libghostty-spm
+        product: GhosttyTerminal
+    info:
+      path: build/Info.plist
+      properties:
+        CFBundleDisplayName: GhosttySpike
+        LSMinimumSystemVersion: "26.0"
+        NSPrincipalClass: NSApplication
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.aeroops.spike.ghostty
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  GhosttySpike:
+    build:
+      targets:
+        GhosttySpike: all
