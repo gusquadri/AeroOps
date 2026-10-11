@@ -14,6 +14,8 @@ let package = Package(
         .library(name: "Collectors", targets: ["Collectors"]),
         .library(name: "TerminalKit", targets: ["TerminalKit"]),
         .library(name: "AgentBridge", targets: ["AgentBridge"]),
+        // Shared by the app (through AgentBridge) and the `aeroops-mcp` CLI (project.yml).
+        .library(name: "BridgeProtocol", targets: ["BridgeProtocol"]),
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
     ],
     dependencies: [
@@ -51,8 +53,24 @@ let package = Package(
             exclude: ["run-selftest.sh"]
         ),
 
-        // bridge.sock server for aeroops-mcp, PolicyEngine, ApprovalCenter, AuditLog.
-        .target(name: "AgentBridge", dependencies: ["Collectors", "SSHKit", "AeroCore"]),
+        // The bridge.sock contract between the app and `aeroops-mcp`: JSON-lines messages, line
+        // framing, the static tool catalog, argument validation and the socket path rule.
+        // Linked by the CLI, so it stays small: AeroCore only.
+        .target(name: "BridgeProtocol", dependencies: ["AeroCore"]),
+
+        // bridge.sock server for aeroops-mcp, peer code-signature check, PolicyEngine,
+        // ApprovalCenter, run_command executor, AuditLog. The app supplies the read tools'
+        // data through `BridgeToolHandler`, so this module does not depend on Collectors.
+        .target(name: "AgentBridge", dependencies: ["BridgeProtocol", "SSHKit", "AeroCore"]),
+
+        // Test-only harness: a Bridge with fake hosts on a temporary socket, for driving the real
+        // `aeroops-mcp` end to end (MCP Inspector, `claude -p`). Not a product, never shipped.
+        // Usage: the header comment of Tests/BridgeHarness/main.swift.
+        .executableTarget(
+            name: "BridgeHarness",
+            dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore"],
+            path: "Tests/BridgeHarness"
+        ),
 
         // Frutiger Aero design tokens and glossy components. Must NOT depend on AeroCore.
         .target(name: "AeroTheme"),
@@ -66,7 +84,8 @@ let package = Package(
         .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AeroTestSupport"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
         .testTarget(name: "TerminalKitTests", dependencies: ["TerminalKit", "AeroCore"]),
-        .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "AeroTestSupport"]),
+        .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),
+        .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit", "AeroTestSupport"]),
         .testTarget(name: "AeroThemeTests", dependencies: ["AeroTheme"]),
     ]
 )
