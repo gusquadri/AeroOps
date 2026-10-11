@@ -43,7 +43,12 @@ struct HostContainersView: View {
             content
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Zero minimums decouple the split view's column minimum from this content. Without them,
+        // wrapped text and toolbars feed a content-dependent minimum size back into
+        // NSSplitView, which can loop until AppKit throws "more Update Constraints in Window
+        // passes than there are views in the window".
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
+        .clipped()
         .background { WindowVisibilityReader(isVisible: $windowVisible) }
         .task(id: windowVisible) {
             guard windowVisible else { return }
@@ -202,16 +207,17 @@ struct WorkloadIssueCard: View {
                 StatusOrb(tone: issue.kind == .transient ? .warning : .error, size: compact ? 12 : 16)
                     .padding(.top, compact ? 3 : 4)
                 VStack(alignment: .leading, spacing: 6) {
+                    // No vertical fixedSize here (or in any text outside a scroll view): it makes
+                    // the minimum height of the whole detail column the height of this text
+                    // wrapped at zero width, which the split view cannot satisfy and loops on.
                     Text(issue.title)
                         .font(Aero.font(compact ? .callout : .headline, weight: .semibold))
                         .foregroundStyle(Aero.text.primary)
-                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                     if let hint = issue.hint {
                         Text(hint)
                             .font(Aero.font(compact ? .caption : .callout))
                             .foregroundStyle(Aero.text.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
                     if let applyError {
@@ -291,7 +297,6 @@ private struct NothingFoundCard: View {
                     Text("AeroOps looked for docker, podman, kubectl and k3s on \(host.user)'s PATH. If kubectl lives elsewhere, set a kubectl prefix in the host editor.")
                         .font(Aero.font(.callout))
                         .foregroundStyle(Aero.text.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Button("Edit Host…", systemImage: "slider.horizontal.3") { model.requestEdit(host.id) }
                             .buttonStyle(.aqua)
@@ -324,6 +329,7 @@ struct WorkloadSearchField: View {
                 .textFieldStyle(.plain)
                 .font(Aero.font(.callout))
                 .foregroundStyle(Aero.text.primary)
+                .frame(minWidth: 60, idealWidth: 160)
             if !text.isEmpty {
                 Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
                     .labelStyle(.iconOnly)

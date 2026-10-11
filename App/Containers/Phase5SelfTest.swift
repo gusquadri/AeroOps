@@ -40,6 +40,8 @@ struct Phase5SelfTest {
     }
     static var vmAddress: String { defaults.string(forKey: "AeroSelfTestVM") ?? "aeroops-vm.orb.local" }
     static let k3sPrefix = "sudo -n k3s kubectl"
+    /// Only this self-test names keys like this, so leftovers of a crashed run can be found.
+    static let keyName = "AeroOps phase 5 self-test"
     static let maxLagBudget = 100.0
 
     let model: AppModel
@@ -102,13 +104,14 @@ struct Phase5SelfTest {
         var terminalCommands: [String] = []
         var snapshots: [String] = []
         var authorizedKeysRemaining: String?
+        var staleRunsSwept: [String] = []
     }
 
     private final class Recorder {
         var report = Report()
         func step(_ name: String, _ ok: Bool, _ detail: String) {
             report.steps.append(Step(name: name, ok: ok, detail: detail))
-            print("[phase5] \(ok ? "PASS" : "FAIL") \(name): \(detail)")
+            Phase5SelfTest.log("[phase5] \(ok ? "PASS" : "FAIL") \(name): \(detail)")
         }
     }
 
@@ -123,7 +126,7 @@ struct Phase5SelfTest {
                 try? data.write(to: url, options: .atomic)
             }
         }
-        print("[phase5] \(report.ok ? "OK" : "FAILED")")
+        Self.log("[phase5] \(report.ok ? "OK" : "FAILED")")
         NSApp.terminate(nil)
     }
 
@@ -132,11 +135,12 @@ struct Phase5SelfTest {
         r.report.vm = Self.vmAddress
         let ssh = model.ssh
         await pause(1.0)
+        r.report.staleRunsSwept = await sweepStaleRuns()
 
         // 1. Key in the Keychain, authorized for dev@ and nodocker@ on the VM.
         let key: SSHKeyRecord
         do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps phase 5 self-test", policy: .always)
+            key = try await ssh.generateKey(.ed25519, name: Self.keyName, policy: .always)
         } catch {
             r.step("generate key", false, error.localizedDescription)
             return await finish(r, key: nil)
@@ -395,6 +399,7 @@ struct Phase5SelfTest {
 
         // One click: the crashed instance's logs.
         if let crasher {
+            progress("opening previous logs")
             containers.showPreviousLogs(crasher)
             if let viewer = containers.logs {
                 await waitUntil(seconds: 2) { viewer.status != .idle }
@@ -422,6 +427,7 @@ struct Phase5SelfTest {
             ?? containers.pods.first { $0.phase == .pending }
         r.report.pendingPod = pending?.id
         if let pending {
+            progress("opening inspector for \(pending.id)")
             containers.showDetail(pending)
             containers.inspectorTab = .events
             var reasons: [String] = []
@@ -447,17 +453,22 @@ struct Phase5SelfTest {
             await snapshotMain("pod-describe")
             containers.inspectorTab = .events
             containers.inspectorPresented = false
+            progress("inspector closed")
+            await pause(1.5)
+            progress("inspector settled")
         } else {
             r.step("pending pod events", false, "no Pending pod")
         }
 
         // kubectl follow ends remotely when the sheet closes.
         if let web = containers.pods.first(where: { $0.namespace == "demo" && $0.name.hasPrefix("web-") && $0.phase == .running }) {
+            progress("opening logs for \(web.id)")
             containers.showLogs(web)
             if let viewer = containers.logs {
                 await waitUntil(seconds: 2) { viewer.status != .idle }
                 if viewer.status == .idle { viewer.start() }
                 await waitUntil(seconds: 20) { viewer.status == .following }
+                progress("pod follow status \(viewer.status), \(viewer.lineCount) lines")
                 var remote = 0
                 for _ in 0..<5 where remote == 0 {
                     remote = await remoteProcessCount("[k]ubectl logs -f ", on: dev)
@@ -547,6 +558,42 @@ struct Phase5SelfTest {
         return r.report
     }
 
+    private struct StaleKeyFile: Decodable {
+        struct Key: Decodable {
+            var id: UUID
+            var name: String
+        }
+        var keys: [Key]
+    }
+
+    /// Cleans up after an earlier phase 5 run that died before ``finish(_:key:)``: for every
+    /// other `/tmp/aero-st-*` root holding a key named ``keyName``, removes the key from the
+    /// servers' authorized_keys and from the self-test Keychain service, then deletes the root.
+    private func sweepStaleRuns() async -> [String] {
+        let current = Phase2SelfTest.root.lastPathComponent
+        let tmp = URL(filePath: "/private/tmp", directoryHint: .isDirectory)
+        let entries = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
+        var swept: [String] = []
+        for root in entries where root.lastPathComponent.hasPrefix("aero-st-") && root.lastPathComponent != current {
+            guard let data = try? Data(contentsOf: root.appending(path: "s/keys.json")),
+                  let file = try? JSONDecoder().decode(StaleKeyFile.self, from: data),
+                  file.keys.contains(where: { $0.name == Self.keyName })
+            else { continue }
+            for key in file.keys where key.name == Self.keyName {
+                let pub = root.appending(path: "d/pub/\(key.id.uuidString).pub")
+                if let line = try? String(contentsOf: pub, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+                   line.hasPrefix("ssh-") {
+                    _ = await Self.stripAuthorizedKey(line)
+                }
+                try? KeychainSecretStore(service: Phase2SelfTest.keychainService).delete(for: key.id)
+            }
+            try? FileManager.default.removeItem(at: root)
+            swept.append(root.lastPathComponent)
+            Self.log("[phase5] swept stale run \(root.lastPathComponent)")
+        }
+        return swept
+    }
+
     /// Deletes `line` from the VM's dev and nodocker authorized_keys (and the compose servers',
     /// if running). Returns how many copies are left on the VM ("0" when clean).
     private static func stripAuthorizedKey(_ line: String) async -> String {
@@ -619,6 +666,18 @@ struct Phase5SelfTest {
     }
 
     // MARK: - Helpers
+
+    /// Unbuffered progress on stderr, so a crash still leaves the last step in the log.
+    nonisolated static func log(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
+    }
+
+    private func progress(_ message: String) {
+        let windows = NSApp.windows.filter(\.isVisible).map { window in
+            "\(window.isSheet ? "sheet" : "window") \(Unmanaged.passUnretained(window).toOpaque())"
+        }
+        Self.log("[phase5] … \(message) [\(windows.joined(separator: ", "))]")
+    }
 
     private func pause(_ seconds: Double) async {
         try? await Task.sleep(for: .seconds(seconds))
@@ -709,7 +768,7 @@ enum SelfTestCapture {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
         CGImageDestinationAddImage(destination, image, nil)
         if CGImageDestinationFinalize(destination) {
-            print("[phase5] wrote \(url.path(percentEncoded: false))")
+            Phase5SelfTest.log("[phase5] wrote \(url.path(percentEncoded: false))")
         }
     }
 }

@@ -33,7 +33,9 @@ struct PodsSection: View {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .fixedSize()
+            .help("Namespace")
             WorkloadSearchField(prompt: "Filter pods", text: $containers.podSearch)
             Spacer(minLength: 8)
             if crashLooping > 0 {
@@ -247,7 +249,10 @@ struct PodInspectorView: View {
             }
         }
         .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Zero minimums: the inspector column's minimum must not follow its content (see
+        // HostContainersView).
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
         .background { SkyBackground() }
     }
 
@@ -274,17 +279,19 @@ struct PodInspectorView: View {
                 AeroTag(detail.namespace, systemImage: "folder")
                 if let pod = containers.selectedPod {
                     AeroTag(pod.displayStatus, tone: pod.health.workloadTone)
-                    if pod.restarts > 0 {
-                        Button("Previous Logs", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
-                            containers.showPreviousLogs(pod)
-                        }
-                        .buttonStyle(.aquaSecondary)
-                        .controlSize(.small)
-                    }
                 }
                 if detail.isGone {
                     AeroTag("Gone", tone: .neutral)
                 }
+            }
+            // On its own row so the inspector's minimum width stays within its column minimum.
+            if let pod = containers.selectedPod, pod.restarts > 0 {
+                Button("Previous Logs", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
+                    containers.showPreviousLogs(pod)
+                }
+                .buttonStyle(.aquaSecondary)
+                .controlSize(.small)
+                .help("Logs of the instance before the last restart")
             }
         }
     }
@@ -400,7 +407,6 @@ struct WorkloadIssueInline: View {
                         .foregroundStyle(Aero.text.secondary)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
         }
     }

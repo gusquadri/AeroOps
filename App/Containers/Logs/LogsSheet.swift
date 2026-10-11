@@ -193,7 +193,6 @@ struct LogsSheet: View {
             Text(notice)
                 .font(Aero.font(.caption))
                 .foregroundStyle(Aero.text.primary)
-                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if viewer.previous {
                 Button("Show Current Logs") { viewer.setPrevious(false) }
