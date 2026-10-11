@@ -1,0 +1,112 @@
+# XcodeGen spec for AeroOps. Edit this file, never the generated AeroOps.xcodeproj (git-ignored).
+#   xcodegen generate
+#   xcodebuild -scheme AeroOps -destination 'platform=macOS' build
+#   xcodebuild -scheme AeroOps -destination 'platform=macOS' test   # runs the AeroKit package tests
+name: AeroOps
+
+options:
+  bundleIdPrefix: app.aeroops
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"            # Swift 6 language mode (XcodeGen's preset default is 5.0)
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+    # Apple Development signing (team VUDQQS32NW) so Keychain item ACLs survive rebuilds.
+    # Phase 9 switches Release to Developer ID.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: VUDQQS32NW
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  AeroKit:
+    path: Packages/AeroKit
+
+targets:
+  AeroOps:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    entitlements:
+      path: App/AeroOps.entitlements
+      properties:
+        # No App Sandbox: the app spawns /usr/bin/ssh, owns PTYs and listens on Unix sockets.
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_NAME: AeroOps
+        PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.AeroOps
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: AeroOps
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_PREVIEWS: YES
+    dependencies:
+      - package: AeroKit
+        product: AeroCore
+      - package: AeroKit
+        product: SSHKit
+      - package: AeroKit
+        product: KeyAgent
+      - package: AeroKit
+        product: Collectors
+      - package: AeroKit
+        product: TerminalKit
+      - package: AeroKit
+        product: AgentBridge
+      - package: AeroKit
+        product: AeroTheme
+      # Build the MCP CLI first and copy it to AeroOps.app/Contents/MacOS/aeroops-mcp.
+      - target: aeroops-mcp
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+
+  aeroops-mcp:
+    type: tool
+    platform: macOS
+    sources:
+      - path: MCP
+    # Phase 7 adds the MCP Swift SDK as a package dependency here.
+    settings:
+      base:
+        PRODUCT_NAME: aeroops-mcp
+        PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.mcp
+        # Embed an Info.plist in the Mach-O so the binary carries a stable identifier.
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+schemes:
+  AeroOps:
+    build:
+      targets:
+        AeroOps: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: AeroKit/AeroCoreTests
+        - package: AeroKit/SSHKitTests
+        - package: AeroKit/KeyAgentTests
+        - package: AeroKit/CollectorsTests
+        - package: AeroKit/AgentBridgeTests
+        - package: AeroKit/AeroThemeTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
