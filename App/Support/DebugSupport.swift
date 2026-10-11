@@ -16,14 +16,20 @@ import UniformTypeIdentifiers
 ///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json, keys.json and the ~/.aeroops files
 ///                                                # (in <dir>/dot) live here; keys stay in memory
 ///   -AeroOpsDemoHosts YES \                      # an empty data directory gets the six sample hosts
-///   -AeroOpsDemoStatuses YES \                   # give hosts every HostStatus so all orb tones show
+///   -AeroOpsDemoStatuses YES \                   # every card state: online, stale, host-key issues, offline, unsupported
 ///   -AeroOpsDemoKeys YES \                       # sample keys, and a changed host key on the third host
 ///   -AeroOpsSnapshotDirectory build/snapshots \  # write PNGs of every tab, the editor and Settings, then quit
-///   -AeroOpsSnapshotPrefix many                  # file name prefix for the PNGs (default "main")
+///   -AeroOpsSnapshotPrefix many \                # file name prefix for the PNGs (default "main")
+///   -AeroOpsSnapshotAppearance dark              # snapshot under the dark (or light) system appearance
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase2 -AeroSelfTestOutput /tmp/st.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase2SelfTest
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase3 -AeroSelfTestOutput /tmp/st3.json \
+///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase3SelfTest (revokes with dev/remove-key.sh)
 /// ```
+///
+/// Demo hosts and statuses turn live monitoring off, so the sample states stay on screen.
 enum DebugLaunchOptions {
     private static var defaults: UserDefaults { .standard }
 
@@ -43,14 +49,23 @@ enum DebugLaunchOptions {
 
     static var snapshotPrefix: String { defaults.string(forKey: "AeroOpsSnapshotPrefix") ?? "main" }
 
+    /// `dark` or `light`: the system appearance for a snapshot run (default: the Mac's).
+    static var snapshotAppearance: NSAppearance? {
+        switch defaults.string(forKey: "AeroOpsSnapshotAppearance") {
+        case "dark": NSAppearance(named: .darkAqua)
+        case "light": NSAppearance(named: .aqua)
+        default: nil
+        }
+    }
+
     /// A model for a debug launch, or `nil` for the real one.
     ///
-    /// - `-AeroSelfTest`: a fresh temporary root (see ``Phase2SelfTest``).
+    /// - `-AeroSelfTest`: a fresh temporary root (see ``Phase2SelfTest`` and ``Phase3SelfTest``).
     /// - `-AeroOpsDataDirectory`: everything under that directory, keys in memory, so demo and
     ///   snapshot runs never touch `~/.aeroops`, the real hosts or the Keychain.
     @MainActor
     static func makeModel() -> AppModel? {
-        if Phase2SelfTest.isRequested {
+        if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested {
             return Phase2SelfTest.makeModel()
         }
         guard let dataDirectory else { return nil }
@@ -64,6 +79,9 @@ enum DebugLaunchOptions {
 
     @MainActor
     static func apply(to model: AppModel) {
+        if demoHosts || demoStatuses {
+            model.monitoring.isEnabled = false
+        }
         if demoHosts, dataDirectory != nil, model.hosts.isEmpty {
             for host in SampleData.hosts {
                 try? model.addHost(host)
@@ -71,11 +89,11 @@ enum DebugLaunchOptions {
             model.selection = nil
         }
         if demoStatuses {
-            model.applySampleStatuses()
+            model.applySampleLiveStates()
         }
     }
 
-    /// Runs after ``AppModel/startServices()``: demo keys and the self-test.
+    /// Runs after ``AppModel/startServices()``: demo keys and the self-tests.
     @MainActor
     static func servicesDidStart(_ model: AppModel) async {
         if demoKeys, dataDirectory != nil {
@@ -91,12 +109,16 @@ enum DebugLaunchOptions {
         if Phase2SelfTest.isRequested {
             await Phase2SelfTest(model: model).runAndQuit()
         }
+        if Phase3SelfTest.isRequested {
+            await Phase3SelfTest(model: model).runAndQuit()
+        }
     }
 }
 
 extension View {
-    /// With `-AeroOpsSnapshotDirectory`, captures every main-window tab, the host editor sheet
-    /// and every Settings pane to PNGs, then quits. Otherwise does nothing.
+    /// With `-AeroOpsSnapshotDirectory`, captures the dashboard grid, every main-window tab, the
+    /// host detail panel, the host editor sheet and every Settings pane to PNGs, then quits.
+    /// Otherwise does nothing.
     func debugSnapshotHarness() -> some View {
         modifier(DebugSnapshotHarness())
     }
@@ -125,11 +147,28 @@ private struct DebugSnapshotter {
 
     func run(openSettings: () -> Void) async {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let appearance = DebugLaunchOptions.snapshotAppearance {
+            NSApp.appearance = appearance
+        }
         await pause(1.5)
         guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && !$0.isSheet }) else {
             log("no main window")
             return NSApp.terminate(nil)
         }
+        NSApp.activate()
+        main.makeKeyAndOrderFront(nil)
+        // The whole dashboard grid, before a selection opens the inspector.
+        model.selection = nil
+        model.selectedTab = .dashboard
+        await pause(0.8)
+        await capture(main, name: "\(prefix)-dashboard-grid")
+        // Wide enough for three columns, so every sample card state is on screen at once.
+        let frame = main.frame
+        main.setFrame(NSRect(x: frame.minX, y: frame.maxY - 820, width: 1560, height: 820), display: true)
+        await pause(0.8)
+        await capture(main, name: "\(prefix)-dashboard-wide")
+        main.setFrame(frame, display: true)
+        await pause(0.5)
         if model.selection == nil, model.hosts.count > 1 {
             model.selection = model.hosts[min(2, model.hosts.count - 1)].id
         }
@@ -143,6 +182,13 @@ private struct DebugSnapshotter {
         model.selectedTab = .dashboard
         await pause(0.8)
         await capture(main, name: "\(prefix)-dashboard-again")
+        // The inspector for a live host and for a stale one.
+        for (index, label) in [(0, "online"), (1, "stale")] where model.hosts.count > index {
+            model.selection = model.hosts[index].id
+            await pause(0.8)
+            await capture(main, name: "\(prefix)-dashboard-detail-\(label)")
+        }
+        await captureHostDetails()
 
         model.editorRequest = model.hosts.dropFirst(2).first.map { .edit($0.id) } ?? .new
         await pause(1.2)
@@ -188,6 +234,16 @@ private struct DebugSnapshotter {
         }
         // Settings › Keys tall enough to show the agent section without scrolling.
         await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
+    }
+
+    /// The host detail panel at full height (every mount and swap visible), for the first hosts.
+    private func captureHostDetails() async {
+        for (index, label) in [(0, "online"), (1, "stale"), (4, "offline")] where model.hosts.count > index {
+            let host = model.hosts[index]
+            let view = HostDetailView(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
+                .frame(width: 380, height: 1000)
+            await captureStandalone(view, title: host.name, name: "\(prefix)-detail-\(label)")
+        }
     }
 
     /// Shows `view` in a temporary window, captures it and closes the window.

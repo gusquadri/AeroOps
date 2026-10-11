@@ -49,7 +49,12 @@ public enum MetricsParser {
             load15: sample.load?.fifteen ?? 0,
             hostname: sample.hostname ?? "",
             kernel: sample.kernel ?? "",
-            sampledAt: sampledAt
+            sampledAt: sampledAt,
+            swapTotalBytes: sample.memory?.swapTotalBytes,
+            swapUsedBytes: sample.memory.flatMap { memory in
+                guard let total = memory.swapTotalBytes, let free = memory.swapFreeBytes else { return nil }
+                return max(total - free, 0)
+            }
         )
     }
 

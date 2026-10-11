@@ -65,6 +65,9 @@ final class SSHServices {
     @ObservationIgnored private var sessionObservers: [Task<Void, Never>] = []
     @ObservationIgnored private var hosts: [RemoteHost] = []
     @ObservationIgnored private(set) var isStarted = false
+    /// Called after ``trust(_:for:replacingPinned:)`` or ``recheckHostKey(_:)`` changed what is
+    /// pinned or blocked for a host, so ``MonitorService`` can resume polling it.
+    @ObservationIgnored var hostKeysDidChange: (@MainActor (RemoteHost) -> Void)?
 
     /// - Parameters:
     ///   - defaults: Where the agent toggle is persisted; `nil` keeps it in memory (self-test, previews).
@@ -342,6 +345,7 @@ final class SSHServices {
             try await hostKeys.trust(key, for: host, replacingPinned: replacingPinned && index == 0)
         }
         await refreshHostKeyBlocks()
+        hostKeysDidChange?(host)
     }
 
     /// Scans the server again (three unauthenticated connections) to learn which key it presents
@@ -351,6 +355,7 @@ final class SSHServices {
         let verification = try await hostKeys.verify(host)
         if case .trusted = verification { await hostKeys.unblock(host) }
         await refreshHostKeyBlocks()
+        hostKeysDidChange?(host)
         return verification
     }
 }

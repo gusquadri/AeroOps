@@ -31,6 +31,8 @@ struct MetricsParserTests {
         #expect(sample.memory?.availableIsEstimate == false)
         #expect(sample.memory?.swapTotalBytes == 4_100_588 * kib)
         #expect(sample.memory?.swapFreeBytes == 3_557_896 * kib)
+        #expect(snapshot.swapTotalBytes == 4_100_588 * kib)
+        #expect(snapshot.swapUsedBytes == (4_100_588 - 3_557_896) * kib)
         #expect(snapshot.uptimeSeconds == 727_305.64)
         #expect(snapshot.load1 == 1.80)
         #expect(snapshot.load5 == 2.20)
