@@ -1,4 +1,5 @@
 import AeroCore
+import Collectors
 import Foundation
 
 /// The editable form of a ``RemoteHost`` used by the host editor, with validation.
@@ -57,7 +58,6 @@ struct HostDraft: Hashable, Sendable {
     static let maxAddressLength = 253
     static let maxUserLength = 64
     static let maxTagLength = 32
-    static let maxKubectlPrefixLength = 200
 
     // MARK: - Parsed values
 
@@ -81,10 +81,12 @@ struct HostDraft: Hashable, Sendable {
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
-    /// The host this draft describes, normalised (trimmed text, parsed tags, empty prefix → `nil`).
-    /// Check ``validate(otherHostNames:)`` first; an unparsable port falls back to 22.
+    /// The host this draft describes, normalised (trimmed text, parsed tags, empty prefix → `nil`,
+    /// prefix words joined by single spaces). Check ``validate(otherHostNames:)`` first; an
+    /// unparsable port falls back to 22.
     func makeHost() -> RemoteHost {
-        let prefix = trimmedKubectlPrefix
+        let trimmed = trimmedKubectlPrefix
+        let prefix = trimmed.isEmpty ? "" : (try? KubectlPrefix.normalized(trimmed)) ?? trimmed
         return RemoteHost(
             id: id,
             name: trimmedName,
@@ -205,11 +207,19 @@ struct HostDraft: Hashable, Sendable {
         return nil
     }
 
+    /// The collectors' rule (``KubectlPrefix``): plain words such as `sudo -n k3s kubectl`, with
+    /// no quotes, `$`, `;`, pipes or redirections, because the prefix is inserted unquoted at the
+    /// head of every kubectl command line.
     static func kubectlPrefixIssue(_ prefix: String) -> String? {
         if prefix.isEmpty { return nil }
-        if hasControlCharacters(prefix) { return "The prefix can't contain line breaks or control characters." }
-        if prefix.hasPrefix("-") { return "Start with a command, e.g. “sudo -n k3s kubectl”." }
-        if prefix.count > maxKubectlPrefixLength { return "Use \(maxKubectlPrefixLength) characters or fewer." }
-        return nil
+        do {
+            _ = try KubectlPrefix.normalized(prefix)
+            return nil
+        } catch {
+            if case .invalidKubectlPrefix(_, let reason) = error {
+                return "Not usable: \(reason) Use plain words, e.g. “sudo -n k3s kubectl”."
+            }
+            return error.localizedDescription
+        }
     }
 }

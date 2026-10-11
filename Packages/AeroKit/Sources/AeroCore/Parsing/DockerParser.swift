@@ -215,12 +215,12 @@ public enum DockerError: Error, Sendable, Hashable, LocalizedError {
         switch self {
         case .permissionDenied:
             "Add this user to the docker group (sudo usermod -aG docker <user>, then log in again), "
-                + "or turn on \"Use sudo -n for Docker\" for this host."
+                + "or turn on \"Run docker with sudo -n\" for this host in the host editor."
         case .daemonNotRunning:
             "Start the Docker service on the host (for example: sudo systemctl start docker)."
         case .sudoRefused:
             "sudo -n needs a passwordless sudoers rule (NOPASSWD) for docker. Add one, "
-                + "or turn off \"Use sudo -n for Docker\" and add the user to the docker group instead."
+                + "or turn off \"Run docker with sudo -n\" and add the user to the docker group instead."
         case .notInstalled:
             "Docker is not installed on this host, or not on the login user's PATH."
         case .failed:
