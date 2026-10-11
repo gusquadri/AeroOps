@@ -102,6 +102,7 @@ schemes:
         - package: AeroKit/SSHKitTests
         - package: AeroKit/KeyAgentTests
         - package: AeroKit/CollectorsTests
+        - package: AeroKit/TerminalKitTests
         - package: AeroKit/AgentBridgeTests
         - package: AeroKit/AeroThemeTests
     profile:
