@@ -4,6 +4,7 @@ import Collectors
 import Foundation
 import Observation
 import SSHKit
+import SwiftUI
 import Synchronization
 
 /// Live metrics for every host (Phase 3): drives Collectors' ``MonitorCoordinator`` from the
@@ -189,12 +190,18 @@ final class MonitorService {
         let updates = Array(pending.values)
         pending = [:]
         var blocksChanged = false
-        for update in updates {
-            guard let state = displayState(update.hostID) else { continue }
-            if Self.isChanged(update.hostKeyIssue) != Self.isChanged(state.hostKeyIssue) {
-                blocksChanged = true
+        // Off screen (minimised, hidden or covered) the cards still re-render; skip the gauge
+        // animations there, which would otherwise run at the display rate for no one.
+        var transaction = Transaction()
+        transaction.disablesAnimations = !Self.mainWindowIsVisible()
+        withTransaction(transaction) {
+            for update in updates {
+                guard let state = displayState(update.hostID) else { continue }
+                if Self.isChanged(update.hostKeyIssue) != Self.isChanged(state.hostKeyIssue) {
+                    blocksChanged = true
+                }
+                state.apply(update)
             }
-            state.apply(update)
         }
         if blocksChanged {
             // The store blocked the host (or lifted the block); mirror it for the banner.
