@@ -115,6 +115,9 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
+        # No entitlements: otherwise Xcode adds com.apple.application-identifier, a restricted
+        # entitlement a bare tool cannot back with a provisioning profile under Developer ID.
+        ENTITLEMENTS_REQUIRED: NO
 
 schemes:
   AeroOps:
