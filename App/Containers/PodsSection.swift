@@ -78,18 +78,25 @@ struct PodsSection: View {
     }
 }
 
-/// The pods table's columns. Fixed widths fit the content and the header: "10/10", the
-/// "Restarts" header and a four-digit crash-loop badge, "120d", the CrashLoopBackOff,
-/// ImagePullBackOff and ContainerCreating chips (longer reasons such as
+/// The pods table's columns. Fixed widths fit the content and the header: "10/10" and the
+/// "Ready" header, the "Restarts" header and a four-digit crash-loop badge, "120d", the
+/// CrashLoopBackOff, ImagePullBackOff and ContainerCreating chips (longer reasons such as
 /// CreateContainerConfigError get the wide Status column), and two or three row buttons.
-private enum PodColumn: Hashable {
-    case namespace, name, ready, status, restarts, age, node, actions
+private enum PodColumn: String, CaseIterable {
+    case namespace, name, ready, status, statusWide, restarts, age, node, actions, actionsCompact
 
     static let nameMinimum: CGFloat = 90
     /// A typical generated pod name (`coredns-5688667fd4-sdcln`) with its orb.
     static let nameComfort: CGFloat = 170
-    static let namespaceWidths = (min: CGFloat(70), ideal: CGFloat(100), max: CGFloat(200))
-    static let nodeWidths = (min: CGFloat(70), ideal: CGFloat(110), max: CGFloat(240))
+    static let namespaceWidths = (min: CGFloat(70), ideal: CGFloat(100))
+    static let nodeWidths = (min: CGFloat(70), ideal: CGFloat(110))
+    static let readyWidth: CGFloat = 46
+    static let statusWidth: CGFloat = 126
+    static let statusWideWidth: CGFloat = 172
+    static let restartsWidth: CGFloat = 56
+    static let ageWidth: CGFloat = 34
+    static let actionsWidth: CGFloat = 66
+    static let actionsCompactWidth: CGFloat = 40
     /// Statuses up to this length fit the regular Status column.
     static let regularStatusLength = "ContainerCreating".count
 
@@ -103,12 +110,13 @@ private enum PodColumn: Hashable {
             columns: [
                 .init(.namespace, min: namespaceWidths.min, ideal: namespaceWidths.ideal),
                 .init(.name, width: nameMinimum),
-                .init(.ready, width: 38),
-                .init(.status, width: wideStatus ? 172 : 126),
-                .init(.restarts, width: 56),
-                .init(.age, width: 34),
+                .init(.ready, width: readyWidth),
+                wideStatus ? .init(.statusWide, width: statusWideWidth) : .init(.status, width: statusWidth),
+                .init(.restarts, width: restartsWidth),
+                .init(.age, width: ageWidth),
                 .init(.node, min: nodeWidths.min, ideal: nodeWidths.ideal),
-                .init(.actions, width: detailButton ? 66 : 40),
+                detailButton
+                    ? .init(.actions, width: actionsWidth) : .init(.actionsCompact, width: actionsCompactWidth),
             ],
             name: .name,
             nameComfort: nameComfort,
@@ -121,51 +129,57 @@ private enum PodColumn: Hashable {
 
 /// The pods table: namespace, name, ready, status, restarts, age, node and actions. Name takes
 /// the spare width; when the table is too narrow for a typical pod name (the inspector is open,
-/// or the window is small), optional columns give way (``PodColumn/layout(width:namespacePicked:wideStatus:detailButton:)``)
-/// rather than the table scrolling sideways.
+/// or the window is small), optional columns give way
+/// (``PodColumn/layout(width:namespacePicked:wideStatus:detailButton:)``) rather than the
+/// table scrolling sideways.
 private struct PodTable: View {
     @Bindable var containers: HostContainersModel
     @State private var width: CGFloat = 0
+    @State private var columns = TableColumnCustomization<PodInfo>()
 
     var body: some View {
         let rows = containers.filteredPods
+        let layout = layout(width: width)
+        AeroCard(padding: 0) {
+            // The table is created once its width is known, so it starts out filled.
+            if width > 0 {
+                table(rows, layout: layout)
+            } else {
+                Color.clear
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
+            width = newWidth
+            self.layout(width: newWidth).apply(to: &columns)
+        }
+        .onChange(of: layout.shown) {
+            self.layout(width: width).apply(to: &columns)
+        }
+    }
+
+    private func layout(width: CGFloat) -> WorkloadTableLayout<PodColumn> {
         let longest = containers.pods.lazy.map(\.displayStatus.count).max() ?? 0
-        // With the inspector open, clicking a row shows its details, so the row button goes.
-        let detailButton = !containers.inspectorPresented
-        let layout = PodColumn.layout(
+        return PodColumn.layout(
             width: width,
             namespacePicked: containers.namespace != nil,
             wideStatus: longest > PodColumn.regularStatusLength,
-            detailButton: detailButton
+            // With the inspector open, clicking a row shows its details, so the row button goes.
+            detailButton: !containers.inspectorPresented
         )
-        AeroCard(padding: 0) {
-            ScrollViewReader { proxy in
-                table(rows, layout: layout, detailButton: detailButton)
-                    // A new table starts at the top; bring the selected pod back into view.
-                    .id(layout.identity)
-                    .task(id: layout.identity) {
-                        await Task.yield()
-                        if let id = containers.selectedPodID, rows.contains(where: { $0.id == id }) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
-            }
-        }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
-    private func table(_ rows: [PodInfo], layout: WorkloadTableLayout<PodColumn>, detailButton: Bool) -> some View {
-        Table(rows, selection: $containers.selectedPodID) {
-            if layout.shows(.namespace) {
-                TableColumn("Namespace") { pod in
-                    Text(pod.namespace)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(Aero.text.secondary)
-                        .help(pod.namespace)
-                }
-                .width(min: PodColumn.namespaceWidths.min, ideal: layout.width(.namespace), max: PodColumn.namespaceWidths.max)
+    private func table(_ rows: [PodInfo], layout: WorkloadTableLayout<PodColumn>) -> some View {
+        Table(rows, selection: $containers.selectedPodID, columnCustomization: $columns) {
+            TableColumn("Namespace") { pod in
+                Text(pod.namespace)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(Aero.text.secondary)
+                    .help(pod.namespace)
             }
+            // At most its ideal width: spare width goes to Name.
+            .width(min: PodColumn.namespaceWidths.min, ideal: layout.width(.namespace), max: PodColumn.namespaceWidths.ideal)
+            .layoutColumn(PodColumn.namespace)
             TableColumn("Name") { pod in
                 HStack(spacing: 8) {
                     StatusOrb(tone: pod.health.workloadTone, size: 10)
@@ -177,63 +191,55 @@ private struct PodTable: View {
                 .help(pod.id)
             }
             .width(min: PodColumn.nameMinimum, ideal: layout.width(.name))
-            if layout.shows(.ready) {
-                TableColumn("Ready") { pod in
-                    Text("\(pod.readyCount)/\(pod.containerCount)")
-                        .monospacedDigit()
-                }
-                .width(layout.width(.ready))
+            .layoutColumn(PodColumn.name)
+            TableColumn("Ready") { pod in
+                Text("\(pod.readyCount)/\(pod.containerCount)")
+                    .monospacedDigit()
             }
+            .width(PodColumn.readyWidth)
+            .layoutColumn(PodColumn.ready)
             TableColumn("Status") { pod in
-                AeroTag(pod.displayStatus, tone: pod.health.workloadTone)
-                    .help(statusHelp(pod))
+                status(pod)
             }
-            .width(layout.width(.status))
-            if layout.shows(.restarts) {
-                TableColumn("Restarts") { pod in
-                    restarts(pod)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .width(layout.width(.restarts))
+            .width(PodColumn.statusWidth)
+            .layoutColumn(PodColumn.status)
+            TableColumn("Status") { pod in
+                status(pod)
             }
-            if layout.shows(.age) {
-                TableColumn("Age") { pod in
-                    Text(pod.age() ?? MetricText.missing)
-                        .monospacedDigit()
-                        .foregroundStyle(Aero.text.secondary)
-                }
-                .width(layout.width(.age))
+            .width(PodColumn.statusWideWidth)
+            .layoutColumn(PodColumn.statusWide)
+            TableColumn("Restarts") { pod in
+                restarts(pod)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            if layout.shows(.node) {
-                TableColumn("Node") { pod in
-                    Text(pod.nodeName ?? MetricText.missing)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(Aero.text.secondary)
-                        .help(pod.nodeName ?? "")
-                }
-                .width(min: PodColumn.nodeWidths.min, ideal: layout.width(.node), max: PodColumn.nodeWidths.max)
+            .width(PodColumn.restartsWidth)
+            .layoutColumn(PodColumn.restarts)
+            TableColumn("Age") { pod in
+                Text(pod.age() ?? MetricText.missing)
+                    .monospacedDigit()
+                    .foregroundStyle(Aero.text.secondary)
             }
+            .width(PodColumn.ageWidth)
+            .layoutColumn(PodColumn.age)
+            TableColumn("Node") { pod in
+                Text(pod.nodeName ?? MetricText.missing)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(Aero.text.secondary)
+                    .help(pod.nodeName ?? "")
+            }
+            .width(min: PodColumn.nodeWidths.min, ideal: layout.width(.node), max: PodColumn.nodeWidths.ideal)
+            .layoutColumn(PodColumn.node)
             TableColumn("") { pod in
-                HStack(spacing: 10) {
-                    RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
-                        containers.showLogs(pod)
-                    }
-                    RowActionButton(
-                        title: "Previous logs (the crashed instance)",
-                        systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                        disabled: pod.restarts == 0
-                    ) {
-                        containers.showPreviousLogs(pod)
-                    }
-                    if detailButton {
-                        RowActionButton(title: "Events and describe", systemImage: "sidebar.trailing") {
-                            containers.showDetail(pod)
-                        }
-                    }
-                }
+                rowActions(pod, detailButton: true)
             }
-            .width(layout.width(.actions))
+            .width(PodColumn.actionsWidth)
+            .layoutColumn(PodColumn.actions)
+            TableColumn("") { pod in
+                rowActions(pod, detailButton: false)
+            }
+            .width(PodColumn.actionsCompactWidth)
+            .layoutColumn(PodColumn.actionsCompact)
         }
         .contextMenu(forSelectionType: PodInfo.ID.self) { ids in
             if let pod = pod(ids) {
@@ -272,6 +278,31 @@ private struct PodTable: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Aero.radius.card, style: .continuous))
+    }
+
+    private func status(_ pod: PodInfo) -> some View {
+        AeroTag(pod.displayStatus, tone: pod.health.workloadTone)
+            .help(statusHelp(pod))
+    }
+
+    private func rowActions(_ pod: PodInfo, detailButton: Bool) -> some View {
+        HStack(spacing: 10) {
+            RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
+                containers.showLogs(pod)
+            }
+            RowActionButton(
+                title: "Previous logs (the crashed instance)",
+                systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                disabled: pod.restarts == 0
+            ) {
+                containers.showPreviousLogs(pod)
+            }
+            if detailButton {
+                RowActionButton(title: "Events and describe", systemImage: "sidebar.trailing") {
+                    containers.showDetail(pod)
+                }
+            }
+        }
     }
 
     /// Restart count; red with the count for crash-looping pods.

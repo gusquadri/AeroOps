@@ -50,15 +50,19 @@ struct DockerSection: View {
 
 /// The containers table's columns. Fixed widths fit the content and the header: the
 /// Restarting chip, "100.0%", "123.4 MB" and three row buttons.
-private enum ContainerColumn: Hashable {
+private enum ContainerColumn: String, CaseIterable {
     case name, image, state, status, cpu, memory, ports, actions
 
     static let nameMinimum: CGFloat = 90
-    /// A typical Compose container name (`aeroops-web-1`) with its orb, with room to spare.
-    static let nameComfort: CGFloat = 130
+    /// A typical Compose container name (`aeroops-web-1`) with its orb.
+    static let nameComfort: CGFloat = 110
     static let imageWidths = (min: CGFloat(80), ideal: CGFloat(140), max: CGFloat(320))
-    static let statusWidths = (min: CGFloat(90), ideal: CGFloat(130), max: CGFloat(240))
+    static let statusWidths = (min: CGFloat(90), ideal: CGFloat(150), max: CGFloat(240))
     static let portsWidths = (min: CGFloat(70), ideal: CGFloat(110), max: CGFloat(280))
+    static let stateWidth: CGFloat = 84
+    static let cpuWidth: CGFloat = 50
+    static let memoryWidth: CGFloat = 62
+    static let actionsWidth: CGFloat = 66
 
     /// Ports give way first, then image, status, memory and CPU.
     static func layout(width: CGFloat) -> WorkloadTableLayout<ContainerColumn> {
@@ -67,12 +71,12 @@ private enum ContainerColumn: Hashable {
             columns: [
                 .init(.name, width: nameMinimum),
                 .init(.image, min: imageWidths.min, ideal: imageWidths.ideal),
-                .init(.state, width: 84),
+                .init(.state, width: stateWidth),
                 .init(.status, min: statusWidths.min, ideal: statusWidths.ideal),
-                .init(.cpu, width: 50),
-                .init(.memory, width: 62),
+                .init(.cpu, width: cpuWidth),
+                .init(.memory, width: memoryWidth),
                 .init(.ports, min: portsWidths.min, ideal: portsWidths.ideal),
-                .init(.actions, width: 66),
+                .init(.actions, width: actionsWidth),
             ],
             name: .name,
             nameComfort: nameComfort,
@@ -88,28 +92,27 @@ private struct DockerTable: View {
     let host: RemoteHost
     @Bindable var containers: HostContainersModel
     @State private var width: CGFloat = 0
+    @State private var columns = TableColumnCustomization<ContainerInfo>()
 
     var body: some View {
         let rows = containers.filteredContainers
         let layout = ContainerColumn.layout(width: width)
         AeroCard(padding: 0) {
-            ScrollViewReader { proxy in
+            // The table is created once its width is known, so it starts out filled.
+            if width > 0 {
                 table(rows, layout: layout)
-                    // A new table starts at the top; bring the selected container back into view.
-                    .id(layout.identity)
-                    .task(id: layout.identity) {
-                        await Task.yield()
-                        if let id = containers.selectedContainerID, rows.contains(where: { $0.id == id }) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
+            } else {
+                Color.clear
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
+            width = newWidth
+            ContainerColumn.layout(width: newWidth).apply(to: &columns)
+        }
     }
 
     private func table(_ rows: [ContainerInfo], layout: WorkloadTableLayout<ContainerColumn>) -> some View {
-        Table(rows, selection: $containers.selectedContainerID) {
+        Table(rows, selection: $containers.selectedContainerID, columnCustomization: $columns) {
             TableColumn("Name") { container in
                 HStack(spacing: 8) {
                     StatusOrb(tone: container.health.workloadTone, size: 10)
@@ -121,64 +124,61 @@ private struct DockerTable: View {
                 .help(container.id)
             }
             .width(min: ContainerColumn.nameMinimum, ideal: layout.width(.name))
-            if layout.shows(.image) {
-                TableColumn("Image") { container in
-                    Text(container.image)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(container.image)
-                }
-                .width(
-                    min: ContainerColumn.imageWidths.min, ideal: layout.width(.image),
-                    max: ContainerColumn.imageWidths.max
-                )
+            .layoutColumn(ContainerColumn.name)
+            TableColumn("Image") { container in
+                Text(container.image)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(container.image)
             }
+            .width(
+                min: ContainerColumn.imageWidths.min, ideal: layout.width(.image),
+                max: ContainerColumn.imageWidths.max
+            )
+            .layoutColumn(ContainerColumn.image)
             TableColumn("State") { container in
                 AeroTag(container.state.rawValue.capitalized, tone: container.health.workloadTone)
             }
-            .width(layout.width(.state))
-            if layout.shows(.status) {
-                TableColumn("Status") { container in
-                    Text(container.status)
-                        .lineLimit(1)
-                        .foregroundStyle(Aero.text.secondary)
-                        .help(container.status)
-                }
-                .width(
-                    min: ContainerColumn.statusWidths.min, ideal: layout.width(.status),
-                    max: ContainerColumn.statusWidths.max
-                )
+            .width(ContainerColumn.stateWidth)
+            .layoutColumn(ContainerColumn.state)
+            TableColumn("Status") { container in
+                Text(container.status)
+                    .lineLimit(1)
+                    .foregroundStyle(Aero.text.secondary)
+                    .help(container.status)
             }
-            if layout.shows(.cpu) {
-                TableColumn("CPU") { container in
-                    Text(container.cpuText)
-                        .monospacedDigit()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .width(layout.width(.cpu))
+            .width(
+                min: ContainerColumn.statusWidths.min, ideal: layout.width(.status),
+                max: ContainerColumn.statusWidths.max
+            )
+            .layoutColumn(ContainerColumn.status)
+            TableColumn("CPU") { container in
+                Text(container.cpuText)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            if layout.shows(.memory) {
-                TableColumn("Memory") { container in
-                    Text(container.memoryText)
-                        .monospacedDigit()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .help(container.memoryHelp ?? "")
-                }
-                .width(layout.width(.memory))
+            .width(ContainerColumn.cpuWidth)
+            .layoutColumn(ContainerColumn.cpu)
+            TableColumn("Memory") { container in
+                Text(container.memoryText)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .help(container.memoryHelp ?? "")
             }
-            if layout.shows(.ports) {
-                TableColumn("Ports") { container in
-                    Text(container.portsText)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(Aero.text.secondary)
-                        .help(container.ports ?? "")
-                }
-                .width(
-                    min: ContainerColumn.portsWidths.min, ideal: layout.width(.ports),
-                    max: ContainerColumn.portsWidths.max
-                )
+            .width(ContainerColumn.memoryWidth)
+            .layoutColumn(ContainerColumn.memory)
+            TableColumn("Ports") { container in
+                Text(container.portsText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(Aero.text.secondary)
+                    .help(container.ports ?? "")
             }
+            .width(
+                min: ContainerColumn.portsWidths.min, ideal: layout.width(.ports),
+                max: ContainerColumn.portsWidths.max
+            )
+            .layoutColumn(ContainerColumn.ports)
             TableColumn("") { container in
                 HStack(spacing: 10) {
                     RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
@@ -195,7 +195,8 @@ private struct DockerTable: View {
                     }
                 }
             }
-            .width(layout.width(.actions))
+            .width(ContainerColumn.actionsWidth)
+            .layoutColumn(ContainerColumn.actions)
         }
         .contextMenu(forSelectionType: ContainerInfo.ID.self) { ids in
             if let container = container(ids) {
