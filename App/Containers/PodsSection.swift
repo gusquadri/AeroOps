@@ -49,14 +49,25 @@ struct PodsSection: View {
                 .foregroundStyle(Aero.text.secondary)
                 .monospacedDigit()
                 .fixedSize()
+            // With the inspector open the button only closes it, so it gives its title's width
+            // to the column.
             Button {
                 containers.inspectorPresented.toggle()
             } label: {
-                Label("Details", systemImage: "sidebar.trailing")
+                if containers.inspectorPresented {
+                    Label("Hide details", systemImage: "sidebar.trailing")
+                        .labelStyle(.iconOnly)
+                } else {
+                    Label("Details", systemImage: "sidebar.trailing")
+                }
             }
             .buttonStyle(.aquaSecondary)
             .fixedSize()
-            .help("Show the selected pod's events and describe output")
+            .help(
+                containers.inspectorPresented
+                    ? "Hide the pod's events and describe output"
+                    : "Show the selected pod's events and describe output"
+            )
         }
     }
 

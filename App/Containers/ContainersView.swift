@@ -33,9 +33,19 @@ struct ContainersView: View {
 /// One host's containers and pods.
 struct HostContainersView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.sidebarVisibility) private var sidebarVisibility
     let host: RemoteHost
     @Bindable var containers: HostContainersModel
     @State private var windowVisible = true
+    @State private var width: CGFloat = 0
+    /// Whether opening the inspector hid the sidebar, so closing it shows the sidebar again.
+    @State private var hidSidebar = false
+
+    /// The inspector's ideal width.
+    static let inspectorWidth: CGFloat = 340
+    /// The width the header, the pods toolbar and a pods table with names, status and row
+    /// buttons need beside the inspector.
+    static let widthBesideInspector: CGFloat = 600
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -46,9 +56,29 @@ struct HostContainersView: View {
         // Zero minimums decouple the split view's column minimum from this content. Without them,
         // wrapped text and toolbars feed a content-dependent minimum size back into
         // NSSplitView, which can loop until AppKit throws "more Update Constraints in Window
-        // passes than there are views in the window".
+        // passes than there are views in the window". (A constant minimum while the inspector
+        // is open throws too, which is why a narrow window hides the sidebar instead.)
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .clipped()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
+            let appeared = width == 0
+            width = newWidth
+            if appeared, containers.inspectorPresented {
+                // Back on the tab with the inspector still open.
+                hideSidebar(ifNarrowerThan: Self.widthBesideInspector)
+            } else if hidSidebar, !containers.inspectorPresented {
+                // The inspector has closed and handed its width back.
+                showSidebarAgain()
+            }
+        }
+        .onChange(of: containers.inspectorPresented) { _, presented in
+            if presented { hideSidebar(ifNarrowerThan: Self.inspectorWidth + Self.widthBesideInspector) }
+        }
+        .onChange(of: sidebarVisibility.wrappedValue) { _, visibility in
+            // Shown by hand: it stays.
+            if visibility != .detailOnly { hidSidebar = false }
+        }
+        .onDisappear(perform: showSidebarAgain)
         .background { WindowVisibilityReader(isVisible: $windowVisible) }
         .task(id: windowVisible) {
             guard windowVisible else { return }
@@ -62,8 +92,26 @@ struct HostContainersView: View {
         }
         .inspector(isPresented: $containers.inspectorPresented) {
             PodInspectorView(containers: containers)
-                .inspectorColumnWidth(min: 300, ideal: 340, max: 560)
+                .inspectorColumnWidth(min: 300, ideal: Self.inspectorWidth, max: 560)
         }
+    }
+
+    /// Opening the inspector in a window too narrow for it and the content hides the sidebar,
+    /// until the inspector closes or the tab changes.
+    private func hideSidebar(ifNarrowerThan needed: CGFloat) {
+        guard width > 0, width < needed, sidebarVisibility.wrappedValue != .detailOnly else { return }
+        hidSidebar = true
+        sidebarVisibility.wrappedValue = .detailOnly
+    }
+
+    /// Shows the sidebar again once the inspector has closed. Through the sidebar toggle
+    /// action, like the toolbar button: setting the split view's visibility to `.all` grows the
+    /// window by the sidebar's width instead.
+    private func showSidebarAgain() {
+        guard hidSidebar else { return }
+        hidSidebar = false
+        guard sidebarVisibility.wrappedValue == .detailOnly else { return }
+        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
     }
 
     @ViewBuilder private var content: some View {
