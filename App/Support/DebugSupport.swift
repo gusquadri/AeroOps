@@ -21,7 +21,11 @@ import UniformTypeIdentifiers
 ///   -AeroOpsDemoKeys YES \                       # sample keys, and a changed host key on the third host
 ///   -AeroOpsSnapshotDirectory build/snapshots \  # write PNGs of every tab, the editor and Settings, then quit
 ///   -AeroOpsSnapshotPrefix many \                # file name prefix for the PNGs (default "main")
-///   -AeroOpsSnapshotAppearance dark              # snapshot under the dark (or light) system appearance
+///   -AeroOpsSnapshotAppearance dark \            # snapshot under the dark (or light) system appearance
+///   -AeroOpsSnapshotScope onboarding \           # only the onboarding steps (default: everything)
+///   -AeroOpsOnboarding YES                       # show the first-run onboarding sheet even if it was
+///                                                # completed (it never shows by itself in self-test
+///                                                # and snapshot runs)
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase2 -AeroSelfTestOutput /tmp/st.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase2SelfTest
@@ -57,6 +61,12 @@ enum DebugLaunchOptions {
 
     static var snapshotPrefix: String { defaults.string(forKey: "AeroOpsSnapshotPrefix") ?? "main" }
 
+    /// `onboarding`: a snapshot run captures only the onboarding steps.
+    static var snapshotsOnlyOnboarding: Bool { defaults.string(forKey: "AeroOpsSnapshotScope") == "onboarding" }
+
+    /// Shows the onboarding sheet at launch whatever its flag says.
+    static var forcesOnboarding: Bool { defaults.bool(forKey: "AeroOpsOnboarding") }
+
     /// `dark` or `light`: the system appearance for a snapshot run (default: the Mac's).
     static var snapshotAppearance: NSAppearance? {
         switch defaults.string(forKey: "AeroOpsSnapshotAppearance") {
@@ -77,6 +87,7 @@ enum DebugLaunchOptions {
             || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested {
             let model = Phase2SelfTest.makeModel()
             model.agents.useTransientSettings()
+            model.onboarding.suppressesAutomaticPresentation = true
             if Phase7SelfTest.isRequested { Phase7SelfTest.configure(model) }
             return model
         }
@@ -93,6 +104,12 @@ enum DebugLaunchOptions {
 
     @MainActor
     static func apply(to model: AppModel) {
+        if snapshotDirectory != nil {
+            model.onboarding.suppressesAutomaticPresentation = true
+        }
+        if forcesOnboarding {
+            model.onboarding.present()
+        }
         if demoHosts || demoStatuses {
             model.monitoring.isEnabled = false
             model.agents.isEnabled = false

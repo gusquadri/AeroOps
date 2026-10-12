@@ -28,6 +28,10 @@ struct RootView: View {
         .sheet(item: $model.editorRequest) { request in
             HostEditorSheet(request: request)
         }
+        // Closing the sheet any other way than its own buttons still counts as skipped.
+        .sheet(isPresented: $model.onboarding.isPresented, onDismiss: { model.onboarding.complete() }) {
+            OnboardingView(onImport: nil)
+        }
     }
 }
 

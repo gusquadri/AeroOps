@@ -44,6 +44,9 @@ final class AppModel {
     var settingsPane: SettingsPane = .hosts
     /// The main window's host editor sheet; `nil` when closed.
     var editorRequest: HostEditorRequest?
+    /// The first-run onboarding sheet. In memory unless replaced: the real app's model stores
+    /// its flag in `UserDefaults.standard` (`AeroOpsApp.makeModel()`).
+    var onboarding = OnboardingState()
 
     // MARK: Services
 

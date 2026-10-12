@@ -24,6 +24,7 @@ struct AeroOpsApp: App {
         _model = State(initialValue: model)
         AppDelegate.launchHandler = {
             await model.startServices()
+            model.presentOnboardingIfNeeded()
             #if DEBUG
             await DebugLaunchOptions.servicesDidStart(model)
             #endif
@@ -37,7 +38,9 @@ struct AeroOpsApp: App {
     static func makeModel() -> AppModel {
         let paths = AeroPaths.standard
         let ssh = SSHServices(paths: paths, secretStore: KeychainSecretStore(), defaults: .standard)
-        return AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
+        let model = AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
+        model.onboarding = OnboardingState(defaults: .standard)
+        return model
     }
 
     var body: some Scene {
