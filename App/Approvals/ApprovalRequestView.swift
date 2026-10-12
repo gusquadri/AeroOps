@@ -149,7 +149,7 @@ struct ApprovalRequestView: View {
                     .font(Aero.font(.callout, weight: .medium))
                     .foregroundStyle(Aero.text.primary)
             }
-            Text("Commands like this are asked about every time, even while the host is allowed for 15 minutes.")
+            Text("Commands like this are asked about every time, even while the host is allowed, so “Allow host for 15 minutes” is not offered.")
                 .font(Aero.font(.caption))
                 .foregroundStyle(Aero.text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -210,9 +210,7 @@ struct ApprovalCountdown: View {
             let left = min(max(expiresAt.timeIntervalSince(now), 0), total)
             let urgent = left < Self.warning
             HStack(spacing: 10) {
-                ProgressView(value: left, total: total)
-                    .progressViewStyle(.linear)
-                    .tint(urgent ? Aero.coral : Aero.aqua)
+                CountdownBar(fraction: left / total, tint: urgent ? Aero.coral : Aero.aqua)
                 Text("Denied automatically in \(Int(left.rounded(.up))) s")
                     .font(Aero.font(.caption, weight: urgent ? .semibold : .regular))
                     .monospacedDigit()
@@ -222,6 +220,28 @@ struct ApprovalCountdown: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Denied automatically in \(Int(left.rounded(.up))) seconds")
         }
+    }
+}
+
+/// A capsule that empties as time runs out. Drawn by hand so it keeps its colour in a panel
+/// that is not key (a system progress bar turns grey there).
+private struct CountdownBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        Capsule()
+            .fill(Aero.glass.solidFill)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: max(proxy.size.width * min(max(fraction, 0), 1), 6))
+                }
+            }
+            .overlay { Capsule().strokeBorder(tint.opacity(0.45), lineWidth: 1) }
+            .frame(height: 8)
+            .accessibilityHidden(true)
     }
 }
 

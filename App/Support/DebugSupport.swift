@@ -72,6 +72,7 @@ enum DebugLaunchOptions {
         if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase7SelfTest.isRequested {
             let model = Phase2SelfTest.makeModel()
             model.agents.useTransientSettings()
+            if Phase7SelfTest.isRequested { Phase7SelfTest.configure(model) }
             return model
         }
         guard let dataDirectory else { return nil }
