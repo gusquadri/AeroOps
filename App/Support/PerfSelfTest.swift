@@ -688,32 +688,26 @@ struct PerfSelfTest {
     }
 
     /// The first IPv4 and the first IPv6 address of `name` (no link-local or scoped ones).
-    nonisolated static func resolve(_ name: String) async -> [String] {
-        await Task.detached {
-            var hints = addrinfo()
-            hints.ai_family = AF_UNSPEC
-            hints.ai_socktype = SOCK_STREAM
-            var list: UnsafeMutablePointer<addrinfo>?
-            guard getaddrinfo(name, nil, &hints, &list) == 0, let first = list else { return [] }
-            defer { freeaddrinfo(first) }
-            var v4: String?
-            var v6: String?
-            var cursor: UnsafeMutablePointer<addrinfo>? = first
-            while let entry = cursor {
-                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                let status = getnameinfo(entry.pointee.ai_addr, entry.pointee.ai_addrlen, &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST)
-                if status == 0 {
-                    let text = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
-                    if entry.pointee.ai_family == AF_INET, v4 == nil {
-                        v4 = text
-                    } else if entry.pointee.ai_family == AF_INET6, v6 == nil, !text.contains("%"), !text.lowercased().hasPrefix("fe80") {
-                        v6 = text
-                    }
-                }
-                cursor = entry.pointee.ai_next
+    ///
+    /// Asks `dscacheutil`: the app itself may not resolve `.local` names (Local Network privacy),
+    /// while the system's ssh does.
+    static func resolve(_ name: String) async -> [String] {
+        let (status, output) = await Phase2SelfTest.runProcess(
+            URL(filePath: "/usr/bin/dscacheutil"), arguments: ["-q", "host", "-a", "name", name]
+        )
+        guard status == 0 else { return [] }
+        var v4: String?
+        var v6: String?
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2 else { continue }
+            if parts[0] == "ip_address", v4 == nil {
+                v4 = parts[1]
+            } else if parts[0] == "ipv6_address", v6 == nil, !parts[1].contains("%"), !parts[1].lowercased().hasPrefix("fe80") {
+                v6 = parts[1]
             }
-            return [v4, v6].compactMap { $0 }
-        }.value
+        }
+        return [v4, v6].compactMap { $0 }
     }
 
     private static func loadAverage() -> [Double] {
