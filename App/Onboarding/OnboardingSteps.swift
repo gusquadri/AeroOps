@@ -7,8 +7,8 @@ import SwiftUI
 
 // The five steps of ``OnboardingView``. Each reuses what Settings shows for the same job:
 // ``KeyGenerationFields``, ``KeyFileImport`` and ``SystemAgentToggle`` from Settings › Keys,
-// ``HostEditorForm`` (with Test Connection and host-key trust) from Settings › Hosts, and
-// ``ConnectAgentSection`` from Settings › MCP.
+// ``HostEditorForm`` (with Test Connection and host-key trust) and the ~/.ssh/config import
+// sheet from Settings › Hosts, and ``ConnectAgentSection`` from Settings › MCP.
 
 // MARK: - Welcome
 
@@ -224,30 +224,29 @@ struct OnboardingKeyStep: View {
 
 // MARK: - Server
 
-/// The host editor for a first server, then a summary of the servers added.
+/// The host editor for a first server, or "Import from ~/.ssh/config"; then a summary of the
+/// servers added. Hosts added either way complete the step.
 struct OnboardingServerStep: View {
     @Environment(AppModel.self) private var model
     @Bindable var flow: OnboardingFlow
-    /// See ``OnboardingView/onImport``.
-    let onImport: (() -> Void)?
 
     @State private var editing: HostEditorRequest?
+    @State private var isImporting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let onImport {
-                HStack(spacing: 10) {
-                    Text(model.hosts.isEmpty ? "Already listed in ~/.ssh/config?" : "More servers in ~/.ssh/config?")
-                        .font(Aero.font(.callout))
-                        .foregroundStyle(Aero.text.secondary)
-                    Spacer(minLength: 8)
-                    Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down", action: onImport)
-                        .buttonStyle(.aquaSecondary)
-                        .controlSize(.small)
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 4)
+            HStack(spacing: 10) {
+                Text(model.hosts.isEmpty ? "Already listed in ~/.ssh/config?" : "More servers in ~/.ssh/config?")
+                    .font(Aero.font(.callout))
+                    .foregroundStyle(Aero.text.secondary)
+                Spacer(minLength: 8)
+                Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down") { isImporting = true }
+                    .buttonStyle(.aquaSecondary)
+                    .controlSize(.small)
+                    .help("Pick hosts from your ssh config. AeroOps reads the file and never changes it.")
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 4)
             if model.hosts.isEmpty {
                 HostEditorForm(
                     original: nil,
@@ -261,6 +260,10 @@ struct OnboardingServerStep: View {
         }
         .sheet(item: $editing) { request in
             HostEditorSheet(request: request)
+        }
+        // Over the onboarding sheet, not the main window's: hosts it adds show up in the list.
+        .sshConfigImportSheet(isPresented: $isImporting) { ids in
+            if let first = ids.first { flow.addedHostID = first }
         }
     }
 

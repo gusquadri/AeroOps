@@ -13,11 +13,6 @@ struct OnboardingView: View {
     @State private var flow: OnboardingFlow
     @State private var pendingDiscard: PendingDiscard?
 
-    /// Seam for "Import from ~/.ssh/config": when non-nil, the server step shows an
-    /// "Import from ~/.ssh/config…" button that calls it; when nil the button is hidden. Imported
-    /// hosts that land in ``AppModel/hosts`` complete the server step like a manually added one.
-    let onImport: (() -> Void)?
-
     /// What would be lost by leaving the server step with an unsaved server.
     private enum PendingDiscard: Identifiable {
         case skipSetup
@@ -26,9 +21,8 @@ struct OnboardingView: View {
     }
 
     /// - Parameter flow: Where to start; a new run starts at Welcome (snapshots start elsewhere).
-    init(flow: OnboardingFlow = OnboardingFlow(), onImport: (() -> Void)? = nil) {
+    init(flow: OnboardingFlow = OnboardingFlow()) {
         _flow = State(initialValue: flow)
-        self.onImport = onImport
     }
 
     var body: some View {
@@ -87,7 +81,7 @@ struct OnboardingView: View {
         switch flow.step {
         case .welcome: OnboardingWelcomeStep()
         case .key: OnboardingKeyStep(flow: flow)
-        case .server: OnboardingServerStep(flow: flow, onImport: onImport)
+        case .server: OnboardingServerStep(flow: flow)
         case .agents: OnboardingAgentsStep()
         case .done: OnboardingDoneStep(flow: flow)
         }
@@ -259,6 +253,6 @@ struct OnboardingStepIndicator: View {
 }
 
 #Preview("Onboarding · server") {
-    OnboardingView(flow: OnboardingFlow(step: .server), onImport: {})
+    OnboardingView(flow: OnboardingFlow(step: .server))
         .environment(AppModel.preview(hosts: []))
 }
