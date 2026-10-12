@@ -18,7 +18,7 @@ import UniformTypeIdentifiers
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase4 \
 ///   -AeroSelfTestOutput /tmp/aeroops-phase4.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh \     # dev/remove-key.sh next to it revokes the key
-///   [-AeroSelfTestScreenshots build/phase4]            # window PNGs (tab strip, vi, top, banners, sheets)
+///   [-AeroSelfTestSnapshots build/phase4]              # window PNGs (tab strip, vi, top, banners, sheets)
 ///   [-AeroSelfTestKeepRoot YES]
 /// ```
 ///
@@ -40,8 +40,10 @@ import UniformTypeIdentifiers
 final class Phase4SelfTest {
     private static var defaults: UserDefaults { .standard }
     static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase4" }
+    /// `-AeroSelfTestSnapshots`, as in Phase 5 (`-AeroSelfTestScreenshots`, the old name, still works).
     static var screenshotDirectory: URL? {
-        defaults.string(forKey: "AeroSelfTestScreenshots").map { URL(filePath: $0, directoryHint: .isDirectory) }
+        (defaults.string(forKey: "AeroSelfTestSnapshots") ?? defaults.string(forKey: "AeroSelfTestScreenshots"))
+            .map { URL(filePath: $0, directoryHint: .isDirectory) }
     }
 
     /// `remove-key.sh` next to the authorize script.
