@@ -24,7 +24,7 @@
 #   --download-url-prefix U  where the update zips are served (default: the feed URL's
 #                            directory) [AEROOPS_DOWNLOAD_URL_PREFIX]
 #   --sparkle-account NAME   Keychain account of the Sparkle private key, for the printed
-#                            generate_appcast step (default ed25519) [AEROOPS_SPARKLE_ACCOUNT]
+#                            generate_appcast step (default app.aeroops) [AEROOPS_SPARKLE_ACCOUNT]
 #   --updates-dir DIR        persistent directory of update zips and appcast.xml that
 #                            generate_appcast maintains (default build/updates) [AEROOPS_UPDATES_DIR]
 #   --output DIR             build output (default build/release)
@@ -61,7 +61,7 @@ feed_url=${AEROOPS_FEED_URL:-}
 public_key=${AEROOPS_SPARKLE_PUBLIC_KEY:-}
 team=${AEROOPS_TEAM_ID:-VUDQQS32NW}
 download_prefix=${AEROOPS_DOWNLOAD_URL_PREFIX:-}
-sparkle_account=${AEROOPS_SPARKLE_ACCOUNT:-ed25519}
+sparkle_account=${AEROOPS_SPARKLE_ACCOUNT:-app.aeroops}
 updates_dir=${AEROOPS_UPDATES_DIR:-build/updates}
 output=build/release
 dry_run=0
