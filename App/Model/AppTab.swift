@@ -38,12 +38,14 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Panes of the Settings window (Hosts, Keys, MCP, Appearance).
+/// Panes of the Settings window (Hosts, Keys, MCP, Appearance), plus
+/// Updates (Sparkle).
 enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     case hosts
     case keys
     case mcp
     case appearance
+    case updates
 
     var id: Self { self }
 
@@ -53,6 +55,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .keys: "Keys"
         case .mcp: "MCP"
         case .appearance: "Appearance"
+        case .updates: "Updates"
         }
     }
 
@@ -63,6 +66,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .keys: "key"
         case .mcp: "point.3.connected.trianglepath.dotted"
         case .appearance: "paintpalette"
+        case .updates: "arrow.triangle.2.circlepath"
         }
     }
 }

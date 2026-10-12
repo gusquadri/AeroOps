@@ -28,9 +28,12 @@ struct RootView: View {
         .sheet(item: $model.editorRequest) { request in
             HostEditorSheet(request: request)
         }
+        .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
+            if let first = ids.first { model.selection = first }
+        }
         // Closing the sheet any other way than its own buttons still counts as skipped.
         .sheet(isPresented: $model.onboarding.isPresented, onDismiss: { model.onboarding.complete() }) {
-            OnboardingView(onImport: nil)
+            OnboardingView()
         }
     }
 }

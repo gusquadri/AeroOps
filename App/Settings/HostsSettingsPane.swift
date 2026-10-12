@@ -2,13 +2,14 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// Settings › Hosts: the host list with + / − on the left and the editor for the selected
-/// host (or a new one) on the right.
+/// Settings › Hosts: the host list with + / − / import on the left and the editor for the
+/// selected host (or a new one) on the right.
 struct HostsSettingsPane: View {
     @Environment(AppModel.self) private var model
     @State private var selection: RemoteHost.ID?
     @State private var isCreating = false
     @State private var deletionCandidate: RemoteHost?
+    @State private var isImporting = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -21,6 +22,10 @@ struct HostsSettingsPane: View {
         // The plain sky gradient: bubbles and ribbons would sit behind form text.
         .background { Aero.sky.gradient.ignoresSafeArea() }
         .hostDeletionConfirmation($deletionCandidate)
+        .sshConfigImportSheet(isPresented: $isImporting) { ids in
+            isCreating = false
+            selection = ids.first
+        }
         .onAppear {
             if selection == nil { selection = model.selection ?? model.hosts.first?.id }
         }
@@ -66,6 +71,8 @@ struct HostsSettingsPane: View {
                 .help("Delete the selected host")
                 .disabled(selection == nil)
                 Spacer()
+                Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down") { isImporting = true }
+                    .help("Import hosts from ~/.ssh/config")
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.aquaSecondary)
@@ -103,8 +110,14 @@ struct HostsSettingsPane: View {
                     ? "Add the servers you want to monitor. AeroOps reaches them over SSH; nothing is installed on them."
                     : "Choose a host on the left to edit it, or add a new one."
             ) {
-                Button("Add Host", systemImage: "plus", action: startCreating)
-                    .buttonStyle(.aqua)
+                HStack(spacing: 8) {
+                    Button("Add Host", systemImage: "plus", action: startCreating)
+                        .buttonStyle(.aqua)
+                    if model.hosts.isEmpty {
+                        Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down") { isImporting = true }
+                            .buttonStyle(.aquaSecondary)
+                    }
+                }
             }
         }
     }

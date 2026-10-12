@@ -1,7 +1,7 @@
 import AeroTheme
 import SwiftUI
 
-/// The Settings window (⌘,): Hosts, Keys, MCP and Appearance. The selected pane lives in
+/// The Settings window (⌘,): Hosts, Keys, MCP, Appearance and Updates. The selected pane lives in
 /// ``AppModel/settingsPane`` so other screens can deep-link to a pane.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
@@ -28,6 +28,9 @@ struct SettingsView: View {
                         "Dashboard density and pinned disk per host",
                     ]
                 )
+            }
+            Tab(SettingsPane.updates.title, systemImage: SettingsPane.updates.systemImage, value: .updates) {
+                UpdatesSettingsPane()
             }
         }
         .frame(width: 780, height: 600)

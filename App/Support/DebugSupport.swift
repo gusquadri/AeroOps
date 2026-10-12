@@ -27,6 +27,10 @@ import UniformTypeIdentifiers
 ///                                                # completed (it never shows by itself in self-test
 ///                                                # and snapshot runs)
 ///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroOpsDataDirectory /tmp/aeroops-demo -AeroOpsDemoHosts YES \
+///   -AeroOpsSSHConfigFile dev/fixtures/ssh-config/config  # the SSH config importer reads this file
+///                                                          # instead of ~/.ssh/config (snapshots add the sheet)
+///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase2 -AeroSelfTestOutput /tmp/st.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase2SelfTest
 ///
@@ -74,6 +78,12 @@ enum DebugLaunchOptions {
         case "light": NSAppearance(named: .aqua)
         default: nil
         }
+    }
+
+    /// A config file for "Import from ~/.ssh/config" to read instead of `~/.ssh/config`, with
+    /// relative `Include`s resolved against its directory. Snapshot runs also capture the sheet.
+    static var sshConfigFile: URL? {
+        defaults.string(forKey: "AeroOpsSSHConfigFile").map { URL(filePath: $0, directoryHint: .notDirectory) }
     }
 
     /// A model for a debug launch, or `nil` for the real one.
@@ -230,6 +240,7 @@ private struct DebugSnapshotter {
             await capture(main, name: "\(prefix)-dashboard-detail-\(label)")
         }
         await captureHostDetails()
+        await captureSSHConfigImport()
 
         model.editorRequest = model.hosts.dropFirst(2).first.map { .edit($0.id) } ?? .new
         await pause(1.2)
@@ -318,6 +329,19 @@ private struct DebugSnapshotter {
         await capture(window, name: name)
         window.close()
         await pause(0.4)
+    }
+
+    /// With `-AeroOpsSSHConfigFile`, the import sheet over that file (hosts already in the demo
+    /// inventory show as duplicates), with the skipped-lines list open in a second capture.
+    private func captureSSHConfigImport() async {
+        guard DebugLaunchOptions.sshConfigFile != nil else { return }
+        await captureStandalone(SSHConfigImportSheet(), title: "Import from SSH Config", name: "\(prefix)-import-sheet")
+        let scrolled = SSHConfigImportModel()
+        await scrolled.load(existingHosts: model.hosts)
+        await captureStandalone(
+            SSHConfigImportSheet(importer: scrolled, height: 1640, showsIssues: true),
+            title: "Import from SSH Config", name: "\(prefix)-import-sheet-full"
+        )
     }
 
     private func pause(_ seconds: Double) async {

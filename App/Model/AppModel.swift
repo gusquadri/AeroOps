@@ -44,6 +44,9 @@ final class AppModel {
     var settingsPane: SettingsPane = .hosts
     /// The main window's host editor sheet; `nil` when closed.
     var editorRequest: HostEditorRequest?
+    /// Whether the main window shows the "Import from ~/.ssh/config" sheet. Set it with
+    /// ``requestSSHConfigImport()``.
+    var isImportingSSHConfig = false
     /// The first-run onboarding sheet. In memory unless replaced: the real app's model stores
     /// its flag in `UserDefaults.standard` (`AeroOpsApp.makeModel()`).
     var onboarding = OnboardingState()
@@ -213,6 +216,15 @@ final class AppModel {
     /// Opens the main window's host editor for the host with `id`.
     func requestEdit(_ id: RemoteHost.ID) {
         editorRequest = .edit(id)
+    }
+
+    /// Opens the main window's "Import from ~/.ssh/config" sheet (``SSHConfigImportSheet``),
+    /// which reads the config, lets the user pick hosts and adds them with ``addHost(_:)``. The
+    /// first imported host is selected when it closes. Views that present the sheet themselves
+    /// use ``SwiftUI/View/sshConfigImportSheet(isPresented:onImport:)`` instead.
+    func requestSSHConfigImport() {
+        editorRequest = nil
+        isImportingSSHConfig = true
     }
 
     // MARK: - Terminals
