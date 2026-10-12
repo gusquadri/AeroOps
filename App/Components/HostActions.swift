@@ -2,8 +2,8 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// Context menu items for a host in the sidebar or a list: Edit, Open SSH (disabled until
-/// Phase 4), Delete.
+/// Context menu items for a host in the sidebar or a list: Edit, Open SSH (disabled while
+/// ``AppModel/canOpenSSH(_:)`` is false), Delete.
 struct HostContextMenu: View {
     @Environment(AppModel.self) private var model
     let host: RemoteHost

@@ -9,6 +9,9 @@ public final class TerminalSessionManager {
     public private(set) var sessions: [TerminalSession] = []
     /// Appearance for sessions opened without an explicit one.
     public var defaultAppearance: TerminalAppearance
+    /// Handles a session asking to be closed from inside the terminal: a key press after its
+    /// program ended, or libghostty's close binding while it runs. `nil` closes it at once.
+    @ObservationIgnored public var closeRequestHandler: ((TerminalSession) -> Void)?
 
     public init(defaultAppearance: TerminalAppearance = .aero) {
         self.defaultAppearance = defaultAppearance
@@ -21,7 +24,12 @@ public final class TerminalSessionManager {
     public func open(_ spec: TerminalLaunchSpec, appearance: TerminalAppearance? = nil) -> TerminalSession {
         let session = TerminalSession(spec: spec, appearance: appearance ?? defaultAppearance)
         session.onCloseRequest = { [weak self] session in
-            self?.close(session.id)
+            guard let self else { return }
+            if let closeRequestHandler {
+                closeRequestHandler(session)
+            } else {
+                close(session.id)
+            }
         }
         sessions.append(session)
         return session

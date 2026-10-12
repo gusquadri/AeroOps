@@ -27,6 +27,8 @@ import UniformTypeIdentifiers
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase3 -AeroSelfTestOutput /tmp/st3.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase3SelfTest (revokes with dev/remove-key.sh)
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase4 ...  # terminal tabs, see Phase4SelfTest
 /// ```
 ///
 /// Demo hosts and statuses turn live monitoring off, so the sample states stay on screen.
@@ -65,7 +67,7 @@ enum DebugLaunchOptions {
     ///   snapshot runs never touch `~/.aeroops`, the real hosts or the Keychain.
     @MainActor
     static func makeModel() -> AppModel? {
-        if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested {
+        if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase4SelfTest.isRequested {
             return Phase2SelfTest.makeModel()
         }
         guard let dataDirectory else { return nil }
@@ -111,6 +113,9 @@ enum DebugLaunchOptions {
         }
         if Phase3SelfTest.isRequested {
             await Phase3SelfTest(model: model).runAndQuit()
+        }
+        if Phase4SelfTest.isRequested {
+            await Phase4SelfTest(model: model).runAndQuit()
         }
     }
 }

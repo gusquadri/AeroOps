@@ -38,7 +38,41 @@ enum GhosttyConfig {
             ("clipboard-paste-protection", "true"),
             ("confirm-close-surface", "false"),
         ]
+        settings += keybindSettings
         return settings
+    }
+
+    /// The surface's key bindings: libghostty's defaults are cleared, then only terminal-local
+    /// ones come back.
+    ///
+    /// The defaults are a standalone terminal app's (Cmd+T new tab, Cmd+W close, Cmd+1...9 go
+    /// to tab, Ctrl+Tab next tab, Cmd+Q quit, Cmd+N new window, ...). A focused surface takes
+    /// every key that is a binding before the main menu sees it, and the wrapper ignores the
+    /// app-level actions, so those keys would either do nothing (Cmd+Q) or bypass the host
+    /// app (Cmd+W closing a running tab without asking). Without them the keys reach the
+    /// host app's menus.
+    static let keybindings: [String] = [
+        "super+c=copy_to_clipboard",
+        "super+v=paste_from_clipboard",
+        "super+a=select_all",
+        "super+k=clear_screen",
+        "super+equal=increase_font_size:1",
+        "super+minus=decrease_font_size:1",
+        "super+digit_0=reset_font_size",
+        "super+home=scroll_to_top",
+        "super+end=scroll_to_bottom",
+        "super+page_up=scroll_page_up",
+        "super+page_down=scroll_page_down",
+        // Line editing as in Terminal.app: start / end of line, delete line, word left / right.
+        "super+arrow_left=text:\\x01",
+        "super+arrow_right=text:\\x05",
+        "super+backspace=text:\\x15",
+        "alt+arrow_left=esc:b",
+        "alt+arrow_right=esc:f",
+    ]
+
+    private static var keybindSettings: [(key: String, value: String)] {
+        [("keybind", "clear")] + keybindings.map { ("keybind", $0) }
     }
 
     static func configuration(appearance: TerminalAppearance, command: String) -> TerminalConfiguration {

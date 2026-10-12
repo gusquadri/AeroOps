@@ -7,7 +7,8 @@ internal import GhosttyTerminal
 /// Keyboard input, IME, mouse selection, scrolling and resizing are handled by the surface.
 /// Copy, paste and select-all work through the responder chain (the Edit menu's `copy:`,
 /// `paste:`, `selectAll:`) and libghostty's Cmd+C / Cmd+V / Cmd+A bindings. Unsafe pastes
-/// ask for confirmation in an alert.
+/// ask for confirmation in an alert, unless the host app presents
+/// ``TerminalSession/clipboardPrompt`` itself (`presentsClipboardPrompts: false`).
 ///
 /// The surface view belongs to the session, so showing the same session again (tab switch,
 /// SwiftUI re-creating this view) keeps its screen and scrollback. Show a session in at most
@@ -15,10 +16,12 @@ internal import GhosttyTerminal
 public struct TerminalSurfaceView: View {
     private let session: TerminalSession
     private let focusOnAppear: Bool
+    private let presentsClipboardPrompts: Bool
 
-    public init(session: TerminalSession, focusOnAppear: Bool = true) {
+    public init(session: TerminalSession, focusOnAppear: Bool = true, presentsClipboardPrompts: Bool = true) {
         self.session = session
         self.focusOnAppear = focusOnAppear
+        self.presentsClipboardPrompts = presentsClipboardPrompts
     }
 
     public var body: some View {
@@ -26,12 +29,12 @@ public struct TerminalSurfaceView: View {
             .alert(
                 alertTitle,
                 isPresented: Binding(
-                    get: { session.clipboardPrompt != nil },
+                    get: { presentsClipboardPrompts && session.clipboardPrompt != nil },
                     set: { presented in
                         if !presented { session.clipboardPrompt?.deny() }
                     }
                 ),
-                presenting: session.clipboardPrompt
+                presenting: presentsClipboardPrompts ? session.clipboardPrompt : nil
             ) { prompt in
                 Button(allowTitle(prompt.kind)) { prompt.allow() }
                 Button("Cancel", role: .cancel) { prompt.deny() }

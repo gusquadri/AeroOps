@@ -11,7 +11,7 @@ import Darwin
 import Foundation
 import GhosttyTerminal
 import SwiftUI
-import TerminalKit
+@_spi(AeroSelfTest) import TerminalKit
 
 struct Options {
     var sshConfig = ""
@@ -254,6 +254,19 @@ final class SelfTest {
         check(await wait { local.state.isFinished }, "local program finishes")
         check(local.state == .exited(code: 3), "local 'exit 3' -> exited(code: 3) (\(local.state))")
         check(lines(local).contains("ENV=env-ok PWD=/usr"), "environment and working directory reach the program")
+        // libghostty prints "Press any key to close the terminal" on every exit: the ended tab
+        // stays until then, and the key press reaches the manager's close handler.
+        try? await Task.sleep(for: .milliseconds(500))
+        check(manager.session(id: local.id) != nil, "an ended tab stays open until asked")
+        var closeRequests: [TerminalSession.ID] = []
+        manager.closeRequestHandler = { [manager] session in
+            closeRequests.append(session.id)
+            manager.close(session.id)
+        }
+        local.type("x")
+        check(await wait(5) { manager.session(id: local.id) == nil }, "a key press after the program ended closes the tab")
+        check(closeRequests == [local.id], "the key press went through closeRequestHandler (\(closeRequests.count) request(s))")
+        manager.closeRequestHandler = nil
         manager.close(local.id)
 
         // Resize: shrink the window, sizes must follow.

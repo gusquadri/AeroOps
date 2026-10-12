@@ -18,7 +18,7 @@ struct HostKeyList: View {
                     HStack(spacing: 6) {
                         AeroTag(key.displayType, tint: tint)
                         if let bits = key.bits {
-                            Text("\(bits) bits")
+                            Text("\(String(bits)) bits")
                                 .font(Aero.font(.caption))
                                 .foregroundStyle(Aero.text.secondary)
                         }
@@ -76,7 +76,7 @@ struct HostKeyTrustSheet: View {
                     Text("Trust this host?")
                         .font(Aero.font(.title2, weight: .semibold))
                         .foregroundStyle(Aero.text.primary)
-                    Text("This is the first connection to \(host.address) on port \(host.port). Compare the fingerprints below with the server's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before trusting it.")
+                    Text("This is the first connection to \(host.address) on port \(String(host.port)). Compare the fingerprints below with the server's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before trusting it.")
                         .font(Aero.font(.callout))
                         .foregroundStyle(Aero.text.secondary)
                         .fixedSize(horizontal: false, vertical: true)
