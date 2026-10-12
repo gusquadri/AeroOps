@@ -342,7 +342,7 @@ struct Phase5SelfTest {
         burst.linesDropped = viewer.droppedLines
         r.report.burst = burst
         r.report.maxMainThreadLagMilliseconds = max(r.report.follow.maxMainThreadLagMilliseconds, burst.maxMainThreadLagMilliseconds)
-        let capped = viewer.lineCount <= LogTextController.maxLines + LogTextController.trimSlack && viewer.droppedLines > 0
+        let capped = viewer.lineCount <= LogTextController.maxLines && viewer.droppedLines > 0
         // A stress run well beyond the spec's follow check: every flush must stay under budget,
         // and so must the main thread at the 99th percentile. The single worst heartbeat is
         // reported but not gated: on a loaded Mac one scheduler hiccup can exceed 100 ms with

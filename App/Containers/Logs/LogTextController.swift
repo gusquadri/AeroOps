@@ -63,21 +63,21 @@ struct LogLine: Sendable, Hashable {
     }
 }
 
-/// The log text view: an `NSTextView` (TextKit 1, non-contiguous layout) that keeps the newest
-/// ``maxLines`` lines (``trimSlack`` more before it trims), appends batches without re-laying
-/// out what is already there, highlights
-/// search matches and keeps the view pinned to the bottom while the user is there.
+/// The log text view: an `NSTextView` (TextKit 1, non-contiguous layout) that keeps at most the
+/// newest ``maxLines`` lines (trimming ``trimSlack`` further at a time), appends batches without
+/// re-laying out what is already there, highlights search matches and keeps the view pinned to
+/// the bottom while the user is there.
 ///
 /// It is the single owner of the lines, so toggling timestamps re-renders from the raw text.
 /// All work runs on the main actor; callers batch lines (``LogViewerModel`` flushes every
 /// 100 ms) so a busy container costs one append per flush, not one per line.
 @MainActor
 final class LogTextController: NSObject, NSTextViewDelegate {
-    /// Oldest lines are dropped beyond this many.
+    /// Never more lines than this; the oldest are dropped.
     nonisolated static let maxLines = 10_000
-    /// Lines over ``maxLines`` tolerated before trimming, so trimming happens in chunks: a cut at
-    /// the start invalidates layout for the whole text, so it should not happen on every flush
-    /// of a busy stream.
+    /// Lines dropped beyond the excess when the cap is hit, so trimming happens in chunks: a cut
+    /// at the start invalidates layout for the whole text, so it should not happen on every flush
+    /// of a busy stream. The view then holds between `maxLines - trimSlack` and `maxLines`.
     static let trimSlack = 2_000
     /// Matches highlighted at most (the count stops there too).
     nonisolated static let maxMatches = 5_000
@@ -186,8 +186,8 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         lengths.append(contentsOf: chunk.lengths)
 
         var removed = 0
-        if lines.count > Self.maxLines + Self.trimSlack {
-            let drop = lines.count - Self.maxLines
+        if lines.count > Self.maxLines {
+            let drop = min(lines.count, lines.count - Self.maxLines + Self.trimSlack)
             removed = lengths[..<drop].reduce(0, +)
             lines.removeFirst(drop)
             lengths.removeFirst(drop)

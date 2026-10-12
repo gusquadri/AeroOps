@@ -211,7 +211,7 @@ struct LogsSheet: View {
         HStack(spacing: 12) {
             Text("\(viewer.lineCount.formatted()) lines")
             if viewer.droppedLines > 0 {
-                Text("\(viewer.droppedLines.formatted()) older lines dropped (keeps the last \(LogTextController.maxLines.formatted()))")
+                Text("\(viewer.droppedLines.formatted()) older lines dropped (keeps up to the last \(LogTextController.maxLines.formatted()))")
             }
             Spacer(minLength: 8)
             Text("Last \(LogViewerModel.tail) lines, ANSI colours removed")
