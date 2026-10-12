@@ -18,6 +18,7 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .safeAreaInset(edge: .top, spacing: 0) { HostLoadErrorBanner() }
                 .background { SkyBackground() }
+                .environment(\.sidebarVisibility, $columnVisibility)
         }
         .navigationTitle("AeroOps")
         .toolbar {
@@ -36,6 +37,12 @@ struct RootView: View {
             OnboardingView()
         }
     }
+}
+
+extension EnvironmentValues {
+    /// The main window's sidebar visibility, for content that needs to make room (the
+    /// Containers inspector in a narrow window).
+    @Entry var sidebarVisibility: Binding<NavigationSplitViewVisibility> = .constant(.all)
 }
 
 /// The segmented tab control in the toolbar. ⌘1–⌘4 live in the View menu (``AppCommands``).

@@ -262,7 +262,7 @@ struct InspectSheet: View {
                 .foregroundStyle(Aero.text.secondary)
             ScrollView([.vertical, .horizontal]) {
                 Text(inspection.json)
-                    .font(Aero.font(.caption).monospaced())
+                    .font(Aero.monospacedFont(.caption))
                     .foregroundStyle(Aero.text.primary)
                     .textSelection(.enabled)
                     .fixedSize()

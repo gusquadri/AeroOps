@@ -108,9 +108,8 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     private let currentMatchColor = NSColor(Aero.sun)
 
     override init() {
-        // The system monospaced face at the Callout text style's size (AeroTheme has no
-        // monospaced token; log text must align in columns).
-        font = NSFont.monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        // Monospaced, so log text aligns in columns.
+        font = Aero.monospacedNSFont(.callout)
         let textView = NSTextView(usingTextLayoutManager: false)
         self.textView = textView
         scrollView = NSScrollView()

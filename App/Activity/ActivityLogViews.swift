@@ -64,8 +64,7 @@ struct LiveCommandView: View {
                 }
             }
             Text(verbatim: VisibleText.escape(command.command).text)
-                .font(Aero.font(.callout))
-                .monospaced()
+                .font(Aero.monospacedFont(.callout))
                 .foregroundStyle(Aero.text.primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -105,8 +104,7 @@ struct LiveCommandView: View {
                                 .frame(width: 3)
                                 .accessibilityHidden(true)
                             Text(verbatim: segment.text)
-                                .font(Aero.font(.caption))
-                                .monospaced()
+                                .font(Aero.monospacedFont(.caption))
                                 .foregroundStyle(Aero.text.primary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -319,7 +317,7 @@ private struct AuditRow: View {
                     .frame(width: AuditColumns.client, alignment: .leading)
                     .help(entry.client ?? "")
                 Text(verbatim: entry.tool)
-                    .monospaced()
+                    .font(Aero.monospacedFont(.callout))
                     .frame(width: AuditColumns.tool, alignment: .leading)
                 Text(verbatim: entry.host ?? "—")
                     .frame(width: AuditColumns.host, alignment: .leading)
@@ -343,8 +341,7 @@ private struct AuditRow: View {
 
             if let detail {
                 Text(verbatim: detail)
-                    .font(Aero.font(.caption))
-                    .monospaced()
+                    .font(Aero.monospacedFont(.caption))
                     .foregroundStyle(Aero.text.secondary)
                     .textSelection(.enabled)
                     .lineLimit(4)

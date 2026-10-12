@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Frutiger Aero design tokens.
@@ -56,6 +57,58 @@ public enum Aero {
     /// SF Pro Rounded at a fixed point size, for numerals in gauges and similar.
     public static func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .rounded)
+    }
+
+    /// SF Mono at a text style's size, e.g. `Aero.monospacedFont(.callout)`: commands, paths,
+    /// fingerprints, JSON and describe output, whose characters must stay distinct and line up.
+    ///
+    /// Built from the AppKit font: the app-wide `.fontDesign(.rounded)` replaces the design of
+    /// system fonts, so `.system(style, design: .monospaced)` and `Font.monospaced()` come out
+    /// proportional.
+    public static func monospacedFont(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
+        Font(monospacedNSFont(style.appKit, weight: weight.appKit) as CTFont)
+    }
+
+    /// ``monospacedFont(_:weight:)`` for AppKit text views (the log viewer).
+    public static func monospacedNSFont(_ style: NSFont.TextStyle, weight: NSFont.Weight = .regular) -> NSFont {
+        .monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
+    }
+}
+
+extension Font.TextStyle {
+    /// The AppKit text style of the same size.
+    var appKit: NSFont.TextStyle {
+        switch self {
+        case .largeTitle: .largeTitle
+        case .title: .title1
+        case .title2: .title2
+        case .title3: .title3
+        case .headline: .headline
+        case .subheadline: .subheadline
+        case .body: .body
+        case .callout: .callout
+        case .footnote: .footnote
+        case .caption: .caption1
+        case .caption2: .caption2
+        @unknown default: .body
+        }
+    }
+}
+
+extension Font.Weight {
+    /// The AppKit font weight of the same name.
+    var appKit: NSFont.Weight {
+        switch self {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
     }
 }
 

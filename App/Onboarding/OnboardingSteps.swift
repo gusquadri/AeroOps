@@ -138,15 +138,13 @@ struct OnboardingKeyStep: View {
                             }
                         }
                         Text(key.fingerprint)
-                            .font(Aero.font(.callout))
-                            .monospaced()
+                            .font(Aero.monospacedFont(.callout))
                             .foregroundStyle(Aero.text.secondary)
                             .textSelection(.enabled)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text(verbatim: key.authorizedKeysLine)
-                            .font(Aero.font(.caption))
-                            .monospaced()
+                            .font(Aero.monospacedFont(.caption))
                             .foregroundStyle(Aero.text.primary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -309,8 +307,7 @@ struct OnboardingServerStep: View {
                         }
                     }
                     Text(verbatim: host.connectionSummary)
-                        .font(Aero.font(.callout))
-                        .monospaced()
+                        .font(Aero.monospacedFont(.callout))
                         .foregroundStyle(Aero.text.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

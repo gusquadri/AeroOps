@@ -225,7 +225,7 @@ private struct UsageRow: View {
             HStack(spacing: 8) {
                 if let detail {
                     Text(detail)
-                        .monospaced()
+                        .font(Aero.monospacedFont(.caption))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(detail)

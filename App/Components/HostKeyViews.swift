@@ -24,8 +24,7 @@ struct HostKeyList: View {
                         }
                     }
                     Text(key.fingerprint)
-                        .font(Aero.font(.callout))
-                        .monospaced()
+                        .font(Aero.monospacedFont(.callout))
                         .foregroundStyle(Aero.text.primary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
