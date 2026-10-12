@@ -72,6 +72,9 @@ targets:
         product: TerminalKit
       - package: AeroKit
         product: AgentBridge
+      # Wire types the app shows (JSONValue arguments, tool names, socket path limits).
+      - package: AeroKit
+        product: BridgeProtocol
       - package: AeroKit
         product: AeroTheme
       # Build the MCP CLI first and copy it to AeroOps.app/Contents/MacOS/aeroops-mcp.

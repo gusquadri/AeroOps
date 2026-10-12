@@ -70,6 +70,26 @@ public struct SSHRunner: Sendable {
         return result
     }
 
+    /// Like ``run(_:on:stdin:timeout:outputLimit:)``, and also hands each piece of stdout and
+    /// stderr to `onOutput` as it arrives (on a private queue), up to `outputLimit` per stream.
+    /// The result still carries the collected output.
+    public func run(
+        _ command: String,
+        on host: RemoteHost,
+        stdin: Data? = nil,
+        timeout: Duration = SSHRunner.defaultTimeout,
+        outputLimit: Int = SSHRunner.defaultOutputLimit,
+        onOutput: @escaping @Sendable (SSHOutputStream, Data) -> Void
+    ) async throws -> SSHResult {
+        try await refuseIfBlocked(host)
+        let mode = ChildProcess.OutputMode.observe { isStdout, data in
+            onOutput(isStdout ? .stdout : .stderr, data)
+        }
+        let result = try await run(command, alias: host.sshAlias, stdin: stdin, timeout: timeout, outputLimit: outputLimit, mode: mode)
+        if result.transportError == .hostKeyChanged { await hostKeys?.block(host) }
+        return result
+    }
+
     /// Runs `arguments` as one remote command, each argument quoted with `ShellQuote.quote`.
     public func run(
         arguments: [String],
@@ -86,11 +106,12 @@ public struct SSHRunner: Sendable {
         alias: String,
         stdin: Data? = nil,
         timeout: Duration = SSHRunner.defaultTimeout,
-        outputLimit: Int = SSHRunner.defaultOutputLimit
+        outputLimit: Int = SSHRunner.defaultOutputLimit,
+        mode: ChildProcess.OutputMode = .collect
     ) async throws -> SSHResult {
         let spec = try spec(command, alias: alias, stdin: stdin, timeout: timeout, outputLimit: outputLimit)
         do {
-            return SSHResult(try await ChildProcess.run(spec))
+            return SSHResult(try await ChildProcess.run(spec, mode: mode))
         } catch let error as ChildLaunchError {
             throw SSHError.launchFailed(error.message)
         }
@@ -207,6 +228,11 @@ public struct SSHRunner: Sendable {
             }
         }
     }
+}
+
+/// Which stream a piece of live output came from.
+public enum SSHOutputStream: Sendable, Hashable {
+    case stdout, stderr
 }
 
 /// The outcome of ``SSHRunner/run(_:on:stdin:timeout:outputLimit:)``.

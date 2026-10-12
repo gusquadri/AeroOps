@@ -1,5 +1,6 @@
 #if DEBUG
 import AeroCore
+import AeroTheme
 import AppKit
 import ImageIO
 import KeyAgent
@@ -31,6 +32,9 @@ import UniformTypeIdentifiers
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase4 ...  # terminal tabs, see Phase4SelfTest
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase5 ...  # Containers tab, see Phase5SelfTest
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase7 -AeroSelfTestOutput /tmp/st7.json \
+///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase7SelfTest (drives aeroops-mcp with dev/selftest/phase7-drive.sh)
 /// ```
 ///
 /// Demo hosts and statuses turn live monitoring off, so the sample states stay on screen.
@@ -70,8 +74,11 @@ enum DebugLaunchOptions {
     @MainActor
     static func makeModel() -> AppModel? {
         if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase4SelfTest.isRequested
-            || Phase5SelfTest.isRequested {
-            return Phase2SelfTest.makeModel()
+            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested {
+            let model = Phase2SelfTest.makeModel()
+            model.agents.useTransientSettings()
+            if Phase7SelfTest.isRequested { Phase7SelfTest.configure(model) }
+            return model
         }
         guard let dataDirectory else { return nil }
         let paths = AeroPaths(
@@ -79,13 +86,16 @@ enum DebugLaunchOptions {
             applicationSupport: dataDirectory
         )
         let ssh = SSHServices(paths: paths, secretStore: InMemorySecretStore(), defaults: nil)
-        return AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
+        let model = AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
+        model.agents.useTransientSettings()
+        return model
     }
 
     @MainActor
     static func apply(to model: AppModel) {
         if demoHosts || demoStatuses {
             model.monitoring.isEnabled = false
+            model.agents.isEnabled = false
         }
         if demoHosts, dataDirectory != nil, model.hosts.isEmpty {
             for host in SampleData.hosts {
@@ -95,6 +105,7 @@ enum DebugLaunchOptions {
         }
         if demoStatuses {
             model.applySampleLiveStates()
+            model.agents.applySampleState(hosts: model.hosts)
         }
     }
 
@@ -121,6 +132,9 @@ enum DebugLaunchOptions {
         }
         if Phase4SelfTest.isRequested {
             await Phase4SelfTest(model: model).runAndQuit()
+        }
+        if Phase7SelfTest.isRequested {
+            await Phase7SelfTest(model: model).runAndQuit()
         }
     }
 }
@@ -209,6 +223,7 @@ private struct DebugSnapshotter {
         await pause(0.8)
 
         await captureTrustSheet()
+        await captureAgents()
 
         let before = Set(NSApp.windows.map(ObjectIdentifier.init))
         openSettings()
@@ -244,6 +259,25 @@ private struct DebugSnapshotter {
         }
         // Settings › Keys tall enough to show the agent section without scrolling.
         await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
+    }
+
+    /// The approval panel (normal, sudo, seconds left), Activity and Settings › MCP at full height.
+    private func captureAgents() async {
+        let agents = model.agents
+        let pending = agents.pending
+        if let first = pending.first {
+            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: first.requestedAt.addingTimeInterval(14), approvalOverride: first),
+                                    title: "Approval", name: "\(prefix)-approval")
+            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: first.expiresAt.addingTimeInterval(-7), approvalOverride: first),
+                                    title: "Approval", name: "\(prefix)-approval-low")
+        }
+        if let sudo = pending.first(where: { !$0.offersHostWindow }) {
+            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: sudo.requestedAt.addingTimeInterval(21), approvalOverride: sudo),
+                                    title: "Approval", name: "\(prefix)-approval-sudo")
+        }
+        await captureStandalone(ActivityView().frame(width: 1180, height: 2000).background { SkyBackground() },
+                                title: "Activity", name: "\(prefix)-activity-full")
+        await captureStandalone(MCPSettingsPane().frame(width: 780, height: 1500), title: "MCP", name: "\(prefix)-mcp-full")
     }
 
     /// The host detail panel at full height (every mount and swap visible), for the first hosts.

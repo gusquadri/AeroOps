@@ -16,16 +16,7 @@ struct SettingsView: View {
                 KeysSettingsPane()
             }
             Tab(SettingsPane.mcp.title, systemImage: SettingsPane.mcp.systemImage, value: .mcp) {
-                SettingsPlaceholderPane(
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    title: "AI agents (MCP)",
-                    message: "Let Claude Code, Codex and other MCP clients read your servers through AeroOps. Agents never see your keys, and commands always wait for your approval.",
-                    plans: [
-                        "Access per host: Off, Read, or Read + Exec",
-                        "Copy-config buttons for Claude Code, Codex and JSON clients",
-                        "Approval and audit settings",
-                    ]
-                )
+                MCPSettingsPane()
             }
             Tab(SettingsPane.appearance.title, systemImage: SettingsPane.appearance.systemImage, value: .appearance) {
                 SettingsPlaceholderPane(

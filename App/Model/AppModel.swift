@@ -55,6 +55,9 @@ final class AppModel {
     let monitoring: MonitorService
     /// Terminal tabs (Phase 4).
     let terminals: TerminalService
+    /// The MCP bridge, approvals, audit log and live agent commands (Phases 7 and 8).
+    /// See `AppModel+Agents.swift`.
+    let agents: BridgeService
 
     /// Keys offered by the host editor's key picker.
     var availableKeys: [KeySummary] {
@@ -80,15 +83,19 @@ final class AppModel {
         self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
         monitoring = MonitorService(ssh: ssh)
         terminals = TerminalService(ssh: ssh) { hostStore.host(id: $0) }
+        agents = BridgeService(ssh: ssh)
         hostsDidChange()
         addInventoryObserver(ssh)
         bindMonitoring()
+        bindAgents()
     }
 
-    /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring. Called once at launch.
+    /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring, then the MCP
+    /// bridge. Called once at launch.
     func startServices() async {
         await ssh.start()
         monitoring.start()
+        agents.start()
     }
 
     /// Closes terminal tabs, stops monitoring, the agent and shared SSH connections. Called before
@@ -97,19 +104,23 @@ final class AppModel {
     @discardableResult
     func shutdownServices() async -> Int {
         terminals.closeAll()
+        await agents.beginShutdown()?()
         await monitoring.beginShutdown()?()
         return await ssh.shutdown()
     }
 
     /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
-    /// Terminal tabs close first, so no ssh session outlives the agent that signs for it; then
-    /// monitors stop, so no poll opens a connection while the masters close.
+    /// Terminal tabs close first, so no ssh session outlives the agent that signs for it; then the
+    /// MCP bridge and monitors stop, so no agent call or poll opens a connection while the masters
+    /// close.
     func beginShutdown() -> (@Sendable () async -> Void)? {
         terminals.closeAll()
+        let bridge = agents.beginShutdown()
         let monitors = monitoring.beginShutdown()
         let ssh = ssh.beginShutdown()
-        guard monitors != nil || ssh != nil else { return nil }
+        guard bridge != nil || monitors != nil || ssh != nil else { return nil }
         return {
+            await bridge?()
             await monitors?()
             _ = await ssh?()
         }
