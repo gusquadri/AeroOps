@@ -1,0 +1,57 @@
+# Sample ~/.ssh/config for the importer tests and the import-sheet snapshots.
+# Hand-made: documentation names and addresses only, no keys (IdentityFile lines
+# are just paths, and nothing ever reads them).
+
+# Relative includes resolve against ~/.ssh (for this fixture: this directory).
+# Glob matches are read in sorted order.
+Include config.d/*.conf
+
+# Not kept by the importer.
+ServerAliveInterval 30
+
+Host web-prod web-prod-alias
+    HostName 192.0.2.10
+    User deploy
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_work
+
+# Same address, port and user as the demo host "db-primary".
+Host db
+  hostname=db1.internal.example.com
+  user = postgres
+  PORT 2222
+
+Host bastion
+    HostName bastion.example.com
+
+Host app-behind-bastion
+    HostName 10.10.0.5
+    User app
+    ProxyJump bastion
+
+Host legacy
+    HostName legacy.example.net
+    User root
+    ProxyCommand nc -X connect -x proxy.example.net:8080 %h %p
+
+# Same address, port and user as the demo host "web-01".
+Host web-01
+    HostName 10.0.0.12
+    User deploy
+
+Host *.example.org
+    User ops
+
+Host build.example.org
+
+# Refused: not a plain host name.
+Host sketchy
+    HostName -oProxyCommand=sh
+
+Match host db exec "true"
+    User ignored-match-user
+
+# At the bottom, Host * only fills gaps: the first value obtained wins.
+Host * !bastion
+    IdentityFile ~/.ssh/id_rsa_default
+    User fallback
