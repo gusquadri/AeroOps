@@ -148,6 +148,28 @@ struct SSHRunnerTests {
         #expect(kill(timed.pid, 0) == -1 && errno == ESRCH)
     }
 
+    @Test("an exit reported before the child is waitable still reaps it")
+    func exitReportedEarly() async throws {
+        // The kernel posts NOTE_EXIT, once, before the exiting child becomes a waitable zombie.
+        // Report the exit while the child is certainly still running, with no process source to
+        // report it again: the child must still be reaped and the completion must run.
+        let outcome = Mutex<ChildOutcome?>(nil)
+        let spec = ChildSpec(executable: "/bin/sh", arguments: ["-c", "sleep 1; exit 5"], environment: [:])
+        let child = try ChildProcess.launch(spec, watchesExit: false) { result in outcome.withLock { $0 = result } }
+        child.reportExitForTesting()
+        let finished = await eventually(timeout: .seconds(15)) { outcome.withLock { $0 != nil } }
+        if !finished {
+            // The report was lost; clean up so the failure leaves no zombie behind.
+            kill(-child.pid, SIGKILL)
+            var status: Int32 = 0
+            waitpid(child.pid, &status, 0)
+        }
+        #expect(finished, "the child was never reaped")
+        let result = try #require(outcome.withLock { $0 })
+        #expect(result.termination == .exited(5))
+        #expect(kill(result.pid, 0) == -1 && errno == ESRCH)
+    }
+
     @Test("does not wait for background descendants that keep the pipes open")
     func drainGrace() async throws {
         let start = ContinuousClock.now

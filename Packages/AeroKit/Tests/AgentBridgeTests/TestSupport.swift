@@ -235,12 +235,20 @@ let testPeer = BridgePeer(pid: 1, uid: getuid(), executablePath: "/test/aeroops-
 // MARK: - Socket client
 
 /// A raw bridge client: writes lines, collects every message the app sends.
+///
+/// Like `BridgeSocketConnection`, the reader thread owns the descriptor: ``close()`` only shuts
+/// the socket down, and the reader closes it once it saw EOF. Closing it from the test while
+/// the reader was between two `read` calls (or not yet started, which is common under load)
+/// let the reader's next `read` hit the recycled descriptor number, i.e. another test's socket
+/// in this process, and swallow that test's replies or requests.
 final class BridgeTestClient: Sendable {
-    let fd: Int32
+    /// `nil` once the reader closed it. Writes and shutdowns take the lock so they never land on
+    /// a recycled descriptor.
+    private let fd: Mutex<Int32?>
     private let state = Mutex<(messages: [BridgeServerMessage], badLines: [String], closed: Bool)>(([], [], false))
 
     init(path: String) throws {
-        fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(.EIO) }
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
@@ -250,11 +258,19 @@ final class BridgeTestClient: Sendable {
             Darwin.close(fd)
             throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
-        let thread = Thread { [self] in readLoop() }
+        self.fd = Mutex(fd)
+        let thread = Thread { [self] in readLoop(fd) }
         thread.start()
     }
 
-    private func readLoop() {
+    private func readLoop(_ fd: Int32) {
+        defer {
+            self.fd.withLock { open in
+                if let descriptor = open { Darwin.close(descriptor) }
+                open = nil
+            }
+            state.withLock { $0.closed = true }
+        }
         var framer = LineFramer(maxLineBytes: BridgeLimits.maxReplyLineBytes)
         var buffer = [UInt8](repeating: 0, count: 65536)
         while true {
@@ -271,7 +287,6 @@ final class BridgeTestClient: Sendable {
                 }
             }
         }
-        state.withLock { $0.closed = true }
     }
 
     var messages: [BridgeServerMessage] { state.withLock { $0.messages } }
@@ -303,12 +318,14 @@ final class BridgeTestClient: Sendable {
 
     @discardableResult
     func sendRaw(_ data: Data) -> Bool {
-        BridgeServerCore.writeAll(fd, data)
+        fd.withLock { fd in fd.map { BridgeServerCore.writeAll($0, data) } ?? false }
     }
 
+    /// Shuts the socket down; the reader then sees EOF and closes the descriptor.
     func close() {
-        Darwin.shutdown(fd, SHUT_RDWR)
-        Darwin.close(fd)
+        fd.withLock { fd in
+            if let fd { Darwin.shutdown(fd, SHUT_RDWR) }
+        }
     }
 }
 

@@ -238,6 +238,26 @@ final class BridgeServerCore: Sendable {
 
     // MARK: Connections
 
+    /// Readies an accepted socket for its connection thread. `false`: the peer is already gone
+    /// and the socket must be closed unanswered.
+    ///
+    /// Without `SO_NOSIGPIPE`, a write to a peer that hung up raises SIGPIPE, which kills the
+    /// whole process (the app, or the test runner). XNU refuses socket options with EINVAL once
+    /// both directions are shut down, which is the case when the peer connected and closed
+    /// before we accepted (a second AeroOps probing for a stale socket, a client killed right
+    /// after connecting). Writing the refusal or the busy reply to such a socket used to raise
+    /// SIGPIPE; nobody is left to read it anyway.
+    static func prepareAccepted(_ fd: Int32) -> Bool {
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        var on: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 else { return false }
+        // Accepted sockets inherit O_NONBLOCK on macOS; connection threads want blocking I/O.
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+        var writeTimeout = timeval(tv_sec: writeTimeoutSeconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &writeTimeout, socklen_t(MemoryLayout<timeval>.size))
+        return true
+    }
+
     private func acceptPending(_ listenFD: Int32) {
         while true {
             let fd = accept(listenFD, nil, nil)
@@ -245,13 +265,10 @@ final class BridgeServerCore: Sendable {
                 if errno == EINTR { continue }
                 return // EAGAIN: drained; other errors: try again on the next event.
             }
-            _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            // Accepted sockets inherit O_NONBLOCK on macOS; connection threads want blocking I/O.
-            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
-            var on: Int32 = 1
-            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-            var writeTimeout = timeval(tv_sec: Self.writeTimeoutSeconds, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &writeTimeout, socklen_t(MemoryLayout<timeval>.size))
+            guard Self.prepareAccepted(fd) else {
+                close(fd)
+                continue
+            }
 
             let connection: BridgeConnection? = state.withLock { state in
                 guard state.listenFD >= 0, state.connections.count < maxConnections else { return nil }

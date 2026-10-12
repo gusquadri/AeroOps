@@ -250,4 +250,39 @@ struct BridgeServerTests {
         #expect(reply?.error?.code == .malformedRequest)
         #expect(await eventually { client.isClosedByServer })
     }
+
+    /// A peer that connected and hung up before the accept: XNU refuses `SO_NOSIGPIPE` on that
+    /// socket, so the server must drop it instead of writing to it (that write raised SIGPIPE
+    /// and killed the test runner, or the app).
+    @Test func peerThatHungUpBeforeAcceptIsDropped() throws {
+        let dir = try TempDirectory()
+        defer { dir.remove() }
+        let path = dir.appending("s.sock").path(percentEncoded: false)
+        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        try #require(listener >= 0)
+        defer { close(listener) }
+        try #require(BridgeServerCore.withAddress(path) { bind(listener, $0, $1) } == 0)
+        try #require(listen(listener, 4) == 0)
+
+        func acceptPeer(hangUp: Bool) throws -> (peer: Int32, accepted: Int32) {
+            let peer = socket(AF_UNIX, SOCK_STREAM, 0)
+            try #require(peer >= 0)
+            try #require(BridgeServerCore.withAddress(path) { connect(peer, $0, $1) } == 0)
+            if hangUp { close(peer) }
+            let accepted = accept(listener, nil, nil)
+            try #require(accepted >= 0)
+            return (hangUp ? -1 : peer, accepted)
+        }
+
+        let gone = try acceptPeer(hangUp: true)
+        defer { close(gone.accepted) }
+        #expect(!BridgeServerCore.prepareAccepted(gone.accepted))
+
+        let live = try acceptPeer(hangUp: false)
+        defer { close(live.peer); close(live.accepted) }
+        #expect(BridgeServerCore.prepareAccepted(live.accepted))
+        var noSigPipe: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        #expect(getsockopt(live.accepted, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, &length) == 0 && noSigPipe != 0)
+    }
 }

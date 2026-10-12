@@ -133,6 +133,8 @@ final class ChildProcess: @unchecked Sendable {
     private let lineHandler: LineHandler?
     private let chunkHandler: ChunkHandler?
     private let startedAt: ContinuousClock.Instant
+    /// `false` only in tests that report the exit themselves (``reportExitForTesting()``).
+    private let watchesExit: Bool
     private let readBuffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 1)
 
     // Queue-confined state.
@@ -158,12 +160,13 @@ final class ChildProcess: @unchecked Sendable {
     private var completed = false
 
     private init(pid: pid_t, spec: ChildSpec, mode: OutputMode, startedAt: ContinuousClock.Instant,
-                 completion: @escaping @Sendable (ChildOutcome) -> Void) {
+                 watchesExit: Bool, completion: @escaping @Sendable (ChildOutcome) -> Void) {
         self.pid = pid
         self.spec = spec
         self.queue = DispatchQueue(label: "aeroops.sshkit.child.\(pid)")
         self.completion = completion
         self.startedAt = startedAt
+        self.watchesExit = watchesExit
         self.stdout = CappedOutput(limit: spec.outputLimit)
         self.stderr = CappedOutput(limit: spec.outputLimit)
         self.pendingStdin = spec.stdin ?? Data()
@@ -191,9 +194,13 @@ final class ChildProcess: @unchecked Sendable {
 
     /// Starts the child. `completion` runs exactly once, on a private queue, after the child was
     /// reaped and both output pipes reached EOF (or the drain grace expired).
+    ///
+    /// - Parameter watchesExit: tests only; `false` leaves the exit unwatched so the test can
+    ///   report it with ``reportExitForTesting()`` at a moment of its choosing.
     static func launch(
         _ spec: ChildSpec,
         mode: OutputMode = .collect,
+        watchesExit: Bool = true,
         completion: @escaping @Sendable (ChildOutcome) -> Void
     ) throws(ChildLaunchError) -> ChildProcess {
         var opened: [Int32] = []
@@ -266,7 +273,8 @@ final class ChildProcess: @unchecked Sendable {
         }
         if let stdinPipe { _ = fcntl(stdinPipe.write, F_SETNOSIGPIPE, 1) }
 
-        let child = ChildProcess(pid: pid, spec: spec, mode: mode, startedAt: startedAt, completion: completion)
+        let child = ChildProcess(pid: pid, spec: spec, mode: mode, startedAt: startedAt, watchesExit: watchesExit,
+                                 completion: completion)
         child.queue.async {
             child.start(stdin: stdinPipe?.write, stdout: stdoutPipe.read, stderr: stderrPipe.read)
         }
@@ -289,6 +297,12 @@ final class ChildProcess: @unchecked Sendable {
         }
     }
 
+    /// Tests only: delivers the process source's exit report now, the way the kernel may deliver
+    /// it before the exiting child is waitable.
+    func reportExitForTesting() {
+        queue.async { [self] in reapIfExited(exitReported: true) }
+    }
+
     // MARK: - Queue-confined
 
     private func start(stdin: Int32?, stdout: Int32, stderr: Int32) {
@@ -296,10 +310,12 @@ final class ChildProcess: @unchecked Sendable {
         stderrSource = makeReader(fd: stderr, isStdout: false)
         if let stdin { startWriter(fd: stdin) }
 
-        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
-        source.setEventHandler { [self] in reapIfExited() }
-        processSource = source
-        source.activate()
+        if watchesExit {
+            let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
+            source.setEventHandler { [self] in reapIfExited(exitReported: true) }
+            processSource = source
+            source.activate()
+        }
 
         if let timeout = spec.timeout {
             timeoutTimer = makeTimer(after: timeout) { [self] in
@@ -309,7 +325,7 @@ final class ChildProcess: @unchecked Sendable {
             }
         }
         // The child may have exited before the process source was armed.
-        reapIfExited()
+        reapIfExited(exitReported: false)
     }
 
     private func makeReader(fd: Int32, isStdout: Bool) -> DispatchSourceRead {
@@ -394,12 +410,23 @@ final class ChildProcess: @unchecked Sendable {
         stdinSource?.cancel()
     }
 
-    private func reapIfExited() {
+    /// Reaps the child if it exited.
+    ///
+    /// - Parameter exitReported: the process source reported the exit (`NOTE_EXIT`, or the
+    ///   synthetic one libdispatch delivers when the pid is already a zombie). The kernel posts
+    ///   `NOTE_EXIT` while the child is still being torn down, *before* it becomes a waitable
+    ///   zombie, and never posts it again. A `WNOHANG` check in that window sees a running child,
+    ///   so the child was never reaped and the completion never ran (a hang seen under load).
+    ///   After the report this therefore blocks until the child is waitable, which is
+    ///   imminent. Without the report it only checks (`WNOHANG`).
+    private func reapIfExited(exitReported: Bool) {
         guard termination == nil else { return }
         var info = siginfo_t()
-        let peek = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
-        if peek == 0 && info.si_pid != pid { return } // still running
-        if peek != 0 && errno == EINTR { return }
+        let options = WEXITED | WNOWAIT | (exitReported ? 0 : WNOHANG)
+        var peek: Int32
+        repeat { peek = waitid(P_PID, id_t(pid), &info, options) } while peek != 0 && errno == EINTR
+        if peek == 0 && info.si_pid != pid { return } // still running (only possible with WNOHANG)
+        // peek != 0 (ECHILD): someone else reaped it; waitpid below reports that.
 
         if terminating {
             // While the zombie exists its pid (= process group id) cannot be reused, so this is
