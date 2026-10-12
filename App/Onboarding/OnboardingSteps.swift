@@ -66,7 +66,7 @@ struct OnboardingKeyStep: View {
 
     @State private var isWorking = false
     @State private var error: String?
-    @State private var importedFile: URL?
+    @State private var importedFiles: [URL] = []
 
     var body: some View {
         Group {
@@ -76,7 +76,7 @@ struct OnboardingKeyStep: View {
                 keyForm
             }
         }
-        .trashImportedKeyDialog(file: $importedFile) { error = $0 }
+        .trashImportedKeyDialog(files: $importedFiles) { error = $0 }
     }
 
     private static let agentCaption = "If your keys already live in 1Password, Secretive or another ssh-agent, ssh uses the agent in $SSH_AUTH_SOCK and AeroOps needs no key of its own. You can change this in Settings › Keys."
@@ -196,12 +196,12 @@ struct OnboardingKeyStep: View {
     }
 
     private func importKey() {
-        guard let url = KeyFileImport.chooseFile() else { return }
+        guard let url = KeyFileImport.chooseFiles(allowsMultipleSelection: false).first else { return }
         let ssh = model.ssh
         run {
             let record = try await ssh.importKey(contentsOf: url, policy: KeyFileImport.policy)
             flow.keyID = record.id
-            importedFile = url
+            importedFiles = [url]
         }
     }
 

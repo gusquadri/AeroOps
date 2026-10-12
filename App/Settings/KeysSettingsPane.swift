@@ -10,8 +10,9 @@ import SwiftUI
 /// policy, delete and "Copy authorized_keys line", plus the agent's status and the "Use system
 /// ssh-agent instead" fallback.
 ///
-/// Private keys never reach the UI: only ``SSHKeyRecord`` metadata does. Imported files are read
-/// into memory, stored in the Keychain, and the user is offered to move the file to the Trash.
+/// Private keys never reach the UI: only ``SSHKeyRecord`` metadata does. Imported files (several
+/// at once if chosen together) are read into memory, stored in the Keychain, and the user is
+/// offered to move them to the Trash.
 struct KeysSettingsPane: View {
     @Environment(AppModel.self) private var model
 
@@ -19,7 +20,7 @@ struct KeysSettingsPane: View {
     @State private var renaming: SSHKeyRecord?
     @State private var newName = ""
     @State private var deletionCandidate: SSHKeyRecord?
-    @State private var importedFile: URL?
+    @State private var importedFiles: [URL] = []
     @State private var actionError: String?
 
     var body: some View {
@@ -79,7 +80,7 @@ struct KeysSettingsPane: View {
         } message: { key in
             Text(deletionMessage(for: key))
         }
-        .trashImportedKeyDialog(file: $importedFile) { actionError = $0 }
+        .trashImportedKeyDialog(files: $importedFiles) { actionError = $0 }
     }
 
     // MARK: - Sections
@@ -96,9 +97,9 @@ struct KeysSettingsPane: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            Button("Import…", systemImage: "square.and.arrow.down", action: importKey)
+            Button("Import…", systemImage: "square.and.arrow.down", action: importKeys)
                 .buttonStyle(.aquaSecondary)
-                .help("Import an unencrypted OpenSSH private key file")
+                .help("Import one or more unencrypted OpenSSH private key files")
             Button("Generate…", systemImage: "plus") { isGenerating = true }
                 .buttonStyle(.aqua)
         }
@@ -142,12 +143,15 @@ struct KeysSettingsPane: View {
         return "\(usage) \(loss)"
     }
 
-    private func importKey() {
-        guard let url = KeyFileImport.chooseFile() else { return }
+    private func importKeys() {
+        let urls = KeyFileImport.chooseFiles(allowsMultipleSelection: true)
+        guard !urls.isEmpty else { return }
         let ssh = model.ssh
-        perform {
-            _ = try await ssh.importKey(contentsOf: url, policy: KeyFileImport.policy)
-            importedFile = url
+        actionError = nil
+        Task {
+            let outcome = await KeyFileImport.importFiles(urls, into: ssh)
+            actionError = outcome.failureMessage
+            importedFiles = outcome.imported.map(\.file)
         }
     }
 

@@ -6,6 +6,8 @@ public enum KeyImportError: Error, Equatable, Sendable, LocalizedError {
     /// Not an `-----BEGIN OPENSSH PRIVATE KEY-----` file. `detected` names the format when known
     /// (PKCS#1, PKCS#8, SEC1 PEM); `ssh-keygen -p -f <file>` rewrites those as `openssh-key-v1`.
     case notOpenSSHFormat(detected: String?)
+    /// A public key (`.pub` contents or an authorized_keys line) instead of the private key.
+    case publicKey
     /// The key is protected by a passphrase. Encrypted import comes in a later phase.
     case encrypted(cipher: String, kdf: String)
     /// A key type the agent does not serve (e.g. DSA, ECDSA P-384/P-521, FIDO `sk-` keys).
@@ -25,6 +27,8 @@ public enum KeyImportError: Error, Equatable, Sendable, LocalizedError {
             "This is a \(detected) key. Convert it to the OpenSSH format first with `ssh-keygen -p -f <file>`."
         case .notOpenSSHFormat(nil):
             "Not an OpenSSH private key (expected -----BEGIN OPENSSH PRIVATE KEY-----)."
+        case .publicKey:
+            "This is a public key. Choose the private key file instead: it has the same name without .pub."
         case .encrypted:
             "This key is protected by a passphrase. Importing encrypted keys is not supported yet; remove the passphrase with `ssh-keygen -p -f <file>` on a copy, or generate a new key in AeroOps."
         case .unsupportedKeyType(let type):
@@ -53,6 +57,7 @@ struct OpenSSHPrivateKey: Sendable {
     /// Parses the PEM-armoured text of an OpenSSH private key file.
     static func parse(_ text: String) throws(KeyImportError) -> OpenSSHPrivateKey {
         guard let begin = text.range(of: beginMarker), let end = text.range(of: endMarker, range: begin.upperBound..<text.endIndex) else {
+            if isPublicKey(text) { throw .publicKey }
             throw .notOpenSSHFormat(detected: detectOtherFormat(text))
         }
         let base64 = text[begin.upperBound..<end.lowerBound].filter { !$0.isWhitespace }
@@ -168,8 +173,13 @@ struct OpenSSHPrivateKey: Sendable {
         if text.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----") { return "encrypted PKCS#8 PEM" }
         if text.contains("-----BEGIN PRIVATE KEY-----") { return "PKCS#8 PEM" }
         if text.contains("PuTTY-User-Key-File") { return "PuTTY" }
-        if text.hasPrefix("ssh-") || text.hasPrefix("ecdsa-") { return "public key (not a private key)" }
         return nil
+    }
+
+    /// An OpenSSH public key line (`ssh-ed25519 AAAA… comment`, also `ecdsa-` and `sk-` types).
+    private static func isPublicKey(_ text: String) -> Bool {
+        let line = text.drop { $0.isWhitespace }
+        return ["ssh-", "ecdsa-", "sk-"].contains { line.hasPrefix($0) }
     }
 }
 

@@ -62,9 +62,9 @@ struct OpenSSHImportTests {
             try OpenSSHPrivateKey.parse(generated.privateKeyText)
         }
         #expect(KeyImportError.notOpenSSHFormat(detected: "PKCS#1 PEM (RSA)").errorDescription?.contains("ssh-keygen -p") == true)
-        #expect(throws: KeyImportError.notOpenSSHFormat(detected: "public key (not a private key)")) {
-            try OpenSSHPrivateKey.parse(generated.publicKeyLine)
-        }
+        #expect(throws: KeyImportError.publicKey) { try OpenSSHPrivateKey.parse(generated.publicKeyLine) }
+        #expect(throws: KeyImportError.publicKey) { try OpenSSHPrivateKey.parse("\n" + generated.publicKeyLine) }
+        #expect(KeyImportError.publicKey.errorDescription?.contains("without .pub") == true)
         #expect(throws: KeyImportError.notOpenSSHFormat(detected: nil)) { try OpenSSHPrivateKey.parse("hello") }
     }
 
