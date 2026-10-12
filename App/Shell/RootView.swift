@@ -28,6 +28,9 @@ struct RootView: View {
         .sheet(item: $model.editorRequest) { request in
             HostEditorSheet(request: request)
         }
+        .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
+            if let first = ids.first { model.selection = first }
+        }
     }
 }
 
