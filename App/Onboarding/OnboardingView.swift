@@ -36,7 +36,7 @@ struct OnboardingView: View {
             navigationBar
                 .padding(16)
         }
-        .frame(width: 720, height: 660)
+        .frame(width: 720, height: 620)
         .background { Aero.sky.gradient.ignoresSafeArea() }
         .confirmationDialog(
             "Discard “\(unsavedServerName)”?",
@@ -104,8 +104,9 @@ struct OnboardingView: View {
                     .keyboardShortcut("[", modifiers: .command)
                     .help("Previous step (⌘[)")
             }
+            // One primary button at a time: Continue steps back while the step's own owns Return.
             Button(continueTitle, action: advance)
-                .buttonStyle(.aqua)
+                .buttonStyle(AquaButtonStyle(continueOwnsReturn ? .primary : .secondary))
                 .keyboardShortcut(continueOwnsReturn ? .defaultAction : nil)
                 .disabled(!canContinue)
                 .help(continueHelp)

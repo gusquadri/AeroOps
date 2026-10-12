@@ -278,7 +278,7 @@ struct OnboardingServerStep: View {
                         .font(Aero.font(.callout))
                         .foregroundStyle(Aero.text.secondary)
                 }
-                Label("Add more servers any time with the + button in the sidebar. Continue when you’re ready.", systemImage: "info.circle")
+                Label("Add more servers any time with Add Host in the sidebar. Continue when you’re ready.", systemImage: "info.circle")
                     .font(Aero.font(.caption))
                     .foregroundStyle(Aero.text.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -447,7 +447,7 @@ struct OnboardingDoneStep: View {
                 done: true
             )
         } else {
-            row(systemImage: "server.rack", title: "No server yet", detail: "Add one with the + button in the sidebar.", done: false)
+            row(systemImage: "server.rack", title: "No server yet", detail: "Add one with Add Host in the sidebar.", done: false)
         }
     }
 

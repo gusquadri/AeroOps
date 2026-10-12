@@ -2,6 +2,7 @@ import AeroCore
 import Foundation
 import KeyAgent
 import Observation
+import SystemConfiguration
 
 /// One run of the onboarding sheet: the current step and what the user has entered so far, so
 /// Back and Continue never lose an unsaved key name or server form.
@@ -59,8 +60,8 @@ final class OnboardingFlow {
     }
 
     var step: Step
-    /// The "Generate key" fields.
-    var keyDraft = NewKeyDraft()
+    /// The "Generate key" fields, named after this Mac so Generate Key works straight away.
+    var keyDraft = NewKeyDraft(name: OnboardingFlow.suggestedKeyName)
     /// The key generated or imported in this run.
     var keyID: UUID?
     /// Shows the generate and import choices although a key exists ("Use Another Key…").
@@ -83,6 +84,13 @@ final class OnboardingFlow {
     func currentKey(in keys: [SSHKeyRecord]) -> SSHKeyRecord? {
         guard !isChoosingKey else { return nil }
         return keys.first { $0.id == keyID } ?? keys.first
+    }
+
+    /// "<Computer Name> key" (Settings › Sharing), or empty if the name is unavailable.
+    static var suggestedKeyName: String {
+        guard let computer = SCDynamicStoreCopyComputerName(nil, nil) as String?,
+              !computer.trimmingCharacters(in: .whitespaces).isEmpty else { return "" }
+        return "\(computer) key"
     }
 
     /// The user started typing a server but hasn't added it.
