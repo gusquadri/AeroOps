@@ -20,7 +20,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_HARDENED_RUNTIME: YES
     # Apple Development signing (team VUDQQS32NW) so Keychain item ACLs survive rebuilds.
-    # Phase 9 switches Release to Developer ID.
+    # Scripts/release.sh overrides this with Developer ID.
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Apple Development"
     DEVELOPMENT_TEAM: VUDQQS32NW
