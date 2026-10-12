@@ -13,8 +13,13 @@ struct AeroOpsApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+    /// Sparkle; does nothing in builds without an update feed (every development build).
+    @State private var updates: UpdateService
 
     init() {
+        let updates = UpdateService()
+        updates.start()
+        _updates = State(initialValue: updates)
         #if DEBUG
         let model = DebugLaunchOptions.makeModel() ?? Self.makeModel()
         DebugLaunchOptions.apply(to: model)
@@ -51,11 +56,15 @@ struct AeroOpsApp: App {
                 .environment(model)
         }
         .defaultSize(width: 1180, height: 760)
-        .commands { AppCommands(model: model) }
+        .commands {
+            AppCommands(model: model)
+            UpdateCommands(updates: updates)
+        }
 
         Settings {
             SettingsView()
                 .environment(model)
+                .environment(\.updateService, updates)
                 .aeroAppearance()
         }
     }
