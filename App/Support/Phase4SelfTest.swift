@@ -29,12 +29,14 @@ import UniformTypeIdentifiers
 /// Steps: a fresh Ed25519 key, authorized on all three servers (nothing connects unless all
 /// three took it: sshd's PerSourcePenalties would ban this Mac after failed logins) → hosts and
 /// `canOpenSSH` → argv of shell and remote-command tabs → five shell tabs (first contact goes
-/// through the trust sheet, trusted automatically here only) → a remote-command tab that exits 7,
+/// through the trust sheet, trusted automatically here only), each of which the agent's ancestry
+/// walk must see as started by AeroOps → a remote-command tab that exits 7,
 /// Reconnect → an unreachable host (exit 255) → `stty size; tput cols` per tab → vi and top →
 /// window resize → copy a selection and paste it into another tab → an unsafe paste asks first →
 /// menu shortcuts sent as key events (skipped, not failed, while another app keeps the focus) →
 /// close every tab and list leftover processes → the quit path (tabs close before the agent
-/// stops) → revoke the key, delete it, remove the root.
+/// stops) → no Touch ID requests (the key signs without asking for AeroOps' own ssh; requests
+/// are recorded and denied, never shown) → revoke the key, delete it, remove the root.
 /// Writes a JSON report (`"ok": true` on success) and quits.
 @MainActor
 final class Phase4SelfTest {
