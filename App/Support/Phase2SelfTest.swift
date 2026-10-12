@@ -14,6 +14,7 @@ import Synchronization
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase2 \
 ///   -AeroSelfTestOutput /tmp/aeroops-selftest.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh \   # authorizes the new .pub on the dev server
+///   [-AeroSelfTestRevokeScript dev/remove-key.sh] \ # default: remove-key.sh next to the authorize script
 ///   [-AeroSelfTestKeepRoot YES]                      # keep the temporary root for inspection
 /// ```
 ///
@@ -25,7 +26,8 @@ import Synchronization
 /// its .pub → add the host → Test connection (expects first contact) → trust the scanned keys →
 /// Test connection (expects success) → a ControlMaster run → a simulated changed host key (expects
 /// the host to be blocked and never contacted) → scan for private key material on disk →
-/// shutdown → delete the key and the root. Writes a JSON report (`"ok": true` on success) and quits.
+/// shutdown → revoke the .pub on the dev servers → delete the key and the root. Writes a JSON
+/// report (`"ok": true` on success) and quits.
 ///
 /// Not covered: Touch ID prompts (policy "always" never asks) and Secure Enclave keys.
 @MainActor
@@ -286,8 +288,14 @@ struct Phase2SelfTest {
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: paths.controlMasterDirectory.path(percentEncoded: false))) ?? []
         r.step("shutdown", socketGone && leftovers.isEmpty, "masters closed \(closed), agent socket removed \(socketGone), cm/ entries \(leftovers.count)")
 
-        // Cleanup: Keychain item and root.
+        // Cleanup: authorized_keys line, Keychain item and root.
         if let key {
+            // Revoke before deleting: the script reads the .pub.
+            if let script = Phase3SelfTest.revokeScript, Self.authorizeScript != nil {
+                let pub = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
+                let (status, output) = await Self.runProcess(script, arguments: [pub.path(percentEncoded: false)])
+                r.step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
             do {
                 try await ssh.deleteKey(key.id)
                 let remaining = try KeychainSecretStore(service: Self.keychainService).load(for: key.id)
@@ -337,8 +345,18 @@ struct Phase2SelfTest {
     }
 
     /// Runs `executable` with `arguments`; returns the exit status and combined output.
-    nonisolated static func runProcess(_ executable: URL, arguments: [String]) async -> (Int32, String) {
+    /// Runs a helper script and returns its exit status and combined output. A script still
+    /// running after `timeout` seconds is terminated and reported as status -2, so a dev server
+    /// that stops answering (an `orb` or `docker exec` that never returns) cannot stall a run.
+    nonisolated static func runProcess(
+        _ executable: URL, arguments: [String], timeout: TimeInterval = 120
+    ) async -> (Int32, String) {
         await withCheckedContinuation { continuation in
+            let resumed = Mutex(false)
+            let finish: @Sendable (Int32, String) -> Void = { status, output in
+                guard resumed.withLock({ done in defer { done = true }; return !done }) else { return }
+                continuation.resume(returning: (status, output))
+            }
             let process = Process()
             process.executableURL = executable
             process.arguments = arguments
@@ -346,13 +364,20 @@ struct Phase2SelfTest {
             process.standardOutput = pipe
             process.standardError = pipe
             process.terminationHandler = { process in
+                // Blocks until every writer closes the pipe; a grandchild that outlives the
+                // script keeps it open, which the timeout below covers.
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: (process.terminationStatus, String(decoding: data, as: UTF8.self)))
+                finish(process.terminationStatus, String(decoding: data, as: UTF8.self))
             }
             do {
                 try process.run()
             } catch {
-                continuation.resume(returning: (-1, error.localizedDescription))
+                finish(-1, error.localizedDescription)
+                return
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if process.isRunning { process.terminate() }
+                finish(-2, "\(executable.lastPathComponent) timed out after \(Int(timeout)) s")
             }
         }
     }
