@@ -58,6 +58,17 @@ struct AeroThemeTests {
         #expect(GlossyGauge.formatted(-0.2) == "0%")
     }
 
+    @Test("gauge animation key: the shown whole percentage")
+    func gaugePercent() {
+        #expect(GlossyGauge.percent(nil) == nil)
+        #expect(GlossyGauge.percent(.nan) == nil)
+        #expect(GlossyGauge.percent(0.423) == 42)
+        #expect(GlossyGauge.percent(0.4249) == GlossyGauge.percent(0.4151))
+        #expect(GlossyGauge.percent(0.425) == 43)
+        #expect(GlossyGauge.percent(1.7) == 100)
+        #expect(GlossyGauge.percent(-0.2) == 0)
+    }
+
     @Test("gauge colour band follows the thresholds", arguments: [
         (nil, GlossyGauge.Level.none),
         (Double.nan, .none),

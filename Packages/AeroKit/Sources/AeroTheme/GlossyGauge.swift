@@ -47,10 +47,6 @@ public struct GlossyGauge: View {
         let strong = accessibility.increaseContrast
         VStack(spacing: 6) {
             ZStack {
-                GaugeGroove(lineWidth: lineWidth, strong: strong)
-                if let fraction, fraction > 0 {
-                    GaugeTube(fraction: fraction, colors: level.colors, lineWidth: lineWidth)
-                }
                 GaugeSpecular(lineWidth: lineWidth)
                 GaugeBubble(inset: lineWidth + 3)
                 Text(Self.formatted(value))
@@ -62,7 +58,20 @@ public struct GlossyGauge: View {
                     .padding(.horizontal, lineWidth + 4)
             }
             .frame(width: diameter, height: diameter)
-            .animation(accessibility.animation(.smooth(duration: 0.6)), value: fraction)
+            // The groove and the tube sit in a background: drawn first, as before, but outside
+            // the layout, so the animating tube does not re-measure the stacks and grid around
+            // the gauge on every frame.
+            .background {
+                ZStack {
+                    GaugeGroove(lineWidth: lineWidth, strong: strong)
+                    if let fraction, fraction > 0 {
+                        GaugeTube(fraction: fraction, colors: level.colors, lineWidth: lineWidth)
+                    }
+                }
+            }
+            // Keyed on the shown percentage: a sub-percent move (under 2 pt of ring) lands in
+            // one frame instead of running the 0.6 s spring at the display rate.
+            .animation(accessibility.animation(.smooth(duration: 0.6)), value: Self.percent(value))
             Text(label)
                 .font(Aero.font(.caption, weight: .semibold))
                 .foregroundStyle(strong ? Aero.text.primary : Aero.text.secondary)
@@ -87,10 +96,15 @@ public struct GlossyGauge: View {
         return min(max(value, 0), 1)
     }
 
+    /// The value as a whole percentage `0...100`, or `nil` for `nil`/NaN.
+    nonisolated static func percent(_ value: Double?) -> Int? {
+        clamped(value).map { Int(($0 * 100).rounded()) }
+    }
+
     /// Centre text: "42%" or the dash.
     nonisolated static func formatted(_ value: Double?) -> String {
-        guard let fraction = clamped(value) else { return placeholder }
-        return "\(Int((fraction * 100).rounded()))%"
+        guard let percent = percent(value) else { return placeholder }
+        return "\(percent)%"
     }
 
     /// The colour band for `value`.
