@@ -288,7 +288,7 @@ private struct DebugSnapshotter {
         let scrolled = SSHConfigImportModel()
         await scrolled.load(existingHosts: model.hosts)
         await captureStandalone(
-            SSHConfigImportSheet(importer: scrolled, height: 1500, showsIssues: true),
+            SSHConfigImportSheet(importer: scrolled, height: 1640, showsIssues: true),
             title: "Import from SSH Config", name: "\(prefix)-import-sheet-full"
         )
     }

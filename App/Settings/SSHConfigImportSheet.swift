@@ -320,7 +320,8 @@ private struct SSHConfigImportRow: View {
             }
             if !candidate.identityFiles.isEmpty {
                 let files = candidate.identityFiles.map { "“\(safe($0, limit: 60))”" }.formatted(.list(type: .and))
-                note("Uses IdentityFile \(files). AeroOps doesn't read key files: import the key in Settings › Keys, then pick it for this host.",
+                let summary = candidate.identityFiles.count == 1 ? "IdentityFile \(files) isn't" : "IdentityFiles \(files) aren't"
+                note("\(summary) imported: add the key in Settings › Keys, then pick it for this host.",
                      systemImage: "key", tint: Aero.sun)
             }
         }
