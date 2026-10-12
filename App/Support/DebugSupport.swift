@@ -168,7 +168,8 @@ enum DebugLaunchOptions {
 
 extension View {
     /// With `-AeroOpsSnapshotDirectory`, captures the dashboard grid, every main-window tab, the
-    /// host detail panel, the host editor sheet and every Settings pane to PNGs, then quits.
+    /// host detail panel, the host editor sheet, every onboarding step and every Settings pane to
+    /// PNGs, then quits.
     /// Otherwise does nothing.
     func debugSnapshotHarness() -> some View {
         modifier(DebugSnapshotHarness())
@@ -208,6 +209,10 @@ private struct DebugSnapshotter {
         }
         NSApp.activate()
         main.makeKeyAndOrderFront(nil)
+        if DebugLaunchOptions.snapshotsOnlyOnboarding {
+            await captureOnboarding(over: main)
+            return NSApp.terminate(nil)
+        }
         // The whole dashboard grid, before a selection opens the inspector.
         model.selection = nil
         model.selectedTab = .dashboard
@@ -252,6 +257,7 @@ private struct DebugSnapshotter {
 
         await captureTrustSheet()
         await captureAgents()
+        await captureOnboarding(over: main)
 
         let before = Set(NSApp.windows.map(ObjectIdentifier.init))
         openSettings()
@@ -318,9 +324,61 @@ private struct DebugSnapshotter {
         }
     }
 
-    /// Shows `view` in a temporary window, captures it and closes the window.
-    private func captureStandalone(_ view: some View, title: String, name: String) async {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view.aeroAppearance().environment(model)))
+    /// Every onboarding step at full size in a standalone window: a first run (no keys, no
+    /// hosts), a run with sample keys (key ready, server form with the key preselected) and the
+    /// launch model's hosts (servers added, all set). With a data directory, also the live sheet
+    /// over the main window.
+    private func captureOnboarding(over main: NSWindow) async {
+        let firstRun = AppModel.preview(hosts: [])
+        let withKey = AppModel.preview(hosts: [])
+        await withKey.ssh.loadSampleData()
+        let key = withKey.ssh.keys.first?.id
+
+        await captureOnboarding(OnboardingFlow(step: .welcome), on: firstRun, name: "1-welcome")
+        await captureOnboarding(OnboardingFlow(step: .key), on: firstRun, name: "2-key")
+        let keyReady = OnboardingFlow(step: .key)
+        keyReady.keyID = key
+        await captureOnboarding(keyReady, on: withKey, name: "2-key-ready")
+        let server = OnboardingFlow(step: .server)
+        server.preselectKey(key)
+        await captureOnboarding(server, on: withKey, name: "3-server")
+        if let host = model.hosts.first {
+            let added = OnboardingFlow(step: .server)
+            added.addedHostID = host.id
+            await captureOnboarding(added, on: model, name: "3-server-added")
+        }
+        await captureOnboarding(OnboardingFlow(step: .agents), on: firstRun, name: "4-agents")
+        await captureOnboarding(OnboardingFlow(step: .done), on: firstRun, name: "5-done-nothing-set-up")
+        if let host = model.hosts.first {
+            let done = OnboardingFlow(step: .done)
+            done.addedHostID = host.id
+            await captureOnboarding(done, on: model, name: "5-done")
+        }
+
+        // The real sheet. Only with a data directory: dismissing it marks onboarding completed,
+        // which must not reach the real UserDefaults.
+        guard DebugLaunchOptions.dataDirectory != nil else { return }
+        NSApp.activate()
+        main.makeKeyAndOrderFront(nil)
+        model.onboarding.present()
+        await pause(1.5)
+        if let sheet = main.attachedSheet {
+            await capture(sheet, name: "\(prefix)-onboarding-sheet")
+        } else {
+            log("no onboarding sheet")
+        }
+        model.onboarding.complete()
+        await pause(0.8)
+    }
+
+    private func captureOnboarding(_ flow: OnboardingFlow, on model: AppModel, name: String) async {
+        await captureStandalone(OnboardingView(flow: flow), title: "Welcome to AeroOps", name: "\(prefix)-onboarding-\(name)", model: model)
+    }
+
+    /// Shows `view` in a temporary window, captures it and closes the window. `model` defaults to
+    /// the launch model.
+    private func captureStandalone(_ view: some View, title: String, name: String, model: AppModel? = nil) async {
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view.aeroAppearance().environment(model ?? self.model)))
         window.title = title
         window.isReleasedWhenClosed = false
         window.center()
