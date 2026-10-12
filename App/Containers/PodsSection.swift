@@ -78,20 +78,25 @@ struct PodsSection: View {
     }
 }
 
-/// The pods table: namespace, name, ready, status, restarts, age, node and actions.
+/// The pods table: namespace, name, ready, status, restarts, age, node and actions. With the
+/// inspector open the table is too narrow for every column, so namespace and node (both shown
+/// in the inspector) give way rather than the table scrolling sideways.
 private struct PodTable: View {
     @Bindable var containers: HostContainersModel
 
     var body: some View {
         let rows = containers.filteredPods
+        let compact = containers.inspectorPresented
         AeroCard(padding: 0) {
             Table(rows, selection: $containers.selectedPodID) {
-                TableColumn("Namespace") { pod in
-                    Text(pod.namespace)
-                        .lineLimit(1)
-                        .foregroundStyle(Aero.text.secondary)
+                if !compact {
+                    TableColumn("Namespace") { pod in
+                        Text(pod.namespace)
+                            .lineLimit(1)
+                            .foregroundStyle(Aero.text.secondary)
+                    }
+                    .width(min: 64, ideal: 84)
                 }
-                .width(min: 64, ideal: 84)
                 TableColumn("Name") { pod in
                     HStack(spacing: 8) {
                         StatusOrb(tone: pod.health.workloadTone, size: 10)
@@ -102,7 +107,7 @@ private struct PodTable: View {
                     }
                     .help(pod.id)
                 }
-                .width(min: 120, ideal: 190)
+                .width(min: 100, ideal: 190)
                 TableColumn("Ready") { pod in
                     Text("\(pod.readyCount)/\(pod.containerCount)")
                         .monospacedDigit()
@@ -124,12 +129,14 @@ private struct PodTable: View {
                         .foregroundStyle(Aero.text.secondary)
                 }
                 .width(min: 36, ideal: 40, max: 60)
-                TableColumn("Node") { pod in
-                    Text(pod.nodeName ?? MetricText.missing)
-                        .lineLimit(1)
-                        .foregroundStyle(Aero.text.secondary)
+                if !compact {
+                    TableColumn("Node") { pod in
+                        Text(pod.nodeName ?? MetricText.missing)
+                            .lineLimit(1)
+                            .foregroundStyle(Aero.text.secondary)
+                    }
+                    .width(min: 60, ideal: 90)
                 }
-                .width(min: 60, ideal: 90)
                 TableColumn("") { pod in
                     HStack(spacing: 10) {
                         RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
@@ -288,6 +295,15 @@ struct PodInspectorView: View {
                 if detail.isGone {
                     AeroTag("Gone", tone: .neutral)
                 }
+            }
+            // The pod table hides its Node column while the inspector is open.
+            if let node = containers.selectedPod?.nodeName {
+                Label(node, systemImage: "server.rack")
+                    .font(Aero.font(.caption))
+                    .foregroundStyle(Aero.text.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help("Node")
             }
             // On its own row so the inspector's minimum width stays within its column minimum.
             if let pod = containers.selectedPod, pod.restarts > 0 {

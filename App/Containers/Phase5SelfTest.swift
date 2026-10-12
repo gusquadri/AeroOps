@@ -263,7 +263,7 @@ struct Phase5SelfTest {
         containers.section = .docker
         containers.showStopped = true
         await pause(1.0)
-        await snapshotMain("docker-table")
+        await snapshotMain("docker-table", r)
     }
 
     private func checkInspect(_ containers: HostContainersModel, _ r: Recorder) async {
@@ -318,7 +318,7 @@ struct Phase5SelfTest {
         await pause(0.8)
         r.report.searchMatches = viewer.matchCount
         r.step("search", viewer.matchCount > 0, "\(viewer.matchCount) matches for “\(r.report.searchQuery)”")
-        await snapshotSheet("logs-search")
+        await snapshotSheet("logs-search", r)
 
         // A synthetic burst through the same inbox and flush path: 50k lines at ~10k/s.
         heartbeat.reset()
@@ -416,7 +416,7 @@ struct Phase5SelfTest {
             )
         }
         await pause(1.0)
-        await snapshotMain("pod-table")
+        await snapshotMain("pod-table", r)
 
         // One click: the crashed instance's logs.
         if let crasher {
@@ -435,7 +435,7 @@ struct Phase5SelfTest {
                         + (info.map { "; info line: \($0.prefix(100))" } ?? "")
                         + (viewer.issue.map { "; issue: \($0.title)" } ?? "")
                 )
-                await snapshotSheet("previous-logs")
+                await snapshotSheet("previous-logs", r)
                 containers.logs = nil
                 await pause(0.6)
             } else {
@@ -468,10 +468,10 @@ struct Phase5SelfTest {
                     + (containers.podDetail?.eventsIssue.map { "; issue: \($0.title)" } ?? "")
             )
             await pause(1.0)
-            await snapshotMain("pod-events")
+            await snapshotMain("pod-events", r)
             containers.inspectorTab = .describe
             await pause(0.8)
-            await snapshotMain("pod-describe")
+            await snapshotMain("pod-describe", r)
             containers.inspectorTab = .events
             containers.inspectorPresented = false
             progress("inspector closed")
@@ -522,7 +522,7 @@ struct Phase5SelfTest {
         )
         containers.section = .docker
         await pause(1.0)
-        await snapshotMain("permission-hint")
+        await snapshotMain("permission-hint", r)
         model.selection = nil
     }
 
@@ -660,17 +660,17 @@ struct Phase5SelfTest {
         NSApp.windows.first { $0.isVisible && $0.canBecomeMain && !$0.isSheet }
     }
 
-    private func snapshotMain(_ name: String) async {
+    private func snapshotMain(_ name: String, _ r: Recorder) async {
         guard Self.snapshotDirectory != nil, let window = mainWindow else { return }
-        await snapshotBothAppearances(name) { window }
+        await snapshotBothAppearances(name, r) { window }
     }
 
-    private func snapshotSheet(_ name: String) async {
+    private func snapshotSheet(_ name: String, _ r: Recorder) async {
         guard Self.snapshotDirectory != nil else { return }
-        await snapshotBothAppearances(name) { mainWindow?.attachedSheet ?? mainWindow }
+        await snapshotBothAppearances(name, r) { mainWindow?.attachedSheet ?? mainWindow }
     }
 
-    private func snapshotBothAppearances(_ name: String, window: () -> NSWindow?) async {
+    private func snapshotBothAppearances(_ name: String, _ r: Recorder, window: () -> NSWindow?) async {
         guard let directory = Self.snapshotDirectory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         NSApp.activate()
@@ -678,8 +678,9 @@ struct Phase5SelfTest {
         for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
             await pause(0.8)
-            if let window = window() {
-                await SelfTestCapture.capture(window, to: directory.appending(path: "phase5-\(name)-\(suffix).png"))
+            let file = "phase5-\(name)-\(suffix).png"
+            if let window = window(), await SelfTestCapture.capture(window, to: directory.appending(path: file)) {
+                r.report.snapshots.append(file)
             }
         }
         NSApp.appearance = nil
@@ -771,7 +772,9 @@ final class MainThreadHeartbeat {
 /// Recording permission needed), else the view tree drawn into a bitmap.
 @MainActor
 enum SelfTestCapture {
-    static func capture(_ window: NSWindow, to url: URL) async {
+    /// Returns whether the PNG was written.
+    @discardableResult
+    static func capture(_ window: NSWindow, to url: URL) async -> Bool {
         do {
             let content = try await SCShareableContent.currentProcess
             guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
@@ -784,25 +787,26 @@ enum SelfTestCapture {
             config.height = Int(filter.contentRect.height * scale)
             config.showsCursor = false
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            write(image, to: url)
+            return write(image, to: url)
         } catch {
-            fallback(window, to: url)
+            return fallback(window, to: url)
         }
     }
 
-    private static func fallback(_ window: NSWindow, to url: URL) {
+    private static func fallback(_ window: NSWindow, to url: URL) -> Bool {
         guard let view = window.contentView?.superview ?? window.contentView,
-              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
         view.cacheDisplay(in: view.bounds, to: rep)
-        if let image = rep.cgImage { write(image, to: url) }
+        guard let image = rep.cgImage else { return false }
+        return write(image, to: url)
     }
 
-    private static func write(_ image: CGImage, to url: URL) {
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
+    private static func write(_ image: CGImage, to url: URL) -> Bool {
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { return false }
         CGImageDestinationAddImage(destination, image, nil)
-        if CGImageDestinationFinalize(destination) {
-            Phase5SelfTest.log("[phase5] wrote \(url.path(percentEncoded: false))")
-        }
+        guard CGImageDestinationFinalize(destination) else { return false }
+        Phase5SelfTest.log("[phase5] wrote \(url.path(percentEncoded: false))")
+        return true
     }
 }
 #endif
