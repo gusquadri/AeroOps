@@ -7,10 +7,10 @@ import os
 ///
 /// ```text
 /// socket → peer check → tool lookup → argument validation → host lookup → PolicyEngine
-///        → ApprovalCenter (run_command) → BridgeToolHandler / CommandExecutor → AuditLog → reply
+///        → ApprovalCenter (run_command) → BridgeToolHandler / CommandExecutor → reply
 /// ```
 ///
-/// Every call is audited, including invalid and refused ones. While an approval is pending the
+/// While an approval is pending the
 /// CLI gets progress lines ("Waiting for approval in AeroOps"), which it forwards as MCP
 /// progress notifications.
 ///
@@ -22,7 +22,6 @@ import os
 public final class Bridge: Sendable {
     public let socketURL: URL
     public let approvals: ApprovalCenter
-    public let audit: AuditLog
     public let executor: CommandExecutor
     private let pipeline: BridgePipeline
     private let server: BridgeServer
@@ -39,7 +38,6 @@ public final class Bridge: Sendable {
         handler: any BridgeToolHandler,
         executor: CommandExecutor = CommandExecutor(runner: SSHCommandRunner()),
         approvals: ApprovalCenter = ApprovalCenter(),
-        audit: AuditLog = AuditLog(),
         peerValidator: any BridgePeerValidator = CodeSignaturePeerValidator.forApp(),
         policy: PolicyEngine = PolicyEngine(),
         clock: any BridgeClock = SystemBridgeClock(),
@@ -47,9 +45,8 @@ public final class Bridge: Sendable {
     ) {
         self.socketURL = socketURL
         self.approvals = approvals
-        self.audit = audit
         self.executor = executor
-        pipeline = BridgePipeline(handler: handler, executor: executor, approvals: approvals, audit: audit,
+        pipeline = BridgePipeline(handler: handler, executor: executor, approvals: approvals,
                                   policy: policy, clock: clock, progressInterval: progressInterval)
         server = BridgeServer(socketURL: socketURL, handler: pipeline, validator: peerValidator)
     }
@@ -86,61 +83,23 @@ struct BridgePipeline: BridgeRequestHandler {
     let handler: any BridgeToolHandler
     let executor: CommandExecutor
     let approvals: ApprovalCenter
-    let audit: AuditLog
     let policy: PolicyEngine
     let clock: any BridgeClock
     let progressInterval: Duration
 
     private static let logger = Logger(subsystem: "app.aeroops", category: "bridge")
 
-    /// The audit facts gathered while a call goes through the pipeline.
-    private struct Record {
-        let request: BridgeRequest
-        let started = ContinuousClock.now
-        let time: Date
-        var host: String?
-        var hostId: UUID?
-        var decision: AuditDecision = .allowed
-
-        init(request: BridgeRequest, time: Date) {
-            self.request = request
-            self.time = time
-            host = request.arguments["host"]?.stringValue.map { DisplayText.sanitized($0, maxLength: 256) }
-        }
-
-        func entry(_ outcome: AuditOutcome, error: BridgeErrorCode? = nil, exitCode: Int32? = nil, reply: BridgeReply? = nil) -> AuditEntry {
-            AuditEntry(
-                time: time,
-                client: request.client.map { DisplayText.sanitized($0.displayName, maxLength: 100) },
-                toolUseId: request.toolUseId.map { DisplayText.sanitized($0, maxLength: 128) },
-                tool: DisplayText.sanitized(request.tool, maxLength: 64),
-                host: host,
-                hostId: hostId,
-                arguments: request.arguments,
-                decision: decision,
-                outcome: outcome,
-                error: error?.rawValue,
-                exitCode: exitCode,
-                durationMs: max(0, (ContinuousClock.now - started).milliseconds),
-                outputBytes: reply.map { reply in (reply.content ?? []).reduce(0) { $0 + $1.text.utf8.count } })
-        }
-    }
-
     func handle(_ request: BridgeRequest, from peer: BridgePeer,
                 progress: @escaping @Sendable (String) -> Void) async -> BridgeReply? {
-        var record = Record(request: request, time: clock.now)
-
         // 1. Tool and arguments.
         guard let tool = BridgeTool(rawValue: request.tool) else {
-            record.decision = .invalid
-            return await refuse(record, BridgeError(code: .unknownTool, message: "Unknown tool \(String(reflecting: DisplayText.sanitized(request.tool, maxLength: 64)))."))
+            return refuse(request, BridgeError(code: .unknownTool, message: "Unknown tool \(String(reflecting: DisplayText.sanitized(request.tool, maxLength: 64)))."))
         }
         let call: ToolCall
         do {
             call = try ToolCall.parse(tool: tool, arguments: request.arguments)
         } catch {
-            record.decision = .invalid
-            return await refuse(record, BridgeError(code: .invalidArguments, message: error.message))
+            return refuse(request, BridgeError(code: .invalidArguments, message: error.message))
         }
 
         // 2. Host and policy.
@@ -150,56 +109,41 @@ struct BridgePipeline: BridgeRequestHandler {
             switch HostResolver.resolve(query, in: states.map(\.host)) {
             case .success(let resolved):
                 host = resolved
-                record.host = resolved.name
-                record.hostId = resolved.id
             case .failure(let failure):
-                record.decision = .rejected
-                return await refuse(record, failure.bridgeError)
+                return refuse(request, failure.bridgeError)
             }
         }
         if let host {
             switch policy.evaluate(tool: tool, host: host, command: call.command) {
             case .allow:
-                record.decision = .allowed
+                break
             case .reject(let error):
-                record.decision = .rejected
-                return await refuse(record, error)
+                return refuse(request, error)
             case .requireApproval(let alwaysAsk):
                 guard case .runCommand(let arguments) = call else {
-                    record.decision = .rejected
-                    return await refuse(record, BridgeError(code: .internalError, message: "Only run_command can be approved."))
+                    return refuse(request, BridgeError(code: .internalError, message: "Only run_command can be approved."))
                 }
                 let ask = ApprovalAsk(client: request.client, host: host, command: arguments.command, reason: arguments.reason,
                                       alwaysAskReasons: alwaysAsk, toolUseId: request.toolUseId)
-                let outcome = await waitForApproval(ask, progress: progress)
-                switch outcome {
-                case .allowedOnce: record.decision = .approvedOnce
-                case .allowedHost: record.decision = .approvedHostWindow
-                case .allowedByWindow: record.decision = .allowedByWindow
+                switch await waitForApproval(ask, progress: progress) {
+                case .allowedOnce, .allowedHost, .allowedByWindow:
+                    break
                 case .denied:
-                    record.decision = .denied
-                    return await refuse(record, BridgeError(code: .denied, message: "The user denied this command in AeroOps. Do not retry it unchanged."))
+                    return refuse(request, BridgeError(code: .denied, message: "The user denied this command in AeroOps. Do not retry it unchanged."))
                 case .timedOut:
-                    record.decision = .approvalTimedOut
-                    return await refuse(record, BridgeError(
+                    return refuse(request, BridgeError(
                         code: .approvalTimedOut,
                         message: "Nobody approved the command in AeroOps within \(Int(approvals.timeout.timeInterval)) seconds, so it was denied."))
                 case .cancelled:
-                    record.decision = .cancelled
-                    await audit.record(record.entry(.cancelledByAgent))
                     return nil
                 }
             }
         }
-        if Task.isCancelled {
-            await audit.record(record.entry(.cancelledByAgent))
-            return nil
-        }
+        if Task.isCancelled { return nil }
 
         // 3. Run it.
         do {
             let reply: BridgeReply
-            var exitCode: Int32?
             switch call {
             case .listHosts(let arguments):
                 reply = ToolResults.reply(id: request.id, structured: ToolResults.hosts(states, tag: arguments.tag))
@@ -223,20 +167,13 @@ struct BridgePipeline: BridgeRequestHandler {
                 let host = try requireHost(host)
                 progress("Running on \(host.name)")
                 let result = try await executor.execute(arguments.command, on: host, timeoutSeconds: arguments.timeoutSeconds)
-                exitCode = result.exitCode
                 reply = ToolResults.reply(id: request.id, structured: ToolResults.command(result, host: host))
             }
             try Task.checkCancellation()
-            await audit.record(record.entry(.succeeded, exitCode: exitCode, reply: reply))
             return reply
         } catch {
-            if error is CancellationError || Task.isCancelled {
-                await audit.record(record.entry(.cancelledByAgent))
-                return nil
-            }
+            if error is CancellationError || Task.isCancelled { return nil }
             let bridgeError = Self.bridgeError(for: error, tool: tool)
-            let outcome: AuditOutcome = if case CommandExecutionError.cancelledByUser = error { .cancelledByUser } else { .failed }
-            await audit.record(record.entry(outcome, error: bridgeError.code))
             return .failure(id: request.id, bridgeError.code, bridgeError.message)
         }
     }
@@ -263,9 +200,8 @@ struct BridgePipeline: BridgeRequestHandler {
         return outcome
     }
 
-    private func refuse(_ record: Record, _ error: BridgeError) async -> BridgeReply {
-        await audit.record(record.entry(.notRun, error: error.code))
-        return .failure(id: record.request.id, error.code, error.message)
+    private func refuse(_ request: BridgeRequest, _ error: BridgeError) -> BridgeReply {
+        .failure(id: request.id, error.code, error.message)
     }
 
     private func requireHost(_ host: RemoteHost?) throws -> RemoteHost {

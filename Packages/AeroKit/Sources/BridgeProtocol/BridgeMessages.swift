@@ -38,7 +38,7 @@ public struct BridgeRequest: Codable, Sendable, Hashable {
     public var arguments: [String: JSONValue]
     /// The MCP client (self-reported), if the CLI saw `initialize`.
     public var client: BridgeClientInfo?
-    /// Claude Code's `_meta["claudecode/toolUseId"]`, for correlating the audit log.
+    /// Claude Code's `_meta["claudecode/toolUseId"]`, for correlating approvals with the agent's tool call.
     public var toolUseId: String?
 
     public init(id: Int, tool: String, arguments: [String: JSONValue] = [:], client: BridgeClientInfo? = nil, toolUseId: String? = nil) {

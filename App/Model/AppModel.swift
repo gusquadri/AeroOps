@@ -61,7 +61,7 @@ final class AppModel {
     let monitoring: MonitorService
     /// Terminal tabs (Phase 4).
     let terminals: TerminalService
-    /// The MCP bridge, approvals, audit log and live agent commands (Phases 7 and 8).
+    /// The MCP bridge, approvals and live agent commands (Phases 7 and 8).
     /// See `AppModel+Agents.swift`.
     let agents: BridgeService
 

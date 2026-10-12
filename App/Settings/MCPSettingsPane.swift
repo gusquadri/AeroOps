@@ -4,7 +4,7 @@ import AgentBridge
 import SwiftUI
 
 /// Settings › MCP: the bridge's status, config snippets for MCP clients (copied, never written
-/// to their config files), per-host access, approval options and the audit log.
+/// to their config files), per-host access and approval options.
 struct MCPSettingsPane: View {
     @Environment(AppModel.self) private var model
 
@@ -16,7 +16,6 @@ struct MCPSettingsPane: View {
                 ConnectAgentSection()
                 HostAccessSection()
                 ApprovalSettingsSection()
-                AuditLogSettingsSection()
             }
             .padding(20)
         }
@@ -350,30 +349,6 @@ private struct ApprovalSettingsSection: View {
                 }
                 .buttonStyle(.aquaSecondary)
                 .disabled(agents.windows.isEmpty)
-            }
-        }
-    }
-}
-
-// MARK: - Audit log
-
-private struct AuditLogSettingsSection: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let url = model.agents.auditLogURL
-        GlassSection("Audit log", systemImage: "list.bullet.rectangle") {
-            VStack(alignment: .leading, spacing: 10) {
-                LabeledPath(label: "File", path: url.path(percentEncoded: false))
-                Text("Every agent call is recorded as one JSON line: time, client, tool, host, arguments, decision and result. Command output is not stored. The file rotates automatically; Activity shows the latest entries.")
-                    .font(Aero.font(.caption))
-                    .foregroundStyle(Aero.text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Reveal in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                .buttonStyle(.aquaSecondary)
-                .disabled(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
             }
         }
     }

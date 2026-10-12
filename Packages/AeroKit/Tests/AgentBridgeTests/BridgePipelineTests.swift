@@ -5,7 +5,7 @@ import Synchronization
 import Testing
 @testable import AgentBridge
 
-/// The whole pipeline (tool → arguments → host → policy → approval → handler/executor → audit)
+/// The whole pipeline (tool → arguments → host → policy → approval → handler/executor)
 /// through `Bridge.process`, with fakes for the host data, ssh and time.
 @Suite("Bridge pipeline")
 struct BridgePipelineTests {
@@ -15,7 +15,6 @@ struct BridgePipelineTests {
         let handler: FakeToolHandler
         let runner: FakeRunner
         let approvals: ApprovalCenter
-        let audit: AuditLog
         let bridge: Bridge
 
         init(handler: FakeToolHandler = FakeToolHandler(),
@@ -24,9 +23,8 @@ struct BridgePipelineTests {
             self.handler = handler
             self.runner = runner
             approvals = ApprovalCenter(clock: clock)
-            audit = AuditLog(fileURL: dir.appending("audit.jsonl"))
             bridge = Bridge(socketURL: dir.appending("bridge.sock"), handler: handler,
-                            executor: CommandExecutor(runner: runner, clock: clock), approvals: approvals, audit: audit,
+                            executor: CommandExecutor(runner: runner, clock: clock), approvals: approvals,
                             peerValidator: AcceptAllPeers(), clock: clock, progressInterval: .milliseconds(50))
         }
 
@@ -52,10 +50,6 @@ struct BridgePipelineTests {
             task.cancel()
             throw TestFailure("no approval became pending")
         }
-
-        func auditEntries() async -> [AuditEntry] { await audit.recent() }
-
-        var auditFile: String { (try? String(contentsOf: dir.appending("audit.jsonl"), encoding: .utf8)) ?? "" }
     }
 
     final class Progress: Sendable {
@@ -95,9 +89,6 @@ struct BridgePipelineTests {
         #expect(run.error?.code == .hostNotShared)
         #expect(fixture.handler.calls.isEmpty && fixture.runner.calls.isEmpty)
         #expect(await fixture.approvals.snapshot().pending.isEmpty)
-        let entries = await fixture.auditEntries()
-        #expect(entries.count == 4)
-        #expect(entries.allSatisfy { $0.decision == .rejected && $0.outcome == .notRun && $0.error == "host_not_shared" })
     }
 
     @Test func readToolsReturnHandlerData() async throws {
@@ -108,9 +99,6 @@ struct BridgePipelineTests {
         let containers = try #require(await fixture.call("list_containers", ["host": "prod", "all": true]))
         #expect(containers.structuredContent?["containers"]?.arrayValue?.first?["name"]?.stringValue == "api")
         #expect(fixture.handler.calls == ["metrics staging", "containers prod true"])
-        let entries = await fixture.auditEntries()
-        #expect(entries.map(\.decision) == [.allowed, .allowed] && entries.map(\.outcome) == [.succeeded, .succeeded])
-        #expect(entries.first?.host == "staging" && entries.first?.hostId == TestHosts.staging.id)
     }
 
     @Test func logsAreFencedAndStripped() async throws {
@@ -141,14 +129,12 @@ struct BridgePipelineTests {
         #expect(nowhere.error?.code == .hostNotFound)
         #expect(fixture.handler.calls.isEmpty && fixture.runner.calls.isEmpty)
         #expect(await fixture.approvals.snapshot().pending.isEmpty)
-        #expect(await fixture.auditEntries().map(\.decision) == [.invalid, .invalid, .invalid, .invalid, .rejected])
     }
 
     @Test func handlerFailuresBecomeToolErrors() async throws {
         let fixture = try Fixture(handler: FakeToolHandler(failure: .unavailable("Docker is not installed on staging.")))
         let reply = try #require(await fixture.call("list_containers", ["host": "staging"]))
         #expect(reply.error == BridgeError(code: .unavailable, message: "Docker is not installed on staging."))
-        #expect(await fixture.auditEntries().last?.outcome == .failed)
     }
 
     // MARK: run_command
@@ -161,7 +147,7 @@ struct BridgePipelineTests {
         #expect(await fixture.approvals.snapshot().pending.isEmpty)
     }
 
-    @Test func approvedOnceRunsAndIsAuditedWithoutOutput() async throws {
+    @Test func approvedOnceRuns() async throws {
         let fixture = try Fixture()
         let progress = Progress()
         let (task, pending) = try await fixture.pendingCall(Self.run("df -h /", timeout: 20), progress: progress)
@@ -180,14 +166,6 @@ struct BridgePipelineTests {
         #expect(progress.all.last == "Running on staging")
         let call = try #require(fixture.runner.calls.first)
         #expect(call.remoteCommand == RunCommandScript.remoteCommand("df -h /", timeoutSeconds: 20) && call.timeout == .seconds(20))
-
-        let entry = try #require(await fixture.auditEntries().last)
-        #expect(entry.decision == .approvedOnce && entry.outcome == .succeeded && entry.exitCode == 0)
-        #expect(entry.arguments["command"]?.stringValue == "df -h /")
-        #expect(entry.client == "claude-code 2.1.296" && entry.toolUseId == "toolu_x")
-        #expect((entry.outputBytes ?? 0) > 0)
-        #expect(fixture.auditFile.contains("df -h /"))
-        #expect(!fixture.auditFile.contains("OUTPUT-7f3a"), "the audit log never stores command output")
     }
 
     @Test func deniedAndTimedOutApprovals() async throws {
@@ -204,7 +182,6 @@ struct BridgePipelineTests {
         #expect(timedReply.error?.code == .approvalTimedOut)
         #expect(timedReply.error?.message == "Nobody approved the command in AeroOps within 60 seconds, so it was denied.")
         #expect(fixture.runner.calls.isEmpty)
-        #expect(await fixture.auditEntries().map(\.decision) == [.denied, .approvalTimedOut])
     }
 
     @Test func agentCancelWhileWaitingRemovesTheApproval() async throws {
@@ -214,8 +191,6 @@ struct BridgePipelineTests {
         #expect(await task.value == nil, "a cancelled call has no reply")
         #expect(await fixture.approvals.pending(pending.id) == nil)
         #expect(fixture.runner.calls.isEmpty)
-        let entry = try #require(await fixture.auditEntries().last)
-        #expect(entry.decision == .cancelled && entry.outcome == .cancelledByAgent)
     }
 
     @Test func agentCancelWhileRunningKillsTheCommand() async throws {
@@ -226,7 +201,6 @@ struct BridgePipelineTests {
         task.cancel()
         #expect(await task.value == nil)
         #expect(fixture.runner.cancellations == 1)
-        #expect(await fixture.auditEntries().last?.outcome == .cancelledByAgent)
     }
 
     @Test func hostWindowSkipsPromptsExceptSudo() async throws {
@@ -241,7 +215,6 @@ struct BridgePipelineTests {
         #expect(sudoPending.alwaysAskReasons == [.sudo])
         await fixture.approvals.decide(sudoPending.id, .deny)
         #expect(try #require(await sudo.value).error?.code == .denied)
-        #expect(await fixture.auditEntries().map(\.decision) == [.approvedHostWindow, .allowedByWindow, .denied])
     }
 
     @Test func commandFailuresMapToToolErrors() async throws {

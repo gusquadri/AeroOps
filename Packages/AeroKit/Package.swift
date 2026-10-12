@@ -67,7 +67,7 @@ let package = Package(
         .target(name: "BridgeProtocol", dependencies: ["AeroCore"]),
 
         // bridge.sock server for aeroops-mcp, peer code-signature check, PolicyEngine,
-        // ApprovalCenter, run_command executor, AuditLog. The app supplies the read tools'
+        // ApprovalCenter, run_command executor. The app supplies the read tools'
         // data through `BridgeToolHandler`, so this module does not depend on Collectors.
         .target(name: "AgentBridge", dependencies: ["BridgeProtocol", "SSHKit", "AeroCore"]),
 

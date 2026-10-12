@@ -29,7 +29,7 @@ The screenshots show the app's built-in demo data and the dev VM described below
   - Read tools: `list_hosts`, `get_host_metrics`, `list_containers`, `list_pods` and `get_logs`.
   - Exec tool: `run_command`.
 - **Approvals.** Every `run_command` waits for you. The panel shows the agent, the host, the exact command and the agent's stated reason. You can choose Deny, Allow once, or Allow host for 15 minutes. A request with no answer after 60 seconds is denied. Touch ID approval is optional. Commands that use `sudo` or `su`, or that run code they build or download, are asked about every time. While a command runs, its output streams live in the Activity tab, and you can cancel it there.
-- **Audit log.** Every MCP call adds one line to `audit.jsonl`, whether it was allowed, denied or rejected. The Activity tab shows the log with filters, along with the ssh-agent and bridge connections.
+- **Activity.** The Activity tab shows pending approvals, running and recent agent commands with their output, and the ssh-agent and bridge connections.
 - **Import from `~/.ssh/config`.** The importer follows `Include`, `Host` patterns and `Match all` the way OpenSSH does. It imports each host's name, address, port and user. It only reads the config: key files are never opened and nothing under `~/.ssh` is written. Hosts that use `ProxyJump` or `ProxyCommand` are listed with the reason they can't be imported.
 - **Onboarding.** On first run, a sheet walks through five steps: Welcome, Key, Server, AI agents and Done. It covers creating or importing a key, adding or importing a first server, and connecting an agent. Existing users never see it.
 
@@ -164,7 +164,6 @@ Set each host's tier in Settings › MCP or in the host editor. New hosts start 
   - Output is capped at 64 KB per stream and 2,000 log lines.
   - `run_command` times out after at most 300 seconds.
   - A cancelled or timed-out command has its remote process group killed.
-- **Audit.** `~/Library/Application Support/AeroOps/audit.jsonl` records the time, client, tool, host, arguments, decision, exit code, duration and output size for each call. Command output itself is not stored.
 
 ## Project layout
 
@@ -179,7 +178,7 @@ Packages/AeroKit/       Swift package with one target per module:
   Sources/Collectors      metrics, Docker and Kubernetes collectors, polling actors
   Sources/TerminalKit     libghostty wrapper
   Sources/BridgeProtocol  bridge.sock messages and client, shared with aeroops-mcp
-  Sources/AgentBridge     bridge server, PolicyEngine, ApprovalCenter, run_command, AuditLog
+  Sources/AgentBridge     bridge server, PolicyEngine, ApprovalCenter, run_command
   Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusOrb, ...)
   Tests/                  one test target per module, plus BridgeHarness and test helpers
 Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)

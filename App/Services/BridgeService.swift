@@ -11,14 +11,14 @@ import SSHKit
 import Synchronization
 
 /// Phases 7 and 8: the MCP bridge on `~/.aeroops/bridge.sock` and everything the app shows about
-/// it (approvals, the audit log, live `run_command` output, connections).
+/// it (approvals, live `run_command` output, connections).
 ///
 /// One instance per app, owned by ``AppModel/agents``. ``start()`` runs after the agent and the
 /// monitors are up; ``beginShutdown()`` runs first when the app quits, so no agent call opens a
 /// connection while monitors and ControlMasters close.
 ///
 /// - Every call goes through AgentBridge's pipeline: peer check (the embedded, team-signed
-///   `aeroops-mcp` only), PolicyEngine, ApprovalCenter, CommandExecutor, AuditLog. The app only
+///   `aeroops-mcp` only), PolicyEngine, ApprovalCenter, CommandExecutor. The app only
 ///   supplies data (``AppBridgeHandler``) and the approval UI.
 /// - Approvals: ``decide(_:_:)`` is the only way the UI (panel, notification, Activity tab)
 ///   answers one. With ``requiresTouchID`` an allow decision first asks for Touch ID or the
@@ -58,7 +58,6 @@ final class BridgeService {
     }
 
     static let eventLimit = 200
-    static let auditLimit = 1000
     /// Finished commands kept in the Activity tab (with their output) besides the running ones.
     static let finishedCommandsKept = 5
     static let touchIDDefaultsKey = "ApprovalsRequireTouchID"
@@ -72,10 +71,6 @@ final class BridgeService {
     private(set) var pending: [PendingApproval] = []
     /// Open "allow this host for 15 minutes" windows.
     private(set) var windows: [AllowWindow] = []
-    /// Audit entries, newest first: `audit.jsonl` as read at launch plus this session's calls.
-    private(set) var auditEntries: [AuditEntry] = []
-    /// The last audit write failure, if the most recent write failed.
-    private(set) var auditWriteError: String?
     /// Running `run_command` calls (newest first), then the last few finished ones.
     private(set) var liveCommands: [LiveCommand] = []
     /// Ask for Touch ID (or the login password) before an allow decision takes effect.
@@ -106,7 +101,6 @@ final class BridgeService {
     @ObservationIgnored private(set) var bridge: Bridge?
     @ObservationIgnored private var approvals: ApprovalCenter?
     @ObservationIgnored private var executor: CommandExecutor?
-    @ObservationIgnored private var audit: AuditLog?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var presenter: ApprovalPresenter?
     @ObservationIgnored private var isShutDown = false
@@ -132,8 +126,6 @@ final class BridgeService {
 
     /// `~/.aeroops/bridge.sock`, or the debug root's.
     var socketURL: URL { ssh.paths.bridgeSocket }
-    /// `~/Library/Application Support/AeroOps/audit.jsonl`, or the debug root's.
-    var auditLogURL: URL { ssh.paths.auditLog }
     /// Whether an agent call is in progress or waiting.
     var hasRunningCommands: Bool { liveCommands.contains(where: \.isRunning) }
 
@@ -146,20 +138,17 @@ final class BridgeService {
         trackAgentChoice()
 
         let approvals = ApprovalCenter(authenticator: authenticator)
-        let audit = AuditLog(fileURL: auditLogURL)
         let executor = CommandExecutor(runner: runner)
         let bridge = Bridge(
             socketURL: socketURL,
             handler: AppBridgeHandler(source: dataSource, runner: runner),
             executor: executor,
             approvals: approvals,
-            audit: audit,
             peerValidator: CodeSignaturePeerValidator.forApp()
         )
         self.bridge = bridge
         self.approvals = approvals
         self.executor = executor
-        self.audit = audit
         if presentsApprovals {
             presenter = ApprovalPresenter(service: self, notifications: postsNotifications)
         }
@@ -167,13 +156,7 @@ final class BridgeService {
         // Subscribe before the socket opens so no event is missed.
         observe(bridge.events()) { $0.receive($1) }
         observe(executor.activity()) { $0.receive($1) }
-        observe(audit.updates()) { $0.receive($1) }
         observeApprovals(approvals)
-        tasks.append(Task { [weak self] in
-            await audit.loadRecent()
-            let recent = await audit.recent()
-            self?.seedAudit(recent)
-        })
 
         do {
             try bridge.start()
@@ -195,7 +178,6 @@ final class BridgeService {
         tasks.forEach { $0.cancel() }
         tasks = []
         approvals = nil
-        audit = nil
         peers = []
         status = .stopped
         guard let bridge else { return nil }
@@ -324,26 +306,6 @@ final class BridgeService {
         change(&liveCommands[index])
     }
 
-    private func receive(_ entry: AuditEntry) {
-        guard !auditEntries.contains(where: { $0.id == entry.id }) else { return }
-        auditEntries.insert(entry, at: 0)
-        if auditEntries.count > Self.auditLimit { auditEntries.removeLast(auditEntries.count - Self.auditLimit) }
-        if let audit {
-            Task { [weak self] in
-                let error = await audit.lastError
-                if self?.auditWriteError != error { self?.auditWriteError = error }
-            }
-        }
-    }
-
-    /// Merges the file's entries (oldest first) with any already received live.
-    private func seedAudit(_ recent: [AuditEntry]) {
-        let known = Set(auditEntries.map(\.id))
-        let older = recent.filter { !known.contains($0.id) }
-        guard !older.isEmpty else { return }
-        auditEntries = (auditEntries + older).sorted { $0.time > $1.time }.prefix(Self.auditLimit).map(\.self)
-    }
-
     /// Keeps the runner's agent environment and askpass route in step with ``SSHServices``.
     private func trackAgentChoice() {
         guard !isShutDown else { return }
@@ -363,7 +325,7 @@ final class BridgeService {
 
     #if DEBUG
     /// Sample state for demo and snapshot launches: approvals waiting (one with sudo), an allow
-    /// window, a running command with output, a finished one, audit entries and connections. The
+    /// window, a running command with output, a finished one and connections. The
     /// approvals live in a private ``ApprovalCenter``, so the controls work; one that times out
     /// is asked again.
     func applySampleState(hosts: [RemoteHost]) {
@@ -424,26 +386,6 @@ final class BridgeService {
         finished.append(CommandOutputChunk(stream: .stdout, data: Data("Linux web-1 6.8.0-45-generic #45-Ubuntu SMP x86_64 GNU/Linux\n".utf8)))
         finished.end(.finished(exitCode: 0, durationMs: 412))
         liveCommands = [running, finished]
-
-        func entry(_ minutesAgo: Double, _ tool: String, _ host: RemoteHost?, _ decision: AuditDecision, _ outcome: AuditOutcome,
-                   arguments: [String: JSONValue] = [:], client: String = "claude-code 2.1.296", error: String? = nil,
-                   exitCode: Int32? = nil, durationMs: Int, outputBytes: Int? = nil) -> AuditEntry {
-            AuditEntry(time: now.addingTimeInterval(-minutesAgo * 60), client: client, toolUseId: nil, tool: tool,
-                       host: host?.name, hostId: host?.id, arguments: arguments, decision: decision, outcome: outcome,
-                       error: error, exitCode: exitCode, durationMs: durationMs, outputBytes: outputBytes)
-        }
-        auditEntries = [
-            entry(1.6, "run_command", host, .approvedOnce, .succeeded, arguments: ["command": "uname -a"],
-                  exitCode: 0, durationMs: 2412, outputBytes: 61),
-            entry(3, "run_command", other, .denied, .notRun, arguments: ["command": "rm -rf /var/log/nginx/*"],
-                  error: "denied", durationMs: 8210),
-            entry(4, "get_logs", host, .allowed, .succeeded, arguments: ["name": "api", "kind": "docker"], durationMs: 690, outputBytes: 18_204),
-            entry(5, "list_containers", host, .allowed, .succeeded, durationMs: 1210, outputBytes: 2_841),
-            entry(6, "run_command", hosts.dropFirst(5).first ?? host, .rejected, .notRun, arguments: ["command": "df -h"],
-                  error: "exec_not_allowed", durationMs: 3),
-            entry(7, "get_host_metrics", other, .allowed, .succeeded, client: "codex 0.48.0", durationMs: 15, outputBytes: 1_022),
-            entry(8, "list_hosts", nil, .allowed, .succeeded, client: "codex 0.48.0", durationMs: 2, outputBytes: 640),
-        ]
     }
     #endif
 

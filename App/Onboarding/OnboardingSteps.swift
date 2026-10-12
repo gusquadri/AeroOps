@@ -407,7 +407,7 @@ struct OnboardingDoneStep: View {
                         row(
                             systemImage: "sparkles",
                             title: "AI agents",
-                            detail: "Config snippets and the audit log are in Settings › MCP whenever you want them.",
+                            detail: "Config snippets are in Settings › MCP whenever you want them.",
                             done: true
                         )
                     }

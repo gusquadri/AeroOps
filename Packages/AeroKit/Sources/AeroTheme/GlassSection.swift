@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A titled glass card: a header row (optional SF Symbol, title, trailing accessory) over a
 /// glossy divider, then the content. For Settings panes, the Activity screen (pending
-/// approvals, audit log) and host detail.
+/// approvals, agent commands) and host detail.
 ///
 /// ```swift
 /// GlassSection("Pending approvals", systemImage: "hand.raised") {
@@ -92,7 +92,7 @@ extension GlassSection where Accessory == EmptyView {
         } accessory: {
             AeroTag("1 pending", tone: .warning)
         }
-        GlassSection("Audit log") {
+        GlassSection("Agent commands") {
             Text("No activity yet")
                 .font(Aero.font(.callout))
                 .foregroundStyle(Aero.text.secondary)

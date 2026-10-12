@@ -45,22 +45,52 @@ extension EnvironmentValues {
     @Entry var sidebarVisibility: Binding<NavigationSplitViewVisibility> = .constant(.all)
 }
 
-/// The segmented tab control in the toolbar. ⌘1–⌘5 live in the View menu (``AppCommands``).
+/// The tab switcher in the toolbar: one segment per tab, each with its SF Symbol and title.
+/// ⌘1–⌘5 live in the View menu (``AppCommands``).
+///
+/// Custom rather than a segmented `Picker`: on macOS a segmented control shows a `Label`'s
+/// title or its icon, never both.
 struct TabSwitcher: View {
     @Binding var selection: AppTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var highlight
 
     var body: some View {
-        Picker("Section", selection: $selection) {
+        HStack(spacing: 2) {
             ForEach(AppTab.allCases) { tab in
-                Label(tab.title, systemImage: tab.systemImage)
-                    .help("\(tab.title) (⌘\(String(tab.shortcutDigit)))")
-                    .tag(tab)
+                segment(tab)
             }
         }
-        .pickerStyle(.segmented)
-        .labelStyle(.titleAndIcon)
-        .labelsHidden()
+        .padding(2)
         .fixedSize()
+        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Section")
+    }
+
+    private func segment(_ tab: AppTab) -> some View {
+        let isSelected = tab == selection
+        return Button {
+            selection = tab
+        } label: {
+            Label(tab.title, systemImage: tab.systemImage)
+                .labelStyle(.titleAndIcon)
+                .font(Aero.font(.body, weight: .medium))
+                .foregroundStyle(isSelected ? Aero.aquaDeep : Aero.text.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(Aero.aqua.opacity(0.18))
+                            .matchedGeometryEffect(id: "selection", in: highlight)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("\(tab.title) (⌘\(String(tab.shortcutDigit)))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

@@ -7,7 +7,7 @@ import Foundation
 public struct AeroPaths: Sendable, Hashable {
     /// `~/.aeroops/`: sockets, generated ssh_config, known_hosts, public keys.
     public var dotDirectory: URL
-    /// `~/Library/Application Support/AeroOps/`: `hosts.json`, `audit.jsonl`.
+    /// `~/Library/Application Support/AeroOps/`: `hosts.json`.
     public var applicationSupport: URL
 
     /// Paths rooted at `home` (the app is not sandboxed, so this is the real home directory).
@@ -41,6 +41,4 @@ public struct AeroPaths: Sendable, Hashable {
     public var publicKeysDirectory: URL { dotDirectory.appending(path: "pub", directoryHint: .isDirectory) }
     /// `~/Library/Application Support/AeroOps/hosts.json`.
     public var hostsFile: URL { applicationSupport.appending(path: HostStore.fileName) }
-    /// `~/Library/Application Support/AeroOps/audit.jsonl`.
-    public var auditLog: URL { applicationSupport.appending(path: "audit.jsonl") }
 }

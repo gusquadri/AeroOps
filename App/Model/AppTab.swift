@@ -1,5 +1,5 @@
-/// The five main-window tabs. Shown as a segmented control in the
-/// toolbar and bound to ⌘1–⌘5 in the View menu.
+/// The five main-window tabs. Shown with their symbols in the
+/// toolbar's tab switcher and bound to ⌘1–⌘5 in the View menu.
 enum AppTab: String, CaseIterable, Identifiable, Sendable {
     case dashboard
     case containers

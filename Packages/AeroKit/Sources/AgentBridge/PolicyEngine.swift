@@ -4,7 +4,7 @@ import Foundation
 
 /// What the policy says about one tool call.
 public enum PolicyDecision: Sendable, Hashable {
-    /// Run it (read tools on Read and Read+Exec hosts). The call is still audited.
+    /// Run it (read tools on Read and Read+Exec hosts).
     case allow
     /// Refuse without asking the user.
     case reject(BridgeError)

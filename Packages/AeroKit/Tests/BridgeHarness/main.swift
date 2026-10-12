@@ -2,7 +2,7 @@
 // end without the AeroOps UI (MCP Inspector, `claude -p`). Test-only; never shipped.
 //
 // Every call goes through the real pipeline: peer check, argument validation, PolicyEngine,
-// ApprovalCenter, CommandExecutor, AuditLog. Only the data is fake: three hosts (staging is
+// ApprovalCenter, CommandExecutor. Only the data is fake: three hosts (staging is
 // Read+Exec, prod is Read, vault is Off), canned metrics, containers, pods and logs, and a command
 // runner that never runs anything (it answers "harness: fake output" for approved commands).
 //
@@ -19,7 +19,6 @@
 //   --auto-decide DECISION   answer every approval with deny, allowOnce or allowHost15Min after
 //                            --decide-delay seconds (default: nobody answers)
 //   --decide-delay SEC       default 1
-//   --audit PATH             audit log (default: audit.jsonl next to the socket)
 //
 // Stops on SIGINT or SIGTERM and removes the socket. Logs go to stderr.
 
@@ -47,7 +46,6 @@ struct Options {
     var approvalTimeout = 60
     var autoDecide: ApprovalDecision?
     var decideDelay = 1.0
-    var audit: URL?
 
     init(_ arguments: [String]) {
         var rest = arguments[...]
@@ -71,7 +69,6 @@ struct Options {
             case "--decide-delay":
                 guard let seconds = Double(value(flag)), seconds >= 0 else { fail("--decide-delay needs seconds") }
                 decideDelay = seconds
-            case "--audit": audit = URL(filePath: value(flag))
             default: fail("unknown option \(flag)")
             }
         }
@@ -148,7 +145,6 @@ let socketURL: URL = options.socket ?? {
     let directory = URL(filePath: NSTemporaryDirectory()).appending(path: "aero-harness-\(getpid())", directoryHint: .isDirectory)
     return directory.appending(path: BridgeSocketPath.fileName)
 }()
-let auditURL = options.audit ?? socketURL.deletingLastPathComponent().appending(path: "audit.jsonl")
 
 let validator: any BridgePeerValidator
 if let team = options.peerTeam {
@@ -170,7 +166,6 @@ let bridge = Bridge(
     handler: HarnessHandler(),
     executor: CommandExecutor(runner: HarnessRunner()),
     approvals: ApprovalCenter(timeout: .seconds(options.approvalTimeout)),
-    audit: AuditLog(fileURL: auditURL),
     peerValidator: validator,
     progressInterval: .seconds(1))
 
@@ -180,7 +175,7 @@ do {
     fail("could not start: \(error)")
 }
 
-// Observers: connections, approvals (and the optional automatic answer), audit entries.
+// Observers: connections and approvals (and the optional automatic answer).
 let connectionEvents = bridge.events()
 Task {
     for await event in connectionEvents { note("connection: \(event.kind)") }
@@ -202,12 +197,6 @@ Task {
         }
     }
 }
-let auditUpdates = bridge.audit.updates()
-Task {
-    for await entry in auditUpdates {
-        note("audit: \(entry.tool) host=\(entry.host ?? "-") decision=\(entry.decision.rawValue) outcome=\(entry.outcome.rawValue) error=\(entry.error ?? "-")")
-    }
-}
 
 // Stop cleanly on SIGINT / SIGTERM: close connections and remove the socket.
 signal(SIGINT, SIG_IGN)
@@ -225,7 +214,6 @@ let signalSources = [SIGINT, SIGTERM].map { number in
 
 print("ready \(socketURL.path(percentEncoded: false))")
 fflush(stdout)
-note("audit log: \(auditURL.path(percentEncoded: false))")
 // Park the main task; the main queue keeps serving the observers and the signal handlers.
 while true {
     try? await Task.sleep(for: .seconds(3600))

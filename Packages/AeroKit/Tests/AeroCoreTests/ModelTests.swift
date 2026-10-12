@@ -161,7 +161,6 @@ struct ModelTests {
         #expect(paths.knownHosts.path == "/Users/test/.aeroops/known_hosts")
         #expect(paths.publicKeysDirectory.path == "/Users/test/.aeroops/pub")
         #expect(paths.hostsFile.path == "/Users/test/Library/Application Support/AeroOps/hosts.json")
-        #expect(paths.auditLog.path == "/Users/test/Library/Application Support/AeroOps/audit.jsonl")
         // Socket paths must stay well under the 104-byte sun_path limit for typical home dirs.
         #expect(paths.bridgeSocket.path.utf8.count < 104)
     }

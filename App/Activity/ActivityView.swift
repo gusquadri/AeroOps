@@ -5,9 +5,8 @@ import SwiftUI
 /// Activity tab (Phases 7 and 8): what AI agents do through AeroOps' MCP bridge.
 ///
 /// Top to bottom: approvals waiting for the user, open 15-minute allow windows, running and
-/// recent `run_command` calls with live output (Cancel stops one), the audit log (filterable,
-/// newest first) and connection and signing events. Text from agents and hosts is shown as
-/// plain text only.
+/// recent `run_command` calls with live output (Cancel stops one) and connection and signing
+/// events. Text from agents and hosts is shown as plain text only.
 struct ActivityView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
@@ -15,7 +14,6 @@ struct ActivityView: View {
     var body: some View {
         let agents = model.agents
         let isEmpty = agents.pending.isEmpty && agents.windows.isEmpty && agents.liveCommands.isEmpty
-            && agents.auditEntries.isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 ActivityHeader(openMCPSettings: openMCPSettings)
@@ -30,8 +28,6 @@ struct ActivityView: View {
                 }
                 if isEmpty {
                     emptyCard
-                } else {
-                    AuditLogSection()
                 }
                 ConnectionEventsSection()
             }
@@ -50,7 +46,7 @@ struct ActivityView: View {
                 Text("No agent activity yet")
                     .font(Aero.font(.title3, weight: .semibold))
                     .foregroundStyle(Aero.text.primary)
-                Text("When AI agents use AeroOps through MCP, commands waiting for your approval appear at the top and every call, allowed or denied, is logged here. Connect an agent in Settings › MCP.")
+                Text("When AI agents use AeroOps through MCP, commands waiting for your approval appear at the top, followed by the commands they run and their output. Connect an agent in Settings › MCP.")
                     .font(Aero.font(.callout))
                     .foregroundStyle(Aero.text.secondary)
                     .multilineTextAlignment(.center)
@@ -89,11 +85,6 @@ private struct ActivityHeader: View {
                     .foregroundStyle(Aero.text.secondary)
             }
             Spacer(minLength: 12)
-            Button("Reveal Audit Log", systemImage: "doc.text.magnifyingglass") {
-                NSWorkspace.shared.activateFileViewerSelecting([agents.auditLogURL])
-            }
-            .buttonStyle(.aquaSecondary)
-            .disabled(!FileManager.default.fileExists(atPath: agents.auditLogURL.path(percentEncoded: false)))
             Button("MCP Settings…", systemImage: "point.3.connected.trianglepath.dotted", action: openMCPSettings)
                 .buttonStyle(.aquaSecondary)
         }

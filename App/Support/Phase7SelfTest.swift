@@ -22,7 +22,7 @@ import SSHKit
 /// ```
 ///
 /// Runs under ``Phase2SelfTest``'s temporary root and Keychain service, so the bridge socket
-/// (`<root>/d/bridge.sock`) and `audit.jsonl` are the self-test's own; `~/.aeroops` and the
+/// (`<root>/d/bridge.sock`) is the self-test's own; `~/.aeroops` and the
 /// user's agent configuration are never touched. Notifications are off for the run (no
 /// permission prompt); the floating approval panel is shown as usual.
 ///
@@ -46,8 +46,8 @@ import SSHKit
 /// | `sudo -n true`               | asked despite the window; Allow once, then Revoke All | runs   |
 /// | `sleep 120`                  | Allow once; Cancel as the Activity tab does | remote process gone |
 ///
-/// Then checks every call in `audit.jsonl` (decision, outcome) and in the Activity tab's model,
-/// the live output, the connection and agent events, and shuts down, revokes and deletes the
+/// Then checks the live output in the Activity tab's model, the connection and agent events,
+/// and shuts down, revokes and deletes the
 /// key. An authentication failure ends the run at once (sshd's PerSourcePenalties). Writes a
 /// JSON report (the driver's raw output is copied next to it, as `<name>-drive/`) and exits 0
 /// on success, 1 otherwise.
@@ -113,27 +113,12 @@ struct Phase7SelfTest {
         var activityState = ""
     }
 
-    struct AuditRow: Codable {
-        var time: Date
-        var client: String?
-        var tool: String
-        var host: String?
-        var command: String?
-        var decision: String
-        var outcome: String
-        var error: String?
-        var exitCode: Int32?
-        var durationMs: Int
-        var outputBytes: Int?
-        var inActivityTab: Bool
-    }
-
     struct ClaudeRun: Codable {
         var prompt: String
         var exitStatus: Int32
         var seconds: Double
         var turns: Int?
-        var toolCalls: [String]
+        var bridgeConnections: Int
         var answer: String
     }
 
@@ -142,7 +127,6 @@ struct Phase7SelfTest {
         var root = ""
         var socket = ""
         var socketPathBytes = 0
-        var auditLog = ""
         var mcpPath = ""
         var driveExitStatus: Int32?
         var peers: [String] = []
@@ -150,7 +134,6 @@ struct Phase7SelfTest {
         var calls: [Call] = []
         var approvals: [Approval] = []
         var cancel: Cancel?
-        var audit: [AuditRow] = []
         var claude: [ClaudeRun] = []
         var agentSignEvents = 0
         var authFailed = false
@@ -357,32 +340,6 @@ struct Phase7SelfTest {
         }
     }
 
-    /// The audit line each inspector call must leave, in order.
-    private struct Expected {
-        let tool: String
-        let host: String?
-        let command: String?
-        let decision: AuditDecision
-        let outcome: AuditOutcome
-        let exitCode: Int32?
-    }
-
-    private static let expected: [Expected] = [
-        Expected(tool: "list_hosts", host: nil, command: nil, decision: .allowed, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "get_host_metrics", host: "dev-container", command: nil, decision: .allowed, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "get_host_metrics", host: "staging", command: nil, decision: .allowed, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "get_host_metrics", host: "alpine", command: nil, decision: .rejected, outcome: .notRun, exitCode: nil),
-        Expected(tool: "list_containers", host: "staging", command: nil, decision: .allowed, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "get_logs", host: "staging", command: nil, decision: .allowed, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "run_command", host: "dev-container", command: "uname -a", decision: .rejected, outcome: .notRun, exitCode: nil),
-        Expected(tool: "run_command", host: "staging", command: "uname -a", decision: .approvedOnce, outcome: .succeeded, exitCode: 0),
-        Expected(tool: "run_command", host: "staging", command: "uname -a", decision: .denied, outcome: .notRun, exitCode: nil),
-        Expected(tool: "run_command", host: "staging", command: "hostname", decision: .approvedHostWindow, outcome: .succeeded, exitCode: 0),
-        Expected(tool: "run_command", host: "staging", command: "uptime", decision: .allowedByWindow, outcome: .succeeded, exitCode: 0),
-        Expected(tool: "run_command", host: "staging", command: "sudo -n true", decision: .approvedOnce, outcome: .succeeded, exitCode: nil),
-        Expected(tool: "run_command", host: "staging", command: sleepCommand, decision: .approvedOnce, outcome: .cancelledByUser, exitCode: nil),
-    ]
-
     // MARK: - Run
 
     func runAndQuit() async {
@@ -412,7 +369,6 @@ struct Phase7SelfTest {
         r.report.root = Phase2SelfTest.root.path(percentEncoded: false)
         r.report.socket = socket
         r.report.socketPathBytes = socket.utf8.count
-        r.report.auditLog = agents.auditLogURL.path(percentEncoded: false)
         r.report.mcpPath = MCPClientConfig.executablePath
 
         guard case .running = ssh.agentStatus, model.monitoring.isRunning, agents.status == .listening else {
@@ -503,7 +459,7 @@ struct Phase7SelfTest {
         r.report.driveExitStatus = status
         r.step("driver", status == 0, "\(script.lastPathComponent) exited \(status) after \(Self.rounded(Date.now.timeIntervalSince(driveStart))) s")
         await waitUntil(seconds: 30) { !canceller.started || canceller.done }
-        try? await Task.sleep(for: .milliseconds(500))  // let the last audit lines and events land
+        try? await Task.sleep(for: .milliseconds(500))  // let the last events land
         copyDriveOutput(results)
 
         let steps = DriveStep.load(results)
@@ -514,8 +470,7 @@ struct Phase7SelfTest {
 
         checkReadTools(r, byName)
         checkRunCommand(r, byName, approver: approver, canceller: canceller)
-        let entries = checkAudit(r)
-        checkClaude(r, byName, entries: entries)
+        checkClaude(r, byName)
         checkActivity(r)
 
         return await finish(r, key: key)
@@ -703,52 +658,10 @@ struct Phase7SelfTest {
                 + (approver.unexpected.isEmpty ? "" : "; unexpected (denied): \(approver.unexpected)"))
     }
 
-    /// Every call is in the self-test's `audit.jsonl` with the expected decision, and in the
-    /// Activity tab's model. Returns the file's entries, oldest first.
-    private func checkAudit(_ r: Recorder) -> [AuditEntry] {
-        let agents = model.agents
-        let entries = AuditLog.read(from: agents.auditLogURL).sorted { $0.time < $1.time }
-        let shown = Set(agents.auditEntries.map(\.id))
-        r.report.audit = entries.map { entry in
-            AuditRow(time: entry.time, client: entry.client, tool: entry.tool, host: entry.host,
-                     command: entry.arguments["command"]?.stringValue, decision: entry.decision.rawValue,
-                     outcome: entry.outcome.rawValue, error: entry.error, exitCode: entry.exitCode,
-                     durationMs: entry.durationMs, outputBytes: entry.outputBytes, inActivityTab: shown.contains(entry.id))
-        }
-        let notShown = entries.filter { !shown.contains($0.id) }
-        r.step("Activity has every audit entry", !entries.isEmpty && notShown.isEmpty,
-               "\(entries.count) lines in audit.jsonl, \(agents.auditEntries.count) in the Activity tab, \(notShown.count) missing")
-
-        let inspector = entries.filter { !Self.isClaude($0) }
-        var problems: [String] = []
-        for (index, expected) in Self.expected.enumerated() {
-            guard index < inspector.count else {
-                problems.append("#\(index + 1) \(expected.tool) \(expected.host ?? "") missing")
-                continue
-            }
-            let entry = inspector[index]
-            let command = entry.arguments["command"]?.stringValue
-            let exitOK = expected.exitCode.map { $0 == entry.exitCode } ?? true
-            if entry.tool != expected.tool || entry.host != expected.host || command != expected.command
-                || entry.decision != expected.decision || entry.outcome != expected.outcome || !exitOK {
-                problems.append("#\(index + 1) expected \(expected.tool) \(expected.host ?? "-") \(expected.command ?? "") \(expected.decision.rawValue)/\(expected.outcome.rawValue), "
-                                + "got \(entry.tool) \(entry.host ?? "-") \(command ?? "") \(entry.decision.rawValue)/\(entry.outcome.rawValue) exit \(entry.exitCode.map(String.init) ?? "-")")
-            }
-        }
-        if inspector.count > Self.expected.count {
-            problems.append("\(inspector.count - Self.expected.count) unexpected extra entries")
-        }
-        let leaked = entries.filter { Self.mentionsOutput($0) }
-        r.step("audit decisions", problems.isEmpty && leaked.isEmpty,
-               problems.isEmpty
-                ? "\(Self.expected.count) inspector calls audited in order with the expected decision and outcome; \(entries.count - inspector.count) Claude Code calls"
-                : problems.joined(separator: "; "))
-        return entries
-    }
-
-    private func checkClaude(_ r: Recorder, _ steps: [String: DriveStep], entries: [AuditEntry]) {
-        let runs = [("claude-memory", Self.prompts.memory, "get_host_metrics"), ("claude-logs", Self.prompts.logs, "get_logs")]
-        for (name, prompt, tool) in runs {
+    /// Each `claude -p` run answered, and connected to the bridge (through `aeroops-mcp`) while it ran.
+    private func checkClaude(_ r: Recorder, _ steps: [String: DriveStep]) {
+        let runs = [("claude-memory", Self.prompts.memory), ("claude-logs", Self.prompts.logs)]
+        for (name, prompt) in runs {
             guard let step = steps[name] else {
                 r.step("claude -p \"\(prompt)\"", false, "the driver did not run it")
                 continue
@@ -758,14 +671,15 @@ struct Phase7SelfTest {
             let turns = (step.json?["num_turns"] as? NSNumber)?.intValue
             let start = step.start.addingTimeInterval(-1)
             let end = step.start.addingTimeInterval(step.seconds + 1)
-            let calls = entries.filter { Self.isClaude($0) && $0.time >= start && $0.time <= end }
-            let tools = calls.map { "\($0.tool)\($0.host.map { " \($0)" } ?? "")" }
+            let connections = model.agents.connectionEvents.filter { record in
+                guard case .connected = record.kind else { return false }
+                return record.date >= start && record.date <= end
+            }.count
             r.report.claude.append(ClaudeRun(prompt: prompt, exitStatus: step.status, seconds: step.seconds, turns: turns,
-                                             toolCalls: tools, answer: answer))
-            let ok = step.status == 0 && !failed && !answer.isEmpty && calls.contains { $0.tool == tool && $0.outcome == .succeeded }
-                && calls.allSatisfy { $0.decision == .allowed }
+                                             bridgeConnections: connections, answer: answer))
+            let ok = step.status == 0 && !failed && !answer.isEmpty && connections > 0
             r.step("claude -p \"\(prompt)\"", ok,
-                   "exit \(step.status), \(turns.map(String.init) ?? "-") turns, calls: \(tools.joined(separator: ", ")); answer: \(answer.prefix(240))"
+                   "exit \(step.status), \(turns.map(String.init) ?? "-") turns, \(connections) bridge connections; answer: \(answer.prefix(240))"
                     + (answer.isEmpty ? "; stderr: \(step.stderr.prefix(300))" : ""))
         }
     }
@@ -845,16 +759,6 @@ struct Phase7SelfTest {
     }
 
     // MARK: - Helpers
-
-    private static func isClaude(_ entry: AuditEntry) -> Bool {
-        entry.client?.localizedCaseInsensitiveContains("claude") == true
-    }
-
-    /// Audit lines carry arguments and sizes only, never output.
-    private static func mentionsOutput(_ entry: AuditEntry) -> Bool {
-        let encoded = (try? JSONEncoder().encode(entry)).map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return encoded.contains("UNTRUSTED LOG OUTPUT") || encoded.contains("GNU/Linux")
-    }
 
     /// The text between a get_logs reply's untrusted markers, without the final newline.
     private static func untrustedBody(_ text: String) -> String? {
