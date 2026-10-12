@@ -88,7 +88,11 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                     // A faint ink hairline defines the edge on the pale lower sky;
                     // the white rim sits just inside it.
                     shape.strokeBorder(Aero.ink.opacity(0.10), lineWidth: 0.5)
-                    shape.inset(by: 0.5).strokeBorder(Aero.glass.rim, lineWidth: 1)
+                    // The rim's gradient is a view masked by the stroke, not a gradient stroke:
+                    // a gradient-stroked shape is a card-sized layer that SwiftUI redraws on the
+                    // CPU on every frame of any animation inside the card (the gauges). Same
+                    // pixels.
+                    Aero.glass.rim.mask { shape.inset(by: 0.5).strokeBorder(lineWidth: 1) }
                 }
             }
         }
