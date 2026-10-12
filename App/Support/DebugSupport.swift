@@ -43,6 +43,9 @@ import UniformTypeIdentifiers
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase7 -AeroSelfTestOutput /tmp/st7.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase7SelfTest (drives aeroops-mcp with dev/selftest/phase7-drive.sh)
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest perf -AeroSelfTestOutput /tmp/aeroops-perf.json \
+///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # 20 hosts: app and ssh CPU, memory; see PerfSelfTest
 /// ```
 ///
 /// Demo hosts and statuses turn live monitoring off, so the sample states stay on screen.
@@ -94,7 +97,7 @@ enum DebugLaunchOptions {
     @MainActor
     static func makeModel() -> AppModel? {
         if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase4SelfTest.isRequested
-            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested {
+            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested || PerfSelfTest.isRequested {
             let model = Phase2SelfTest.makeModel()
             model.agents.useTransientSettings()
             model.onboarding.suppressesAutomaticPresentation = true
@@ -162,6 +165,9 @@ enum DebugLaunchOptions {
         }
         if Phase7SelfTest.isRequested {
             await Phase7SelfTest(model: model).runAndQuit()
+        }
+        if PerfSelfTest.isRequested {
+            await PerfSelfTest(model: model).runAndQuit()
         }
     }
 }
