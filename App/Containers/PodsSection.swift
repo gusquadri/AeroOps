@@ -513,7 +513,7 @@ private struct PodDescribeView: View {
             }
             ScrollView([.vertical, .horizontal]) {
                 Text(detail.describe.isEmpty ? (detail.isLoading ? "Loading…" : "") : detail.describe)
-                    .font(Aero.font(.caption).monospaced())
+                    .font(Aero.monospacedFont(.caption))
                     .foregroundStyle(Aero.text.primary)
                     .textSelection(.enabled)
                     .fixedSize()

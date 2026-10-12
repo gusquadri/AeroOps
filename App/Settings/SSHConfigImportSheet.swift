@@ -261,7 +261,7 @@ private struct SSHConfigImportRow: View {
                     statusTag
                 }
                 Text(target)
-                    .font(Aero.font(.callout).monospaced())
+                    .font(Aero.monospacedFont(.callout))
                     .foregroundStyle(Aero.text.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)

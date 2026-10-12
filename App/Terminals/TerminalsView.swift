@@ -366,7 +366,7 @@ struct TerminalClipboardSheet: View {
             AeroCard(padding: 12) {
                 ScrollView {
                     Text(preview)
-                        .font(Aero.font(.callout).monospaced())
+                        .font(Aero.monospacedFont(.callout))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

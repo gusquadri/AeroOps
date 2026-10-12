@@ -60,8 +60,7 @@ struct ApprovalRequestView: View {
                     }
                 }
                 Text(verbatim: "\(approval.hostName) · \(approval.hostAddress)")
-                    .font(Aero.font(.callout))
-                    .monospaced()
+                    .font(Aero.monospacedFont(.callout))
                     .foregroundStyle(Aero.text.secondary)
                     .textSelection(.enabled)
                 HStack(spacing: 6) {
@@ -104,8 +103,7 @@ struct ApprovalRequestView: View {
             }
             ScrollView(.vertical) {
                 Text(verbatim: visible.text)
-                    .font(Aero.font(.body))
-                    .monospaced()
+                    .font(Aero.monospacedFont(.body))
                     .foregroundStyle(Aero.text.primary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)

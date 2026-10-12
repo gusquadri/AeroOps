@@ -22,6 +22,22 @@ struct AeroThemeTests {
         #expect(Aero.shadow.card.color == Color(hex: 0x0A4A7A).opacity(0.18))
     }
 
+    @Test("fonts: rounded for text, SF Mono at the same text style sizes for code-like text")
+    func fonts() {
+        #expect(Aero.font(.callout) == .system(.callout, design: .rounded, weight: .regular))
+        #expect(Aero.monospacedFont(.callout) != Aero.font(.callout))
+        for style in Font.TextStyle.allCases {
+            let mono = Aero.monospacedNSFont(style.appKit)
+            #expect(mono.isFixedPitch)
+            #expect(mono.pointSize == NSFont.preferredFont(forTextStyle: style.appKit).pointSize)
+        }
+        #expect(Font.TextStyle.caption.appKit == .caption1)
+        #expect(Font.TextStyle.title.appKit == .title1)
+        #expect(Font.TextStyle.callout.appKit == .callout)
+        #expect(Font.Weight.regular.appKit == .regular)
+        #expect(Font.Weight.semibold.appKit == .semibold)
+    }
+
     @Test("every orb tone has a distinct colour")
     func orbTones() {
         let colors = OrbTone.allCases.map(\.color)
