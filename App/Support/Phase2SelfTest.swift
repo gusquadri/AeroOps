@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import KeyAgent
 import SSHKit
+import Synchronization
 
 /// `-AeroSelfTest phase2`: proves Phase 2's "Done when" end to end in the built app, without
 /// clicking, against the dev SSH server (`dev@localhost:2222`, `docker compose -f dev/compose.yml up -d`).
@@ -54,8 +55,15 @@ struct Phase2SelfTest {
         )
     }
 
+    /// Self-test keys sign without asking ("Never ask"), so any request for user presence is a
+    /// bug: it is recorded and denied here instead of showing a real Touch ID prompt.
+    static let presenceVerifier = SelfTestPresenceVerifier()
+
     static func makeModel() -> AppModel {
-        let ssh = SSHServices(paths: paths, secretStore: KeychainSecretStore(service: keychainService), defaults: nil)
+        let ssh = SSHServices(
+            paths: paths, secretStore: KeychainSecretStore(service: keychainService), defaults: nil,
+            authorizer: PolicySigningAuthorizer(verifier: presenceVerifier)
+        )
         return AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
     }
 
@@ -347,6 +355,21 @@ struct Phase2SelfTest {
                 continuation.resume(returning: (-1, error.localizedDescription))
             }
         }
+    }
+}
+
+/// The self-tests' user-presence check: never prompts. Each request is recorded (the reason
+/// names the key, user, host key fingerprint and program; nothing secret) and denied.
+final class SelfTestPresenceVerifier: UserPresenceVerifier {
+    private let reasons = Mutex<[String]>([])
+
+    /// Every reason asked for so far, oldest first.
+    var requests: [String] { reasons.withLock { $0 } }
+
+    func verifyUserPresence(reason: String) async -> Bool {
+        reasons.withLock { $0.append(reason) }
+        print("[selftest] Touch ID requested (denied, no prompt in self-tests): \(reason)")
+        return false
     }
 }
 #endif

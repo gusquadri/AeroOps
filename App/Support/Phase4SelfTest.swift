@@ -73,6 +73,12 @@ final class Phase4SelfTest {
         var processesWithTabsOpen: [String] = []
         var processesAfterClosingTabs: [String] = []
         var processesAfterQuitPath: [String] = []
+        /// What the agent's "started by AeroOps" walk sees from each shell tab's wrapper process.
+        var tabLineages: [String] = []
+        /// Every agent connection: the peer, how it was classified and its parent chain.
+        var agentPeers: [String] = []
+        /// Touch ID requests (recorded and denied by ``SelfTestPresenceVerifier``, never shown).
+        var touchIDRequests: [String] = []
         var screenshots: [String] = []
         var steps: [Step] = []
         /// Checks that could not run here, with why (e.g. another app kept the keyboard focus).
@@ -188,9 +194,17 @@ final class Phase4SelfTest {
 
         // 4. Five shell tabs: each host once (first contact), then two repeats.
         var shells: [TerminalSession] = []
+        var lineages: [(ok: Bool, detail: String)] = []
+        // A tab's ssh signs through the agent whenever no ControlMaster for its host is up yet,
+        // so the agent must see it as started by AeroOps (through the root-owned login wrapper).
+        func lineageStep() {
+            report.tabLineages = lineages.map(\.detail)
+            step("agent sees tabs as started by AeroOps", !lineages.isEmpty && lineages.allSatisfy(\.ok), lineages.map(\.detail).joined(separator: " | "))
+        }
         for (index, host) in (hosts + hosts.prefix(2)).enumerated() {
             guard let session = await openShell(host, firstContact: index < 3, connectingShot: index == 2 ? "tabs-connecting" : nil) else { return }
             let ready = await wait(25) { session.state == .running && self.hasPrompt(session) }
+            lineages.append(lineage(session))
             let title = terminals.tab(for: session.id)?.title ?? "?"
             step(
                 "tab \(index + 1) \(title)", ready,
@@ -198,9 +212,10 @@ final class Phase4SelfTest {
                     + "surface \(session.screenText() != nil), selected \(terminals.selectedSession?.id == session.id), "
                     + "app tab \(model.selectedTab), window visible \(window.occlusionState.contains(.visible)), active \(NSApp.isActive)"
             )
-            guard ready else { return }
+            guard ready else { return lineageStep() }
             shells.append(session)
         }
+        lineageStep()
         let rootPIDs = shells.map(\.processRootPID)
 
         // 5. A remote-command tab.
@@ -653,6 +668,17 @@ final class Phase4SelfTest {
 
     private func finish() async {
         let ssh = model.ssh
+        report.agentPeers = ssh.agentEvents.compactMap { event in
+            guard case .connected(let peer) = event.kind else { return nil }
+            return "\(peer.summary), Apple ssh \(peer.isAppleSSH), ancestors \(peer.ancestorPIDs)"
+        }
+        report.touchIDRequests = Phase2SelfTest.presenceVerifier.requests
+        step(
+            "no Touch ID requests", report.touchIDRequests.isEmpty,
+            report.touchIDRequests.isEmpty
+                ? "none (\(report.agentPeers.count) agent connection(s))"
+                : "\(report.touchIDRequests.count), denied: \(report.touchIDRequests)"
+        )
         if !quitPathRan {
             terminals.closeAll()
             await model.shutdownServices()
@@ -738,6 +764,19 @@ final class Phase4SelfTest {
     /// Backspace).
     private func clearSelection(_ session: TerminalSession) {
         session.type(" \u{7f}")
+    }
+
+    /// The agent's parent-chain walk (``ProcessAncestry``) from a tab's wrapper shell, whose child
+    /// is the tab's ssh: `pid name ← pid name ← …`, and whether it reaches AeroOps.
+    private func lineage(_ session: TerminalSession) -> (ok: Bool, detail: String) {
+        let title = terminals.tab(for: session.id)?.title ?? "?"
+        guard let root = session.processRootPID else { return (false, "\(title): no process") }
+        let chain = ProcessAncestry.ancestors(of: root)
+        let ok = chain.contains(getpid())
+        let names = ([root] + chain).map { pid in
+            "\(pid) \(ProcessAncestry.executablePath(pid).map { ($0 as NSString).lastPathComponent } ?? "?")"
+        }
+        return (ok, "\(title): " + names.joined(separator: " ← ") + (ok ? "" : " ← (walk stopped)"))
     }
 
     private func lines(_ session: TerminalSession) -> [String] {

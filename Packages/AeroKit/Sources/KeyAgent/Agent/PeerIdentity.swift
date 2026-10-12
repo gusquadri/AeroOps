@@ -77,9 +77,9 @@ enum PeerInspector {
             (identifier, team) = Self.signingInfo(code)
             isAppleSSH = SecCodeCheckValidity(code, [], Self.appleSSHRequirement) == errSecSuccess
         }
-        let ancestors = Self.ancestors(of: pid)
+        let ancestors = ProcessAncestry.ancestors(of: pid)
         return PeerIdentity(
-            pid: pid, uid: uid, executablePath: Self.executablePath(pid), codeSigningIdentifier: identifier,
+            pid: pid, uid: uid, executablePath: ProcessAncestry.executablePath(pid), codeSigningIdentifier: identifier,
             teamIdentifier: team, isAppleSSH: isAppleSSH, parentPID: ancestors.first, ancestorPIDs: ancestors,
             startedByApp: ancestors.contains(appProcessID))
     }
@@ -108,15 +108,21 @@ enum PeerInspector {
               let info = info as? [String: Any] else { return (nil, nil) }
         return (info[kSecCodeInfoIdentifier as String] as? String, info[kSecCodeInfoTeamIdentifier as String] as? String)
     }
+}
 
-    static func executablePath(_ pid: pid_t) -> String? {
+/// The parent chain behind ``PeerIdentity/startedByApp``. Public so the app's DEBUG self-test can
+/// check what the agent will see for a terminal tab's processes.
+public enum ProcessAncestry {
+    /// From `proc_pidpath`; `nil` if the process is gone.
+    public static func executablePath(_ pid: pid_t) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         guard length > 0 else { return nil }
         return String(decoding: buffer[0..<Int(length)].map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
-    static func parentPID(of pid: pid_t) -> pid_t? {
+    /// `pid`'s parent; `nil` if it cannot be read.
+    public static func parentPID(of pid: pid_t) -> pid_t? {
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
@@ -124,13 +130,19 @@ enum PeerInspector {
     }
 
     /// The parent chain of `pid`, nearest first, stopping before launchd (pid 1).
-    /// Bounded, so a PID-reuse cycle cannot loop forever.
-    static func ancestors(of pid: pid_t, maxDepth: Int = 64) -> [pid_t] {
+    public static func ancestors(of pid: pid_t, maxDepth: Int = 64) -> [pid_t] {
+        ancestors(of: pid, maxDepth: maxDepth, parent: parentPID(of:))
+    }
+
+    /// ``ancestors(of:maxDepth:)`` over any parent lookup. The walk stops at launchd, at a
+    /// process whose parent cannot be read, and after `maxDepth` steps or a repeated PID, so a
+    /// PID-reuse cycle cannot loop forever.
+    static func ancestors(of pid: pid_t, maxDepth: Int = 64, parent: (pid_t) -> pid_t?) -> [pid_t] {
         var chain: [pid_t] = []
         var current = pid
-        while chain.count < maxDepth, let parent = parentPID(of: current), parent > 1, parent != current, !chain.contains(parent) {
-            chain.append(parent)
-            current = parent
+        while chain.count < maxDepth, let next = parent(current), next > 1, next != current, !chain.contains(next) {
+            chain.append(next)
+            current = next
         }
         return chain
     }
