@@ -52,6 +52,9 @@ final class AppModel {
     let connectionTester: any ConnectionTester
     /// Live metrics: one monitor per host, feeding ``displayStates`` (Phase 3).
     let monitoring: MonitorService
+    /// The MCP bridge, approvals, audit log and live agent commands (Phases 7 and 8).
+    /// See `AppModel+Agents.swift`.
+    let agents: BridgeService
 
     /// Keys offered by the host editor's key picker.
     var availableKeys: [KeySummary] {
@@ -76,32 +79,40 @@ final class AppModel {
         self.ssh = ssh
         self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
         monitoring = MonitorService(ssh: ssh)
+        agents = BridgeService(ssh: ssh)
         hostsDidChange()
         addInventoryObserver(ssh)
         bindMonitoring()
+        bindAgents()
     }
 
-    /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring. Called once at launch.
+    /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring, then the MCP
+    /// bridge. Called once at launch.
     func startServices() async {
         await ssh.start()
         monitoring.start()
+        agents.start()
     }
 
     /// Stops monitoring, the agent and shared SSH connections. Called before the app quits.
     /// Returns how many ControlMaster connections were closed.
     @discardableResult
     func shutdownServices() async -> Int {
+        await agents.beginShutdown()?()
         await monitoring.beginShutdown()?()
         return await ssh.shutdown()
     }
 
     /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
-    /// Monitors stop first, so no poll opens a connection while the masters close.
+    /// The MCP bridge closes first, then monitors, so no agent call or poll opens a connection
+    /// while the masters close.
     func beginShutdown() -> (@Sendable () async -> Void)? {
+        let bridge = agents.beginShutdown()
         let monitors = monitoring.beginShutdown()
         let ssh = ssh.beginShutdown()
-        guard monitors != nil || ssh != nil else { return nil }
+        guard bridge != nil || monitors != nil || ssh != nil else { return nil }
         return {
+            await bridge?()
             await monitors?()
             _ = await ssh?()
         }
