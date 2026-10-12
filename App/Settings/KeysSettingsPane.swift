@@ -171,7 +171,8 @@ private struct KeyCard: View {
     let hostNames: [String]
     /// The system agent is in use, so AeroOps' keys are not offered to servers.
     let isUnused: Bool
-    let onPolicy: (SigningPolicy) -> Void
+    /// Main-actor isolated (and so Sendable): it becomes the Touch ID picker binding's setter.
+    let onPolicy: @MainActor (SigningPolicy) -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
