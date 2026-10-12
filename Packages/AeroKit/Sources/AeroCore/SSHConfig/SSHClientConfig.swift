@@ -25,8 +25,9 @@ import Foundation
 /// (which name keywords and line numbers but never quote file contents). A malformed `Host`
 /// line starts a block that matches nothing, so its settings can't leak into another host.
 ///
-/// Files are read through ``SSHConfigFileReading`` and never written. A file that looks like a
-/// private key is dropped unread.
+/// Files are read through ``SSHConfigFileReading`` and never written. Included files named like
+/// keys (`id_*` but not `*.pub`, `*.pem`, `*.key`, ...) are never opened, and a file whose text
+/// looks like a private key is dropped without being parsed.
 public struct SSHClientConfig: Sendable {
     /// `Include` files may nest this deep (OpenSSH's `READCONF_MAX_DEPTH`).
     public static let maxIncludeDepth = 16
@@ -359,6 +360,11 @@ private struct Parser {
                     issue(path, line, "“\(name)” is included in a loop; it was read only once.")
                     continue
                 }
+                // `Include *` in ~/.ssh would match the keys next to the config: never open them.
+                if Self.looksLikeKeyFileName(name) {
+                    issue(path, line, "“\(name)” looks like a key file; it was skipped unread.")
+                    continue
+                }
                 if chain.count > SSHClientConfig.maxIncludeDepth {
                     issue(path, line, "Includes are nested more than \(SSHClientConfig.maxIncludeDepth) deep; “\(name)” was skipped.")
                     continue
@@ -400,22 +406,19 @@ private struct Parser {
         let keyword = error.keyword.flatMap(Self.displayKeyword)
         switch error {
         case .missingValue:
-            issue(path, line, keyword.map { "“\($0)” has no value; the line was ignored." } ?? "A keyword has no value; the line was ignored.")
+            issue(path, line, keyword.map { "“\($0)” has no value; the line was ignored." } ?? "The line has no value; it was ignored.")
         case .unterminatedQuote:
-            issue(path, line, keyword.map { "“\($0)” has an unclosed quote; the line was ignored." } ?? "A quote is never closed; the line was ignored.")
+            issue(path, line, keyword.map { "“\($0)” has an unclosed quote; the line was ignored." } ?? "The line has an unclosed quote; it was ignored.")
         case .malformedKeyword:
             issue(path, line, "The line doesn't start with a keyword; it was ignored.")
         }
     }
 
-    /// A keyword fit to show: letters only, short. Anything else (a line of key material, say) is
-    /// never echoed.
+    /// The keyword's proper name if it is one the importer knows. Any other word (a stray
+    /// password or a line of key material, say) is never echoed.
     private static func displayKeyword(_ keyword: String) -> String? {
-        guard (1...32).contains(keyword.count), keyword.unicodeScalars.allSatisfy({ ("a"..."z").contains($0) }) else {
-            return nil
-        }
         if let known = SSHClientConfig.Setting.Keyword(rawValue: keyword) { return keywordName(known) }
-        return ["host": "Host", "match": "Match", "include": "Include"][keyword] ?? keyword
+        return ["host": "Host", "match": "Match", "include": "Include"][keyword]
     }
 
     private static func keywordName(_ keyword: SSHClientConfig.Setting.Keyword) -> String {
@@ -431,6 +434,13 @@ private struct Parser {
 
     private static func looksLikePrivateKey(_ text: String) -> Bool {
         text.contains("PRIVATE KEY-----") || text.contains("PuTTY-User-Key-File")
+    }
+
+    /// `id_*` (but not `*.pub`), `*.pem`, `*.key`, `*.ppk`, `*.p12`, `*.pfx`.
+    static func looksLikeKeyFileName(_ name: String) -> Bool {
+        let name = name.lowercased()
+        if name.hasSuffix(".pub") { return false }
+        return name.hasPrefix("id_") || [".pem", ".key", ".ppk", ".p12", ".pfx"].contains { name.hasSuffix($0) }
     }
 }
 
