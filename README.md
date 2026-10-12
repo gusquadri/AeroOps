@@ -12,8 +12,8 @@ AeroOps is a native macOS app for keeping an eye on a handful of Linux servers o
 | Container logs with search | Agent commands waiting for approval |
 | ![Settings › MCP with copyable client config](docs/screenshots/mcp-settings.png) | ![Onboarding, server step](docs/screenshots/onboarding.png) |
 | Settings › MCP | First-run onboarding |
-| ![Import from ~/.ssh/config sheet](docs/screenshots/ssh-config-import.png) | |
-| Import from `~/.ssh/config` | |
+| ![Import from ~/.ssh/config sheet](docs/screenshots/ssh-config-import.png) | ![Terminal tabs to three dev servers, one running top](docs/screenshots/terminals.png) |
+| Import from `~/.ssh/config` | Terminal tabs, with `top` on a dev server |
 
 The screenshots show the app's built-in demo data and the dev VM described below.
 
