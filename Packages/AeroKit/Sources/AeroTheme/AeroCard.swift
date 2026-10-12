@@ -94,6 +94,9 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                     // pixels.
                     Aero.glass.rim.mask { shape.inset(by: 0.5).strokeBorder(lineWidth: 1) }
                 }
+                // Decoration only. A mask clips pixels, not hit testing: without this the rim
+                // gradient covers the whole card and takes every click meant for its buttons.
+                .allowsHitTesting(false)
             }
         }
         .environment(\.colorScheme, .light)
