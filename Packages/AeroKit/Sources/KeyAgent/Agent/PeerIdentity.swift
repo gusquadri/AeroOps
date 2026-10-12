@@ -121,12 +121,19 @@ public enum ProcessAncestry {
         return String(decoding: buffer[0..<Int(length)].map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
-    /// `pid`'s parent; `nil` if it cannot be read.
+    /// `pid`'s parent; `nil` if the process is gone.
+    ///
+    /// Reads `PROC_PIDT_SHORTBSDINFO`, which the kernel answers for any user's process. The full
+    /// `PROC_PIDTBSDINFO` fails with `EPERM` unless the target has the caller's effective uid, and
+    /// a terminal tab's chain passes through one that does not: libghostty starts every tab as
+    /// `/usr/bin/login` (setuid root, euid 0) → `/bin/sh` → `/usr/bin/ssh`. With the full flavor
+    /// the walk stopped at `login`, so a tab's own ssh was "not started by AeroOps" and needed
+    /// Touch ID whenever it authenticated itself (no ControlMaster up yet).
     public static func parentPID(of pid: pid_t) -> pid_t? {
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
-        return pid_t(info.pbi_ppid)
+        var info = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size, info.pbsi_pid == UInt32(pid) else { return nil }
+        return pid_t(info.pbsi_ppid)
     }
 
     /// The parent chain of `pid`, nearest first, stopping before launchd (pid 1).
