@@ -102,6 +102,10 @@ enum ToolResults {
                 row["ageSeconds"] = .int(seconds)
             }
             if let node = pod.nodeName { row["node"] = .string(node) }
+            if let cpu = pod.cpuMillicores { row["cpuMillicores"] = .int(cpu) }
+            if let limit = pod.cpuLimitMillicores { row["cpuLimitMillicores"] = .int(limit) }
+            if let used = pod.memUsedBytes { row["memUsedBytes"] = .int(Int(used)) }
+            if let limit = pod.memLimitBytes { row["memLimitBytes"] = .int(Int(limit)) }
             let waiting = pod.containers.compactMap(\.waitingReason)
             if !waiting.isEmpty { row["waitingReasons"] = .array(waiting.map(JSONValue.string)) }
             return .object(row)

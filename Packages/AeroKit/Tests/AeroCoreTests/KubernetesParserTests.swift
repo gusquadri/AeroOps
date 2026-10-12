@@ -162,6 +162,110 @@ struct KubernetesParserTests {
         #expect(pods[2].phase == .unknown)
     }
 
+    // MARK: - Resources and metrics
+
+    @Test("pods-all: memory limits summed over containers, no CPU limits")
+    func podLimits() throws {
+        let pods = try fixturePods()
+        #expect(pods.map(\.memLimitBytes) == [nil, 32 << 20, nil, nil, 96 << 20, 170 << 20, nil])
+        #expect(pods.allSatisfy { $0.cpuLimitMillicores == nil })
+        #expect(pods.allSatisfy { $0.cpuMillicores == nil && $0.memUsedBytes == nil })
+    }
+
+    @Test("limits: pod-level wins, every container needs one for a sum, bad values are no limit")
+    func limitVariants() throws {
+        let json = #"""
+        {"items":[
+          {"metadata":{"name":"pod-level","namespace":"a"},
+           "spec":{"resources":{"limits":{"cpu":"2","memory":"1Gi"}},
+                   "containers":[{"name":"c","resources":{"limits":{"cpu":"100m","memory":"64Mi"}}}]}},
+          {"metadata":{"name":"summed","namespace":"a"},
+           "spec":{"containers":[{"name":"a","resources":{"limits":{"cpu":"250m","memory":"64Mi"}}},
+                                 {"name":"b","resources":{"limits":{"cpu":"0.1","memory":"128M"}}}]}},
+          {"metadata":{"name":"one-unlimited","namespace":"a"},
+           "spec":{"containers":[{"name":"a","resources":{"limits":{"cpu":"1","memory":"64Mi"}}},
+                                 {"name":"b","resources":{"limits":{"memory":"64Mi"}}}]}},
+          {"metadata":{"name":"junk","namespace":"a"},
+           "spec":{"containers":[{"name":"a","resources":{"limits":{"cpu":"lots","memory":-5}}}]}},
+          {"metadata":{"name":"wrong-types","namespace":"a"},
+           "spec":{"containers":[{"name":"a","resources":"none"},{"name":"b","resources":{"limits":[1]}}]}}
+        ]}
+        """#
+        let pods = try KubernetesParser.parsePods(json)
+        #expect(pods.map(\.name) == ["pod-level", "summed", "one-unlimited", "junk", "wrong-types"])
+        #expect(pods.map(\.cpuLimitMillicores) == [2000, 350, nil, nil, nil])
+        #expect(pods.map(\.memLimitBytes) == [1 << 30, (64 << 20) + 128_000_000, 128 << 20, nil, nil])
+        #expect(pods[4].containers.map(\.name) == ["a", "b"])
+    }
+
+    @Test("metrics: usage summed over containers and rounded up like kubectl top")
+    func podMetrics() throws {
+        let metrics = KubernetesParser.parsePodMetrics(try Fixtures.data("kubectl/synthetic-metrics-pods.json"))
+        #expect(metrics == [
+            PodMetrics(namespace: "demo", name: "crasher-89b4b56b4-djl5b", cpuMillicores: 0, memUsedBytes: 1_263_616),
+            // 152341n + 2003456n = 2.155797m; 3164Ki + 512Ki.
+            PodMetrics(namespace: "demo", name: "web-7b56d94874-b8t9q", cpuMillicores: 3, memUsedBytes: 3_764_224),
+            PodMetrics(namespace: "demo", name: "gone-6d4cf56db6-q2x7m", cpuMillicores: 7, memUsedBytes: 20 << 20),
+            PodMetrics(namespace: "kube-system", name: "coredns-7cfb7bc9c7-sdcln", cpuMillicores: 3, memUsedBytes: 14_258_176),
+            PodMetrics(
+                namespace: "kube-system", name: "local-path-provisioner-77b9867795-www4x",
+                cpuMillicores: 2, memUsedBytes: 7_938_048
+            ),
+        ])
+    }
+
+    @Test("pods-all with metrics: running pods get usage, the rest and unknown pods are left alone")
+    func podsWithMetrics() throws {
+        let pods = try KubernetesParser.parsePods(
+            try Fixtures.data("kubectl/pods-all.json"),
+            metrics: try Fixtures.data("kubectl/synthetic-metrics-pods.json")
+        )
+        #expect(pods.count == 7)
+        #expect(pods.map(\.cpuMillicores) == [nil, 0, nil, nil, 3, 3, 2])
+        #expect(pods.map(\.memUsedBytes) == [nil, 1_263_616, nil, nil, 3_764_224, 14_258_176, 7_938_048])
+        #expect(pods.map(\.memLimitBytes) == [nil, 32 << 20, nil, nil, 96 << 20, 170 << 20, nil])
+    }
+
+    @Test("metrics: errors, empty output and odd items are no metrics, not a failure")
+    func podMetricsVariants() throws {
+        let notFound = "Error from server (NotFound): the server could not find the requested resource"
+        for junk in ["", notFound, "{}", #"{"items":null}"#, "[1,2]"] {
+            #expect(KubernetesParser.parsePodMetrics(Data(junk.utf8)).isEmpty)
+            #expect(try KubernetesParser.parsePods(#"{"items":[{"metadata":{"name":"p"}}]}"#, metrics: junk).count == 1)
+        }
+
+        let json = #"""
+        {"items":[
+          {"metadata":{"name":"no-ns"},"containers":[{"name":"c","usage":{"cpu":"250m"}}]},
+          {"containers":[{"usage":{"cpu":"1"}}]},
+          {"metadata":{"name":"mixed","namespace":"a"},
+           "containers":[{"usage":{"cpu":"1m","memory":"1Ki"}},{"usage":"x"},{"usage":{"memory":"bad"}},{"name":"no-usage"}]},
+          {"metadata":{"name":"empty","namespace":"a"},"containers":[]}
+        ]}
+        """#
+        #expect(KubernetesParser.parsePodMetrics(Data(json.utf8)) == [
+            PodMetrics(namespace: "default", name: "no-ns", cpuMillicores: 250, memUsedBytes: nil),
+            PodMetrics(namespace: "a", name: "mixed", cpuMillicores: 1, memUsedBytes: 1024),
+            PodMetrics(namespace: "a", name: "empty", cpuMillicores: nil, memUsedBytes: nil),
+        ])
+    }
+
+    @Test("quantities", arguments: [
+        ("0", 0), ("1", 1), ("2.5", 2.5), ("250m", 0.25), ("2367103n", 0.002367103), ("100u", 0.0001),
+        ("1k", 1_000), ("1M", 1_000_000), ("1G", 1e9), ("1T", 1e12), ("1P", 1e15), ("1E", 1e18),
+        ("1Ki", 1_024), ("14304Ki", 14_647_296), ("64Mi", 67_108_864), ("1.5Gi", 1_610_612_736), ("1Ti", 1_099_511_627_776),
+        ("1e3", 1_000), ("1E3", 1_000), ("5e-3", 0.005), ("+3", 3), (" 7Mi ", 7_340_032),
+    ] as [(String, Double)])
+    func quantity(text: String, expected: Double) throws {
+        let value = try #require(KubernetesParser.parseQuantity(text))
+        #expect(abs(value - expected) <= expected * 1e-12)
+    }
+
+    @Test("quantities that are not", arguments: ["", "-1", "-250m", "m", "Ki", "1x", "1KI", "1kb", "1.2.3", "1e", "1e999", "NaN", "inf", "1 Mi"])
+    func badQuantity(text: String) {
+        #expect(KubernetesParser.parseQuantity(text) == nil)
+    }
+
     // MARK: - Events
 
     @Test("crasher events: counts, times and sources")

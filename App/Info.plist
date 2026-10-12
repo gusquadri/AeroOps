@@ -18,5 +18,19 @@
 	<false/>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
+	<!-- Files dragged between the Files tab's panes (FileDragPayload); never leaves the app. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>app.aeroops.file-selection</string>
+			<key>UTTypeDescription</key>
+			<string>AeroOps file selection</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

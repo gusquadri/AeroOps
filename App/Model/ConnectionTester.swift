@@ -2,7 +2,7 @@ import AeroCore
 import Foundation
 import SSHKit
 
-/// Checks that a host is reachable with its configured address, port, user and key.
+/// Checks that a host is reachable with its configured address, port, user and key or password.
 /// Settings › Hosts' **Test connection** button calls it with the (possibly unsaved) draft.
 ///
 /// The app uses ``SSHConnectionTester`` (`ssh … uname -sr` through SSHKit and the in-app agent);
@@ -12,7 +12,16 @@ import SSHKit
 /// connection fields change or the form goes away. They must not retry on their own: OpenSSH 9.8+
 /// (`PerSourcePenalties`) bans addresses that fail authentication repeatedly.
 protocol ConnectionTester: Sendable {
-    func testConnection(to host: RemoteHost) async -> ConnectionTestResult
+    /// - Parameter password: For a password host, a password typed in the editor to try instead
+    ///   of the saved one. It is not saved.
+    func testConnection(to host: RemoteHost, password: String?) async -> ConnectionTestResult
+}
+
+extension ConnectionTester {
+    /// Tests `host` with what is saved for it.
+    func testConnection(to host: RemoteHost) async -> ConnectionTestResult {
+        await testConnection(to: host, password: nil)
+    }
 }
 
 /// The outcome of a ``ConnectionTester`` run.
@@ -50,7 +59,7 @@ struct SimulatedConnectionTester: ConnectionTester {
     /// How long the simulated test takes.
     var delay: Duration = .milliseconds(1200)
 
-    func testConnection(to host: RemoteHost) async -> ConnectionTestResult {
+    func testConnection(to host: RemoteHost, password: String?) async -> ConnectionTestResult {
         let clock = ContinuousClock()
         let start = clock.now
         do {

@@ -91,7 +91,7 @@ enum PeerInspector {
         return requirement
     }()
 
-    private static func code(for token: audit_token_t) -> SecCode? {
+    static func code(for token: audit_token_t) -> SecCode? {
         var token = token
         let tokenData = withUnsafeBytes(of: &token) { Data($0) }
         var code: SecCode?
@@ -100,7 +100,7 @@ enum PeerInspector {
         return code
     }
 
-    private static func signingInfo(_ code: SecCode) -> (identifier: String?, team: String?) {
+    static func signingInfo(_ code: SecCode) -> (identifier: String?, team: String?) {
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return (nil, nil) }
         var info: CFDictionary?

@@ -313,7 +313,7 @@ final class HostContainersModel {
         defer { lastHost = host }
         guard let old = lastHost else { return }
         let endpointChanged = old.address != host.address || old.port != host.port || old.user != host.user
-            || old.keyId != host.keyId
+            || old.keyId != host.keyId || old.auth != host.auth
         let dockerChanged = old.dockerSudo != host.dockerSudo
         let kubeChanged = old.kubectlPrefix != host.kubectlPrefix
         guard endpointChanged || dockerChanged || kubeChanged else { return }

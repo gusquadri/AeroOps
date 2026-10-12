@@ -26,12 +26,15 @@ public struct KubernetesCollector: Sendable {
         self.timeout = timeout
     }
 
-    /// `kubectl get pods -A -o json` (or one namespace), parsed to the fields the plan lists.
+    /// `kubectl get pods -A -o json` (or one namespace) merged with the metrics API (one ssh
+    /// round trip), parsed to the fields the plan lists. Running pods carry CPU and memory use
+    /// when the cluster has metrics-server; otherwise the pods come back without it.
     public func pods(on host: RemoteHost, namespace: String? = nil) async throws -> [PodInfo] {
         let command = try KubectlCommands(host: host).pods(namespace: namespace)
         let result = try await run(command, on: host, outputLimit: Self.podsOutputLimit)
         guard !result.stdoutTruncated else { throw KubectlError.invalidOutput }
-        return try KubernetesParser.parsePods(result.stdout)
+        let parts = KubectlCommands.splitPodsOutput(result.stdout)
+        return try KubernetesParser.parsePods(parts.pods, metrics: parts.metrics)
     }
 
     /// The last `tail` lines (clamped to `1...2000`) of one container, ANSI-stripped and capped

@@ -7,7 +7,7 @@ import TerminalKit
 /// - File: New Host… (⌘N), Import Hosts from ~/.ssh/config…, New Terminal Tab (⌘T), and
 ///   Close (⌘W), which closes the shown terminal tab (asking first while it runs) or else
 ///   the key window.
-/// - View: Dashboard…Activity (⌘1–⌘4).
+/// - View: Dashboard…Activity (⌘1–⌘5).
 /// - Terminal: next / previous tab (⌃Tab / ⌃⇧Tab), Reconnect, font size (⌘+ / ⌘− / ⌘0) and
 ///   tabs 1…9 (⌘⌥1…⌘⌥9). They act while the main window shows terminal tabs.
 ///

@@ -16,6 +16,8 @@ let package = Package(
         .library(name: "AgentBridge", targets: ["AgentBridge"]),
         // Shared by the app (through AgentBridge) and the `aeroops-mcp` CLI (project.yml).
         .library(name: "BridgeProtocol", targets: ["BridgeProtocol"]),
+        // Shared by the app (through SSHKit and KeyAgent) and the `aeroops-askpass` helper.
+        .library(name: "AskpassProtocol", targets: ["AskpassProtocol"]),
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
     ],
     dependencies: [
@@ -28,10 +30,16 @@ let package = Package(
         .target(name: "AeroCore"),
 
         // System /usr/bin/ssh via Process, generated ssh_config, ControlMaster, host-key TOFU.
-        .target(name: "SSHKit", dependencies: ["AeroCore"]),
+        .target(name: "SSHKit", dependencies: ["AeroCore", "AskpassProtocol"]),
 
         // In-app ssh-agent: Unix socket protocol, Keychain / Secure Enclave key store, signing.
-        .target(name: "KeyAgent", dependencies: ["AeroCore"]),
+        // Also the askpass server that hands password hosts' passwords to `aeroops-askpass`.
+        .target(name: "KeyAgent", dependencies: ["AeroCore", "AskpassProtocol"]),
+
+        // The askpass.sock contract between the app and `aeroops-askpass`, the SSH_ASKPASS
+        // helper for password hosts. Linked by the helper,
+        // so it depends on nothing.
+        .target(name: "AskpassProtocol"),
 
         // Metrics script + parser, Docker, Kubernetes, one polling actor per host.
         .target(name: "Collectors", dependencies: ["SSHKit", "AeroCore"]),
@@ -80,8 +88,9 @@ let package = Package(
         .target(name: "AeroTestSupport", path: "Tests/AeroTestSupport"),
 
         .testTarget(name: "AeroCoreTests", dependencies: ["AeroCore", "AeroTestSupport"]),
-        .testTarget(name: "SSHKitTests", dependencies: ["SSHKit", "AeroTestSupport"]),
-        .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AeroTestSupport"]),
+        .testTarget(name: "SSHKitTests", dependencies: ["SSHKit", "AskpassProtocol", "AeroTestSupport"]),
+        .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AskpassProtocol", "AeroTestSupport"]),
+        .testTarget(name: "AskpassProtocolTests", dependencies: ["AskpassProtocol"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
         .testTarget(name: "TerminalKitTests", dependencies: ["TerminalKit", "AeroCore"]),
         .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),

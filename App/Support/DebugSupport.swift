@@ -44,6 +44,9 @@ import UniformTypeIdentifiers
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase7 -AeroSelfTestOutput /tmp/st7.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # see Phase7SelfTest (drives aeroops-mcp with dev/selftest/phase7-drive.sh)
 ///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest files -AeroSelfTestOutput /tmp/aeroops-files.json \
+///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # Files tab over SFTP, see FilesSelfTest
+///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest perf -AeroSelfTestOutput /tmp/aeroops-perf.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # 20 hosts: app and ssh CPU, memory; see PerfSelfTest
 /// ```
@@ -97,7 +100,8 @@ enum DebugLaunchOptions {
     @MainActor
     static func makeModel() -> AppModel? {
         if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase4SelfTest.isRequested
-            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested || PerfSelfTest.isRequested {
+            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested || PerfSelfTest.isRequested
+            || FilesSelfTest.isRequested {
             let model = Phase2SelfTest.makeModel()
             model.agents.useTransientSettings()
             model.onboarding.suppressesAutomaticPresentation = true
@@ -168,6 +172,9 @@ enum DebugLaunchOptions {
         }
         if PerfSelfTest.isRequested {
             await PerfSelfTest(model: model).runAndQuit()
+        }
+        if FilesSelfTest.isRequested {
+            await FilesSelfTest(model: model).runAndQuit()
         }
     }
 }

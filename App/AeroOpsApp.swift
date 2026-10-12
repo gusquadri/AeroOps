@@ -42,7 +42,9 @@ struct AeroOpsApp: App {
     @MainActor
     static func makeModel() -> AppModel {
         let paths = AeroPaths.standard
-        let ssh = SSHServices(paths: paths, secretStore: KeychainSecretStore(), defaults: .standard)
+        let ssh = SSHServices(
+            paths: paths, secretStore: KeychainSecretStore(), passwordStore: HostPasswordVault.keychainStore(), defaults: .standard
+        )
         let model = AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
         model.onboarding = OnboardingState(defaults: .standard)
         return model

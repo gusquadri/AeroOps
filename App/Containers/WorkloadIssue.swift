@@ -51,15 +51,22 @@ struct WorkloadIssue: Hashable, Sendable {
             let kind: Kind = if case .invalidKubectlPrefix = error { .setup } else { .transient }
             return WorkloadIssue(title: error.errorDescription ?? "Invalid request.", hint: error.recoverySuggestion, kind: kind)
         case let error as SSHError:
-            return from(error)
+            return from(error, host: host)
         default:
             return WorkloadIssue(title: error.localizedDescription, hint: nil, kind: .transient)
         }
     }
 
-    private static func from(_ error: SSHError) -> WorkloadIssue? {
+    private static func from(_ error: SSHError, host: RemoteHost?) -> WorkloadIssue? {
         let title = error.errorDescription ?? "ssh failed."
         switch error {
+        case .authFailed where host?.auth == .password:
+            return WorkloadIssue(
+                title: title,
+                hint: "Save the host's password in the host editor (Test Connection checks it), then press Refresh. "
+                    + "AeroOps does not retry a rejected password on its own.",
+                kind: .access
+            )
         case .authFailed:
             return WorkloadIssue(
                 title: title,

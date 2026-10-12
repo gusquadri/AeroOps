@@ -4,7 +4,8 @@ import Foundation
 ///
 /// Decoding is tolerant: unknown keys are ignored, and every field except `id`, `name`,
 /// `address` and `user` falls back to its default when missing, so older or hand-edited files
-/// still load. Secrets never live here; `keyId` only names a key held by KeyAgent.
+/// still load. Secrets never live here: `keyId` only names a key held by KeyAgent, and a
+/// password host's password lives in the Keychain under the host's `id`.
 ///
 /// Named `RemoteHost` (the plan says "Host") because `Foundation.Host` (NSHost) makes a bare
 /// `Host` ambiguous in every file that imports both Foundation/SwiftUI and AeroCore.
@@ -20,7 +21,10 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
     /// Remote login user.
     public var user: String
     /// Identifier of the KeyAgent key used for this host, or `nil` for none chosen yet.
+    /// Ignored while ``auth`` is ``HostAuthMethod/password``, but kept for switching back.
     public var keyId: String?
+    /// How ssh logs in. Defaults to ``HostAuthMethod/key``.
+    public var auth: HostAuthMethod
     /// Free-form tags for grouping and filtering (`list_hosts tag:`).
     public var tags: [String]
     /// Command prefix replacing `kubectl`, e.g. `sudo -n k3s kubectl`. `nil` means plain `kubectl`.
@@ -41,6 +45,7 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         port: Int = RemoteHost.defaultPort,
         user: String,
         keyId: String? = nil,
+        auth: HostAuthMethod = .key,
         tags: [String] = [],
         kubectlPrefix: String? = nil,
         dockerSudo: Bool = false,
@@ -52,6 +57,7 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         self.port = port
         self.user = user
         self.keyId = keyId
+        self.auth = auth
         self.tags = tags
         self.kubectlPrefix = kubectlPrefix
         self.dockerSudo = dockerSudo
@@ -59,7 +65,7 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, port, user, keyId, tags, kubectlPrefix, dockerSudo, mcpTier
+        case id, name, address, port, user, keyId, auth, tags, kubectlPrefix, dockerSudo, mcpTier
     }
 
     /// Tolerant decoding: required `id`, `name`, `address`, `user`; everything else defaulted.
@@ -71,10 +77,26 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         user = try c.decode(String.self, forKey: .user)
         port = try c.decodeIfPresent(Int.self, forKey: .port) ?? RemoteHost.defaultPort
         keyId = try c.decodeIfPresent(String.self, forKey: .keyId)
+        auth = try c.decodeIfPresent(HostAuthMethod.self, forKey: .auth) ?? .key
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         kubectlPrefix = try c.decodeIfPresent(String.self, forKey: .kubectlPrefix)
         dockerSudo = try c.decodeIfPresent(Bool.self, forKey: .dockerSudo) ?? false
         mcpTier = try c.decodeIfPresent(MCPTier.self, forKey: .mcpTier) ?? .default
+    }
+}
+
+/// How ssh logs in to a host.
+public enum HostAuthMethod: String, Codable, Sendable, Hashable, CaseIterable {
+    /// Public key: the host's KeyAgent key through the in-app agent, or the system agent's keys.
+    case key
+    /// A password kept in the Keychain, handed to ssh by the `aeroops-askpass` helper.
+    case password
+
+    /// Decodes a raw value; an unrecognised value falls back to ``key``, which never sends a
+    /// password anywhere.
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = HostAuthMethod(rawValue: raw) ?? .key
     }
 }
 

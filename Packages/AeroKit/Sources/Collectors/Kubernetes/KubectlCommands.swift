@@ -7,6 +7,12 @@ import Foundation
 /// ``KubectlPrefix/normalized(_:)`` and inserted as is; every name is checked with
 /// `ShellQuote.isSafeName` and quoted with `ShellQuote.quote`.
 public struct KubectlCommands: Sendable, Hashable {
+    /// The line ``pods(namespace:)`` prints between the pods JSON and the metrics JSON.
+    public static let metricsMarker = "@@aero-pod-metrics"
+    /// How long the metrics call may take; a slow or broken metrics-server must not hold up the
+    /// pod list.
+    static let metricsTimeout = "5s"
+
     /// The normalized prefix, e.g. `kubectl` or `sudo -n k3s kubectl`.
     public let prefix: String
 
@@ -20,11 +26,28 @@ public struct KubectlCommands: Sendable, Hashable {
         try self.init(prefix: host.kubectlPrefix)
     }
 
-    /// `get pods -A -o json`, or `get pods -n '<namespace>' -o json`.
+    /// The pods and their CPU and memory use (metrics-server) in one round trip:
+    /// `LC_ALL=C sh -c '<prefix> get pods -A -o json || exit $?; echo; echo @@aero-pod-metrics;
+    /// <prefix> get --raw '/apis/metrics.k8s.io/v1beta1/pods' --request-timeout=5s 2>/dev/null || true'`,
+    /// or the same for one namespace (`-n '<namespace>'`, `.../namespaces/<namespace>/pods`).
+    ///
+    /// The script exits with `get pods`'s status when that fails. A failing metrics call (no
+    /// metrics-server, no permission) prints nothing after ``metricsMarker``, so the pods come
+    /// back without CPU and memory.
     public func pods(namespace: String? = nil) throws(CollectorInputError) -> String {
-        guard let namespace else { return command("get pods -A -o json") }
-        let ns = try quoted(namespace, field: "namespace")
-        return command("get pods -n \(ns) -o json")
+        let scope: String
+        let metricsPath: String
+        if let namespace {
+            scope = "-n \(try quoted(namespace, field: "namespace"))"
+            metricsPath = "/apis/metrics.k8s.io/v1beta1/namespaces/\(namespace)/pods"
+        } else {
+            scope = "-A"
+            metricsPath = "/apis/metrics.k8s.io/v1beta1/pods"
+        }
+        let script = "\(prefix) get pods \(scope) -o json || exit $?; "
+            + "echo; echo \(Self.metricsMarker); "
+            + "\(prefix) get --raw \(ShellQuote.quote(metricsPath)) --request-timeout=\(Self.metricsTimeout) 2>/dev/null || true"
+        return RemoteShell.script(script)
     }
 
     /// `logs [-f] -n '<ns>' '<pod>' [-c '<container>'] [--previous] --tail=<n> --timestamps [--since=<s>s]`.
@@ -63,6 +86,14 @@ public struct KubectlCommands: Sendable, Hashable {
         try NameCheck.require(pod, field: "pod")
         let selector = ShellQuote.quote("involvedObject.name=\(pod)")
         return command("get events -n \(namespace) --field-selector \(selector) -o json")
+    }
+
+    /// Splits ``pods(namespace:)`` output into the pods JSON and the metrics JSON (empty when
+    /// the metrics call failed or the marker is missing).
+    static func splitPodsOutput(_ output: Data) -> (pods: Data, metrics: Data) {
+        // JSON strings cannot hold a raw newline, so the marker line cannot occur inside the pods JSON.
+        guard let marker = output.range(of: Data("\n\(metricsMarker)\n".utf8)) else { return (output, Data()) }
+        return (output[..<marker.lowerBound], output[marker.upperBound...])
     }
 
     private func command(_ arguments: String) -> String {

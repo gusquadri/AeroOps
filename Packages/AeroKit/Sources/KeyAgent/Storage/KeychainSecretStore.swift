@@ -4,7 +4,7 @@ import Security
 import Synchronization
 
 /// A ``SecretStore`` backed by Keychain generic-password items (service `app.aeroops.keys`,
-/// account = key id).
+/// account = key id; password hosts use service `app.aeroops.passwords`, account = host id).
 ///
 /// ## Backend
 ///
@@ -47,11 +47,23 @@ public struct KeychainSecretStore: SecretStore {
     /// ``SecretStoreError/interactionRequired(operation:)`` instead. The agent signs on behalf of
     /// background `ssh` processes, so a hidden dialog must never block it.
     public let allowsUserInteraction: Bool
+    /// The item name Keychain Access shows.
+    public let label: String
+    /// The item kind Keychain Access shows.
+    public let itemDescription: String
 
-    public init(service: String = defaultService, backend: Backend = .legacyFileKeychain, allowsUserInteraction: Bool = false) {
+    public init(
+        service: String = defaultService,
+        backend: Backend = .legacyFileKeychain,
+        allowsUserInteraction: Bool = false,
+        label: String = "AeroOps SSH key",
+        itemDescription: String = "AeroOps SSH private key"
+    ) {
         self.service = service
         self.backend = backend
         self.allowsUserInteraction = allowsUserInteraction
+        self.label = label
+        self.itemDescription = itemDescription
     }
 
     // MARK: SecretStore
@@ -60,8 +72,8 @@ public struct KeychainSecretStore: SecretStore {
         try withInteractionPolicy { () throws(SecretStoreError) in
             var add = query(for: id)
             add[kSecValueData] = secret
-            add[kSecAttrLabel] = "AeroOps SSH key"
-            add[kSecAttrDescription] = "AeroOps SSH private key"
+            add[kSecAttrLabel] = label
+            add[kSecAttrDescription] = itemDescription
             if case .dataProtection = backend {
                 add[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             }
@@ -93,6 +105,22 @@ public struct KeychainSecretStore: SecretStore {
                 return nil
             default:
                 throw Self.error("read", status)
+            }
+        }
+    }
+
+    /// Reads only the item's attributes, so it never needs the item's access control.
+    public func contains(_ id: UUID) throws(SecretStoreError) -> Bool {
+        try withInteractionPolicy { () throws(SecretStoreError) -> Bool in
+            var find = query(for: id)
+            find[kSecReturnAttributes] = true
+            find[kSecMatchLimit] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(find as CFDictionary, &result)
+            switch status {
+            case errSecSuccess: return true
+            case errSecItemNotFound: return false
+            default: throw Self.error("lookup", status)
             }
         }
     }

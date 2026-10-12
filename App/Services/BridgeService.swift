@@ -344,11 +344,12 @@ final class BridgeService {
         auditEntries = (auditEntries + older).sorted { $0.time > $1.time }.prefix(Self.auditLimit).map(\.self)
     }
 
-    /// Keeps the runner's agent environment in step with Settings › Keys' agent choice.
+    /// Keeps the runner's agent environment and askpass route in step with ``SSHServices``.
     private func trackAgentChoice() {
         guard !isShutDown else { return }
         withObservationTracking {
             _ = ssh.agentChoice
+            _ = ssh.askpassRoute
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }

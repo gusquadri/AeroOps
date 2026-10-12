@@ -1,11 +1,15 @@
 import AeroCore
+import AskpassProtocol
 import Collectors
 import Foundation
 
 /// The editable form of a ``RemoteHost`` used by the host editor, with validation.
 ///
 /// Port and tags are kept as typed text so invalid input can be shown and fixed rather than
-/// silently coerced. ``validate(otherHostNames:)`` and ``makeHost()`` are pure.
+/// silently coerced. ``validate(otherHostNames:hasSavedPassword:)`` and ``makeHost()`` are pure.
+///
+/// ``password`` is never part of the host: the editor saves it to the Keychain on its own and
+/// clears it.
 ///
 /// Validation is also a safety boundary: address, user and kubectl prefix end up in the generated
 /// ssh_config and in remote command lines, so line breaks, spaces and a leading "-" (which ssh
@@ -17,6 +21,9 @@ struct HostDraft: Hashable, Sendable {
     var port: String
     var user: String
     var keyId: String?
+    var auth: HostAuthMethod
+    /// A password typed for a password host; empty keeps the saved one.
+    var password: String
     /// Comma-separated, e.g. "prod, web, eu-west".
     var tags: String
     /// Empty means plain `kubectl`.
@@ -32,6 +39,8 @@ struct HostDraft: Hashable, Sendable {
         port = String(RemoteHost.defaultPort)
         user = ""
         keyId = nil
+        auth = .key
+        password = ""
         tags = ""
         kubectlPrefix = ""
         dockerSudo = false
@@ -46,6 +55,8 @@ struct HostDraft: Hashable, Sendable {
         port = String(host.port)
         user = host.user
         keyId = host.keyId
+        auth = host.auth
+        password = ""
         tags = host.tags.joined(separator: ", ")
         kubectlPrefix = host.kubectlPrefix ?? ""
         dockerSudo = host.dockerSudo
@@ -82,8 +93,8 @@ struct HostDraft: Hashable, Sendable {
     }
 
     /// The host this draft describes, normalised (trimmed text, parsed tags, empty prefix → `nil`,
-    /// prefix words joined by single spaces). Check ``validate(otherHostNames:)`` first; an
-    /// unparsable port falls back to 22.
+    /// prefix words joined by single spaces, no key for a password host). Check
+    /// ``validate(otherHostNames:hasSavedPassword:)`` first; an unparsable port falls back to 22.
     func makeHost() -> RemoteHost {
         let trimmed = trimmedKubectlPrefix
         let prefix = trimmed.isEmpty ? "" : (try? KubectlPrefix.normalized(trimmed)) ?? trimmed
@@ -93,7 +104,8 @@ struct HostDraft: Hashable, Sendable {
             address: trimmedAddress,
             port: parsedPort ?? RemoteHost.defaultPort,
             user: trimmedUser,
-            keyId: keyId,
+            keyId: auth == .key ? keyId : nil,
+            auth: auth,
             tags: parsedTags,
             kubectlPrefix: prefix.isEmpty ? nil : prefix,
             dockerSudo: dockerSudo,
@@ -105,7 +117,7 @@ struct HostDraft: Hashable, Sendable {
 
     /// Fields that can carry a validation message.
     enum Field: Hashable, CaseIterable, Sendable {
-        case name, address, port, user, tags, kubectlPrefix
+        case name, address, port, user, password, tags, kubectlPrefix
     }
 
     /// Validation messages by field.
@@ -116,9 +128,9 @@ struct HostDraft: Hashable, Sendable {
 
         func message(for field: Field) -> String? { issues[field] }
 
-        /// Address, port and user are valid, so a connection test makes sense.
+        /// Address, port, user and password are valid, so a connection test makes sense.
         var canTestConnection: Bool {
-            issues[.address] == nil && issues[.port] == nil && issues[.user] == nil
+            issues[.address] == nil && issues[.port] == nil && issues[.user] == nil && issues[.password] == nil
         }
     }
 
@@ -129,19 +141,23 @@ struct HostDraft: Hashable, Sendable {
         case .address: address
         case .port: port
         case .user: user
+        case .password: password
         case .tags: tags
         case .kubectlPrefix: kubectlPrefix
         }
     }
 
     /// Validates every field. `otherHostNames` are the names of the *other* hosts; names must be
-    /// unique ignoring case.
-    func validate(otherHostNames: some Sequence<String>) -> Validation {
+    /// unique ignoring case. A password host needs a password unless `hasSavedPassword`.
+    func validate(otherHostNames: some Sequence<String>, hasSavedPassword: Bool = false) -> Validation {
         var v = Validation()
         v.issues[.name] = Self.nameIssue(trimmedName, otherHostNames: otherHostNames)
         v.issues[.address] = Self.addressIssue(trimmedAddress)
         v.issues[.port] = parsedPort == nil ? "Enter a port from 1 to 65535." : nil
         v.issues[.user] = Self.userIssue(trimmedUser)
+        if auth == .password {
+            v.issues[.password] = Self.passwordIssue(password, hasSavedPassword: hasSavedPassword)
+        }
         v.issues[.tags] = Self.tagsIssue(parsedTags)
         v.issues[.kubectlPrefix] = Self.kubectlPrefixIssue(trimmedKubectlPrefix)
         return v
@@ -192,6 +208,17 @@ struct HostDraft: Hashable, Sendable {
             return "Use letters, digits, “.”, “_”, “-” or “@”, no spaces."
         }
         return nil
+    }
+
+    /// The password is used as typed (no trimming): ssh sends it as one line.
+    static func passwordIssue(_ password: String, hasSavedPassword: Bool) -> String? {
+        if password.isEmpty { return hasSavedPassword ? nil : "Enter the password." }
+        switch Askpass.passwordProblem(password) {
+        case nil: return nil
+        case .empty: return "Enter the password."
+        case .lineBreak: return "A password can't contain a line break."
+        case .tooLong: return "Use \(Askpass.maxPasswordBytes) bytes or fewer."
+        }
     }
 
     static func tagsIssue(_ tags: [String]) -> String? {

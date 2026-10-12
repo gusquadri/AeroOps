@@ -1,9 +1,10 @@
-/// The four main-window tabs. Shown as a segmented control in the
-/// toolbar and bound to ⌘1–⌘4 in the View menu.
+/// The five main-window tabs. Shown as a segmented control in the
+/// toolbar and bound to ⌘1–⌘5 in the View menu.
 enum AppTab: String, CaseIterable, Identifiable, Sendable {
     case dashboard
     case containers
     case terminals
+    case files
     case activity
 
     var id: Self { self }
@@ -13,6 +14,7 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .dashboard: "Dashboard"
         case .containers: "Containers"
         case .terminals: "Terminals"
+        case .files: "Files"
         case .activity: "Activity"
         }
     }
@@ -23,6 +25,7 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .dashboard: "square.grid.2x2"
         case .containers: "shippingbox"
         case .terminals: "terminal"
+        case .files: "folder"
         case .activity: "list.bullet.rectangle"
         }
     }
@@ -33,7 +36,8 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .dashboard: "1"
         case .containers: "2"
         case .terminals: "3"
-        case .activity: "4"
+        case .files: "4"
+        case .activity: "5"
         }
     }
 }

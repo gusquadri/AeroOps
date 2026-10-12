@@ -4,12 +4,13 @@ import KeyAgent
 import SSHKit
 
 /// Test connection through SSHKit: `ssh -F <probe config> -o BatchMode=yes aero-<id> uname -sr`
-/// via the in-app agent (or the system agent when the fallback is on).
+/// via the in-app agent (or the system agent when the fallback is on). Password hosts run without
+/// `BatchMode` and get the password from `aeroops-askpass`.
 struct SSHConnectionTester: ConnectionTester {
     let services: SSHServices
 
-    func testConnection(to host: RemoteHost) async -> ConnectionTestResult {
-        await services.testConnection(to: host)
+    func testConnection(to host: RemoteHost, password: String?) async -> ConnectionTestResult {
+        await services.testConnection(to: host, password: password)
     }
 }
 
@@ -21,15 +22,20 @@ extension SSHServices {
 
     /// Tests `host`, which may be an unsaved draft.
     ///
-    /// 1. The draft must render into `ssh_config`; in-app mode also needs a key and a running agent.
+    /// 1. The draft must render into `ssh_config`. A key host in in-app mode needs a key and a
+    ///    running agent; a password host needs the askpass server and a password (`password`, or
+    ///    the saved one).
     /// 2. Blocked hosts are never contacted.
     /// 3. First contact (nothing pinned): `ssh-keyscan`, then ``ConnectionTestResult/Outcome/hostKeyUnknown(offered:)``
     ///    so the user can trust the key. No login is attempted before that.
     /// 4. Otherwise one `ssh` run against a throwaway config that holds only this host, with
     ///    connection sharing off, so the result reflects this draft and not an open master.
+    ///    A typed `password` reaches `aeroops-askpass` through a one-time token and is never saved.
+    ///    A test of the saved password opens or closes the ``PasswordAttemptGate`` for the host.
     ///
-    /// No retries: OpenSSH 9.8+ penalises addresses that keep failing authentication.
-    func testConnection(to host: RemoteHost) async -> ConnectionTestResult {
+    /// No retries: OpenSSH 9.8+ penalises addresses that keep failing authentication, and every
+    /// wrong password counts towards the account's lockout.
+    func testConnection(to host: RemoteHost, password: String? = nil) async -> ConnectionTestResult {
         let clock = ContinuousClock()
         let start = clock.now
         func result(
@@ -52,7 +58,18 @@ extension SSHServices {
         }
 
         var key: SSHKeyRecord?
-        if context.agent == .inApp {
+        if host.auth == .password {
+            guard context.askpass != nil else {
+                return result(
+                    .failure,
+                    "AeroOps can’t hand passwords to ssh: \(askpassError ?? "the askpass server is not running.")",
+                    hint: "Terminal tabs still work: they ask for the password."
+                )
+            }
+            guard password != nil || passwords.hasPassword(for: host.id) else {
+                return result(.failure, "Enter the password first.")
+            }
+        } else if context.agent == .inApp {
             guard host.keyId != nil else {
                 return result(.failure, "Choose a key for this host first.", hint: "Generate or import one in Settings › Keys.")
             }
@@ -109,6 +126,18 @@ extension SSHServices {
         defer { try? FileManager.default.removeItem(at: probe) }
         var probeContext = context
         probeContext.configFileOverride = probe
+        var token: String?
+        if host.auth == .password, let password {
+            do {
+                token = try passwords.beginTemporary(password, for: host.id)
+            } catch {
+                return result(.failure, error.localizedDescription)
+            }
+            probeContext.askpassToken = token
+        }
+        defer { if let token { passwords.endTemporary(token) } }
+        // Only a test of the saved password says anything about what background ssh may try.
+        let testsSavedPassword = host.auth == .password && token == nil
 
         let outcome: SSHResult
         do {
@@ -132,16 +161,34 @@ extension SSHServices {
                     return result(.hostKeyChanged(block), Self.changedMessage(host))
                 }
             }
+            if host.auth == .password, transportError == .authFailed {
+                if testsSavedPassword { await passwordGate.reject(host.id) }
+                let (message, hint) = Self.describePasswordFailure(stderr: outcome.stderrString, host: host)
+                return result(.failure, message, hint: hint)
+            }
             let (message, hint) = Self.describe(transportError, host: host)
             return result(.failure, message, hint: hint, keyToAuthorize: transportError == .authFailed ? key?.id : nil)
+        }
+        if testsSavedPassword {
+            // ssh logged in with the saved password: background ssh may use it again.
+            await passwordGate.reset(host.id)
+            await passwordGate.accept(host.id)
+            passwordsDidChange?(host.id)
         }
         if outcome.exitCode != 0 {
             let stderr = outcome.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
             return result(.failure, "Logged in, but `\(Self.testCommand)` exited with status \(outcome.exitCode)." + (stderr.isEmpty ? "" : " \(stderr)"))
         }
         let system = outcome.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        let via = context.agent == .inApp ? (key.map { " with “\($0.name)”" } ?? "") : " via the system ssh-agent"
-        return result(.success, "Connected as \(host.user)@\(host.address):\(host.port)\(via)" + (system.isEmpty ? "." : " · \(system)"))
+        let via = switch host.auth {
+        case .password: token == nil ? " with the saved password" : " with the password above"
+        case .key: context.agent == .inApp ? (key.map { " with “\($0.name)”" } ?? "") : " via the system ssh-agent"
+        }
+        return result(
+            .success,
+            "Connected as \(host.user)@\(host.address):\(host.port)\(via)" + (system.isEmpty ? "." : " · \(system)"),
+            hint: token == nil ? nil : "Save the host to keep the password in the Keychain."
+        )
     }
 
     /// Writes `probe-<random>` (0600) next to `ssh_config`: a block that turns connection
@@ -177,6 +224,8 @@ extension SSHServices {
         guard let error = error as? SSHError else { return (error.localizedDescription, nil) }
         let target = "\(host.address):\(host.port)"
         switch error {
+        case .authFailed where host.auth == .password:
+            return ("\(host.user)@\(target) rejected the password.", passwordHint)
         case .authFailed:
             return (
                 "\(host.user)@\(target) rejected the key.",
@@ -202,5 +251,35 @@ extension SSHServices {
         case .launchFailed, .remoteCommandFailed, .invalidRequest, .other:
             return (error.localizedDescription, nil)
         }
+    }
+
+    static let passwordHint = "Check the password, then test again. AeroOps does not retry: repeated failures can lock the account or get this Mac temporarily banned by the server."
+
+    /// Why a password login failed, from ssh's stderr: the server takes no passwords, the
+    /// askpass helper gave none (its `aeroops-askpass:` line), or the password was wrong.
+    static func describePasswordFailure(stderr: String, host: RemoteHost) -> (message: String, hint: String?) {
+        let target = "\(host.address):\(host.port)"
+        if let methods = deniedMethods(stderr), !methods.contains("password"), !methods.contains("keyboard-interactive") {
+            return (
+                "\(target) does not accept passwords for \(host.user) (it allows: \(methods.joined(separator: ", "))).",
+                "Turn on PasswordAuthentication or KbdInteractiveAuthentication in the server’s sshd_config, or sign in with a key."
+            )
+        }
+        let refusal = stderr.split(whereSeparator: \.isNewline)
+            .first { $0.hasPrefix(SSHError.askpassMarker) }
+            .map { String($0.dropFirst(SSHError.askpassMarker.count)).trimmingCharacters(in: .whitespaces) }
+        if let refusal, refusal != AskpassRefusal.alreadyAnswered.description {
+            return ("No password was sent to \(target): \(refusal).", nil)
+        }
+        return ("\(host.user)@\(target) rejected the password.", passwordHint)
+    }
+
+    /// The methods in ssh's final `Permission denied (publickey,password).` line, if any.
+    static func deniedMethods(_ stderr: String) -> [String]? {
+        guard let line = stderr.split(whereSeparator: \.isNewline).last(where: { $0.contains("Permission denied (") }),
+              let open = line.range(of: "Permission denied ("),
+              let close = line[open.upperBound...].firstIndex(of: ")")
+        else { return nil }
+        return line[open.upperBound..<close].split(separator: ",").map(String.init)
     }
 }

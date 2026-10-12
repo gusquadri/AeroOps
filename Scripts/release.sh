@@ -206,7 +206,7 @@ check_code() {
 
 verify_app() {
     codesign --verify --deep --strict --verbose=2 "$app"
-    # Every Mach-O in the bundle: the app, aeroops-mcp, Sparkle and its helpers.
+    # Every Mach-O in the bundle: the app, aeroops-mcp, aeroops-askpass, Sparkle and its helpers.
     local count=0 file
     while IFS= read -r file; do
         case $(file -b "$file") in
@@ -233,12 +233,20 @@ verify_app() {
         || die "aeroops-mcp does not satisfy the bridge's peer requirement"
     "$cli" --version > /dev/null || die "aeroops-mcp does not run (code signature or entitlements rejected?)"
     note "aeroops-mcp: satisfies the bridge peer requirement and runs"
+
+    # The askpass server only answers aeroops-askpass signed by the same team with this identifier.
+    local askpass="$app/Contents/MacOS/aeroops-askpass"
+    codesign --verify -R="anchor apple generic and certificate leaf[subject.OU] = \"$team\" and identifier \"app.aeroops.askpass\"" "$askpass" \
+        || die "aeroops-askpass does not satisfy the askpass server's peer requirement"
+    "$askpass" --version > /dev/null || die "aeroops-askpass does not run (code signature or entitlements rejected?)"
+    note "aeroops-askpass: satisfies the askpass peer requirement and runs"
 }
 
 step "Verifying the exported app"
 if [ "$dry_run" = 1 ]; then
     note "dry run: would check every Mach-O in $app (Developer ID, hardened runtime, timestamp,"
-    note "no get-task-allow), the Sparkle Info.plist keys and aeroops-mcp's bridge requirement"
+    note "no get-task-allow), the Sparkle Info.plist keys, aeroops-mcp's bridge requirement and"
+    note "aeroops-askpass's askpass requirement"
 else
     verify_app
 fi

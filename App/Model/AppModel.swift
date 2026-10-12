@@ -104,23 +104,25 @@ final class AppModel {
         agents.start()
     }
 
-    /// Closes terminal tabs, stops monitoring, the agent and shared SSH connections. Called before
-    /// the app quits.
+    /// Closes terminal tabs and SFTP sessions, stops monitoring, the agent and shared SSH
+    /// connections. Called before the app quits.
     /// Returns how many ControlMaster connections were closed.
     @discardableResult
     func shutdownServices() async -> Int {
         terminals.closeAll()
+        closeFileSessions()
         await agents.beginShutdown()?()
         await monitoring.beginShutdown()?()
         return await ssh.shutdown()
     }
 
     /// The quit-time variant of ``shutdownServices()``: see ``SSHServices/beginShutdown()``.
-    /// Terminal tabs close first, so no ssh session outlives the agent that signs for it; then the
-    /// MCP bridge and monitors stop, so no agent call or poll opens a connection while the masters
-    /// close.
+    /// Terminal tabs and SFTP sessions close first, so no ssh session outlives the agent that
+    /// signs for it; then the MCP bridge and monitors stop, so no agent call or poll opens a
+    /// connection while the masters close.
     func beginShutdown() -> (@Sendable () async -> Void)? {
         terminals.closeAll()
+        closeFileSessions()
         let bridge = agents.beginShutdown()
         let monitors = monitoring.beginShutdown()
         let ssh = ssh.beginShutdown()
@@ -179,6 +181,8 @@ final class AppModel {
     func deleteHost(id: RemoteHost.ID) throws(HostStoreError) {
         try hostStore.delete(id: id)
         hostsDidChange()
+        // Its saved password, if any, goes with it.
+        try? ssh.deletePassword(for: id)
     }
 
     /// Re-reads `hosts.json` (e.g. after a load error was fixed on disk).

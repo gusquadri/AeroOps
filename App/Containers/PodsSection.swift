@@ -92,9 +92,10 @@ struct PodsSection: View {
 /// The pods table's columns. Fixed widths fit the content and the header: "10/10" and the
 /// "Ready" header, the "Restarts" header and a four-digit crash-loop badge, "120d", the
 /// CrashLoopBackOff, ImagePullBackOff and ContainerCreating chips (longer reasons such as
-/// CreateContainerConfigError get the wide Status column), and two or three row buttons.
+/// CreateContainerConfigError get the wide Status column), "1234m", "123.4 MB", and two or
+/// three row buttons.
 private enum PodColumn: String, CaseIterable {
-    case namespace, name, ready, status, statusWide, restarts, age, node, actions, actionsCompact
+    case namespace, name, ready, status, statusWide, restarts, cpu, memory, age, node, actions, actionsCompact
 
     static let nameMinimum: CGFloat = 90
     /// A typical generated pod name (`coredns-5688667fd4-sdcln`) with its orb.
@@ -105,44 +106,53 @@ private enum PodColumn: String, CaseIterable {
     static let statusWidth: CGFloat = 126
     static let statusWideWidth: CGFloat = 172
     static let restartsWidth: CGFloat = 56
+    static let cpuWidth: CGFloat = 50
+    static let memoryWidth: CGFloat = 62
     static let ageWidth: CGFloat = 34
     static let actionsWidth: CGFloat = 66
     static let actionsCompactWidth: CGFloat = 40
     /// Statuses up to this length fit the regular Status column.
     static let regularStatusLength = "ContainerCreating".count
 
-    /// Namespace and node (both shown in the inspector) give way first, then age, ready and
-    /// restarts; a picked namespace makes its column redundant, so it goes before anything.
+    /// Namespace and node (both shown in the inspector) give way first, then age, memory, CPU,
+    /// ready and restarts; a picked namespace makes its column redundant, so it goes before
+    /// anything. CPU and memory are left out when no pod has usage (no metrics-server).
     static func layout(
-        width: CGFloat, namespacePicked: Bool, wideStatus: Bool, detailButton: Bool
+        width: CGFloat, namespacePicked: Bool, wideStatus: Bool, metrics: Bool, detailButton: Bool
     ) -> WorkloadTableLayout<PodColumn> {
-        WorkloadTableLayout(
+        var columns: [WorkloadTableLayout<PodColumn>.Spec] = [
+            .init(.namespace, min: namespaceWidths.min, ideal: namespaceWidths.ideal),
+            .init(.name, width: nameMinimum),
+            .init(.ready, width: readyWidth),
+            wideStatus ? .init(.statusWide, width: statusWideWidth) : .init(.status, width: statusWidth),
+            .init(.restarts, width: restartsWidth),
+        ]
+        if metrics {
+            columns += [.init(.cpu, width: cpuWidth), .init(.memory, width: memoryWidth)]
+        }
+        columns += [
+            .init(.age, width: ageWidth),
+            .init(.node, min: nodeWidths.min, ideal: nodeWidths.ideal),
+            detailButton
+                ? .init(.actions, width: actionsWidth) : .init(.actionsCompact, width: actionsCompactWidth),
+        ]
+        return WorkloadTableLayout(
             width: width,
-            columns: [
-                .init(.namespace, min: namespaceWidths.min, ideal: namespaceWidths.ideal),
-                .init(.name, width: nameMinimum),
-                .init(.ready, width: readyWidth),
-                wideStatus ? .init(.statusWide, width: statusWideWidth) : .init(.status, width: statusWidth),
-                .init(.restarts, width: restartsWidth),
-                .init(.age, width: ageWidth),
-                .init(.node, min: nodeWidths.min, ideal: nodeWidths.ideal),
-                detailButton
-                    ? .init(.actions, width: actionsWidth) : .init(.actionsCompact, width: actionsCompactWidth),
-            ],
+            columns: columns,
             name: .name,
             nameComfort: nameComfort,
             dropOrder: namespacePicked
-                ? [.namespace, .node, .age, .ready, .restarts]
-                : [.node, .namespace, .age, .ready, .restarts]
+                ? [.namespace, .node, .age, .memory, .cpu, .ready, .restarts]
+                : [.node, .namespace, .age, .memory, .cpu, .ready, .restarts]
         )
     }
 }
 
-/// The pods table: namespace, name, ready, status, restarts, age, node and actions. Name takes
-/// the spare width; when the table is too narrow for a typical pod name (the inspector is open,
-/// or the window is small), optional columns give way
-/// (``PodColumn/layout(width:namespacePicked:wideStatus:detailButton:)``) rather than the
-/// table scrolling sideways.
+/// The pods table: namespace, name, ready, status, restarts, CPU, memory, age, node and actions.
+/// Name takes the spare width; when the table is too narrow for a typical pod name (the
+/// inspector is open, or the window is small), optional columns give way
+/// (``PodColumn/layout(width:namespacePicked:wideStatus:metrics:detailButton:)``) rather than
+/// the table scrolling sideways.
 private struct PodTable: View {
     @Bindable var containers: HostContainersModel
     @State private var width: CGFloat = 0
@@ -174,6 +184,7 @@ private struct PodTable: View {
             width: width,
             namespacePicked: containers.namespace != nil,
             wideStatus: longest > PodColumn.regularStatusLength,
+            metrics: containers.pods.contains(where: \.hasUsage),
             // With the inspector open, clicking a row shows its details, so the row button goes.
             detailButton: !containers.inspectorPresented
         )
@@ -225,6 +236,25 @@ private struct PodTable: View {
             }
             .width(PodColumn.restartsWidth)
             .layoutColumn(PodColumn.restarts)
+            // Grouped here and below: the column builder takes at most ten columns.
+            Group {
+                TableColumn("CPU") { (pod: PodInfo) in
+                    Text(pod.cpuText)
+                        .monospacedDigit()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .help(pod.cpuHelp ?? "")
+                }
+                .width(PodColumn.cpuWidth)
+                .layoutColumn(PodColumn.cpu)
+                TableColumn("Memory") { (pod: PodInfo) in
+                    Text(pod.memoryText)
+                        .monospacedDigit()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .help(pod.memoryHelp ?? "")
+                }
+                .width(PodColumn.memoryWidth)
+                .layoutColumn(PodColumn.memory)
+            }
             TableColumn("Age") { pod in
                 Text(pod.age() ?? MetricText.missing)
                     .monospacedDigit()
@@ -241,16 +271,18 @@ private struct PodTable: View {
             }
             .width(min: PodColumn.nodeWidths.min, ideal: layout.width(.node), max: PodColumn.nodeWidths.ideal)
             .layoutColumn(PodColumn.node)
-            TableColumn("") { pod in
-                rowActions(pod, detailButton: true)
+            Group {
+                TableColumn("") { (pod: PodInfo) in
+                    rowActions(pod, detailButton: true)
+                }
+                .width(PodColumn.actionsWidth)
+                .layoutColumn(PodColumn.actions)
+                TableColumn("") { (pod: PodInfo) in
+                    rowActions(pod, detailButton: false)
+                }
+                .width(PodColumn.actionsCompactWidth)
+                .layoutColumn(PodColumn.actionsCompact)
             }
-            .width(PodColumn.actionsWidth)
-            .layoutColumn(PodColumn.actions)
-            TableColumn("") { pod in
-                rowActions(pod, detailButton: false)
-            }
-            .width(PodColumn.actionsCompactWidth)
-            .layoutColumn(PodColumn.actionsCompact)
         }
         .contextMenu(forSelectionType: PodInfo.ID.self) { ids in
             if let pod = pod(ids) {

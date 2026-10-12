@@ -8,29 +8,93 @@ import Foundation
 /// ```
 /// When kubectl exits non-zero, classify its stderr with ``KubectlError/classify(_:)``.
 public enum KubernetesParser {
-    /// Parses `kubectl get pods -A -o json` (a `List`/`PodList`, or a single `Pod`).
+    /// Parses `kubectl get pods -A -o json` (a `List`/`PodList`, or a single `Pod`), merged with
+    /// `kubectl get --raw /apis/metrics.k8s.io/v1beta1/pods` (a `PodMetricsList`).
     /// Pods without a name are skipped; one undecodable pod does not hide the others.
+    ///
+    /// Metrics attach by namespace and name; pods without metrics (not running, or no
+    /// metrics-server, so `metrics` is empty or an error) have `nil` CPU and memory use.
     ///
     /// - Throws: ``KubectlError``: a known error when the text is a kubectl/sudo error message,
     ///   otherwise ``KubectlError/invalidOutput``.
-    public static func parsePods(_ data: Data) throws(KubectlError) -> [PodInfo] {
+    public static func parsePods(_ data: Data, metrics: Data = Data()) throws(KubectlError) -> [PodInfo] {
+        var pods: [PodInfo]
         if let list = decodeJSONTolerantly(ListJSON<PodJSON>.self, from: data), let items = list.items {
-            return items.elements.compactMap { $0.pod() }
+            pods = items.elements.compactMap { $0.pod() }
+        } else if let single = decodeJSONTolerantly(PodJSON.self, from: data), let pod = single.pod() {
+            pods = [pod]
+        } else {
+            throw failure(data)
         }
-        if let single = decodeJSONTolerantly(PodJSON.self, from: data), let pod = single.pod() {
-            return [pod]
+        let usage = parsePodMetrics(metrics)
+        guard !usage.isEmpty else { return pods }
+        let byID = Dictionary(usage.map { ("\($0.namespace)/\($0.name)", $0) }, uniquingKeysWith: { first, _ in first })
+        for index in pods.indices {
+            guard let entry = byID[pods[index].id] else { continue }
+            pods[index].cpuMillicores = entry.cpuMillicores
+            pods[index].memUsedBytes = entry.memUsedBytes
         }
-        throw failure(data)
+        return pods
     }
 
-    /// Parses `kubectl get pods -A -o json` text. See ``parsePods(_:)-(Data)``.
-    public static func parsePods(_ text: String) throws(KubectlError) -> [PodInfo] {
-        try parsePods(Data(text.utf8))
+    /// Parses `kubectl get pods -A -o json` text. See ``parsePods(_:metrics:)-(Data,_)``.
+    public static func parsePods(_ text: String, metrics: String = "") throws(KubectlError) -> [PodInfo] {
+        try parsePods(Data(text.utf8), metrics: Data(metrics.utf8))
+    }
+
+    /// Parses `kubectl get --raw /apis/metrics.k8s.io/v1beta1/pods` (a `PodMetricsList`), summing
+    /// each pod's containers. Anything else (an error message, no output) is no metrics.
+    public static func parsePodMetrics(_ data: Data) -> [PodMetrics] {
+        guard !data.isEmpty,
+              let list = decodeJSONTolerantly(ListJSON<PodMetricsJSON>.self, from: data),
+              let items = list.items
+        else { return [] }
+        return items.elements.compactMap { $0.metrics() }
+    }
+
+    /// A Kubernetes quantity (`resource.Quantity`) in base units: cores for CPU, bytes for
+    /// memory. Accepts decimal suffixes (`2367103n`, `250m`, `1k`, `1M`), binary suffixes
+    /// (`14304Ki`, `64Mi`, `1Gi`) and exponents (`1e3`). `nil` for negative values or junk.
+    public static func parseQuantity(_ text: some StringProtocol) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let suffixStart = trimmed.firstIndex { !"0123456789.+-".contains($0) } ?? trimmed.endIndex
+        guard let number = Double(trimmed[..<suffixStart]), number.isFinite, number >= 0 else { return nil }
+        let suffix = trimmed[suffixStart...]
+        let multiplier: Double
+        if let scale = quantitySuffixes[String(suffix)] {
+            multiplier = scale
+        } else if suffix.first == "e" || suffix.first == "E", let exponent = Int(suffix.dropFirst()), abs(exponent) <= 30 {
+            multiplier = pow(10, Double(exponent))
+        } else {
+            return nil
+        }
+        let value = number * multiplier
+        return value.isFinite ? value : nil
+    }
+
+    private static let quantitySuffixes: [String: Double] = [
+        "": 1, "n": 1e-9, "u": 1e-6, "m": 1e-3,
+        "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
+        "Ki": 1_024, "Mi": 1_048_576, "Gi": 1_073_741_824,
+        "Ti": 1_099_511_627_776, "Pi": 1_125_899_906_842_624, "Ei": 1_152_921_504_606_846_976,
+    ]
+
+    /// `value` rounded up to a whole number, as Kubernetes' `Quantity.ScaledValue` does (so
+    /// `2.4m` is `3m`, like `kubectl top`). Float noise (`0.1 * 1000`) does not round up.
+    static func roundedUp(_ value: Double) -> Int64? {
+        guard value.isFinite, value >= 0, value < 9.0e18 else { return nil }
+        let nearest = value.rounded()
+        return Int64(abs(value - nearest) < 1e-6 ? nearest : value.rounded(.up))
+    }
+
+    /// Cores to whole millicores, rounded up.
+    static func millicores(_ cores: Double?) -> Int? {
+        cores.flatMap { roundedUp($0 * 1000) }.map(Int.init)
     }
 
     /// Parses `kubectl get events -o json` into rows sorted oldest first by ``PodEvent/lastSeen``.
     ///
-    /// - Throws: ``KubectlError``, as ``parsePods(_:)-(Data)``.
+    /// - Throws: ``KubectlError``, as ``parsePods(_:metrics:)-(Data,_)``.
     public static func parseEvents(_ data: Data) throws(KubectlError) -> [PodEvent] {
         guard let list = decodeJSONTolerantly(ListJSON<EventJSON>.self, from: data), let items = list.items else {
             throw failure(data)
@@ -55,6 +119,26 @@ public enum KubernetesParser {
         let error = KubectlError.classify(String(decoding: data, as: UTF8.self))
         if case .failed = error { return .invalidOutput }
         return error
+    }
+}
+
+/// One pod's CPU and memory use from the metrics API (metrics-server), summed over its containers.
+public struct PodMetrics: Sendable, Hashable {
+    /// `metadata.namespace`.
+    public var namespace: String
+    /// `metadata.name`.
+    public var name: String
+    /// Sum of `containers[].usage.cpu`, in millicores (rounded up).
+    public var cpuMillicores: Int?
+    /// Sum of `containers[].usage.memory` (working set), in bytes.
+    public var memUsedBytes: Int64?
+
+    /// Creates a metrics row.
+    public init(namespace: String, name: String, cpuMillicores: Int?, memUsedBytes: Int64?) {
+        self.namespace = namespace
+        self.name = name
+        self.cpuMillicores = cpuMillicores
+        self.memUsedBytes = memUsedBytes
     }
 }
 
@@ -238,14 +322,30 @@ private struct MetadataJSON: Decodable {
 private struct PodJSON: Decodable {
     struct Spec: Decodable {
         var nodeName: String?
-        var containers: [String]
+        var containers: [ContainerSpecJSON]
+        /// Pod-level `resources.limits` (Kubernetes 1.32+); overrides the containers' limits.
+        var limits: ResourceListJSON?
 
-        enum CodingKeys: String, CodingKey { case nodeName, containers }
+        enum CodingKeys: String, CodingKey { case nodeName, containers, resources }
 
         init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             nodeName = c.nonEmptyString(.nodeName)
-            containers = (c.lenient(LossyArray<NamedJSON>.self, .containers)?.elements ?? []).compactMap(\.name)
+            containers = (c.lenient(LossyArray<ContainerSpecJSON>.self, .containers)?.elements ?? []).filter { $0.name != nil }
+            limits = c.lenient(ResourcesJSON.self, .resources)?.limits
+        }
+
+        /// The pod-level limit, else the sum of the containers' limits when every container has
+        /// one (one unlimited container makes the pod unlimited).
+        func limit(_ resource: KeyPath<ResourceListJSON, Double?>) -> Double? {
+            if let podLimit = limits?[keyPath: resource] { return podLimit }
+            guard !containers.isEmpty else { return nil }
+            var total = 0.0
+            for container in containers {
+                guard let limit = container.limits?[keyPath: resource] else { return nil }
+                total += limit
+            }
+            return total
         }
     }
 
@@ -280,7 +380,7 @@ private struct PodJSON: Decodable {
         let statuses = (status?.containerStatuses ?? []).compactMap { $0.status() }
         var containers: [PodContainerStatus] = []
         var seen = Set<String>()
-        for containerName in spec?.containers ?? [] where seen.insert(containerName).inserted {
+        for containerName in (spec?.containers ?? []).compactMap(\.name) where seen.insert(containerName).inserted {
             containers.append(statuses.first { $0.name == containerName }
                 ?? PodContainerStatus(name: containerName, ready: false))
         }
@@ -293,18 +393,80 @@ private struct PodJSON: Decodable {
             phase: status?.phase.map { PodPhase(rawValue: $0) ?? .unknown } ?? .unknown,
             containers: containers,
             nodeName: spec?.nodeName,
-            createdAt: metadata?.creationTimestamp.flatMap { Timestamps.parseRFC3339($0) }
+            createdAt: metadata?.creationTimestamp.flatMap { Timestamps.parseRFC3339($0) },
+            cpuLimitMillicores: KubernetesParser.millicores(spec?.limit(\.cpu)),
+            memLimitBytes: spec?.limit(\.memory).flatMap(KubernetesParser.roundedUp)
         )
     }
 }
 
-private struct NamedJSON: Decodable {
+/// One `spec.containers[]` entry: its name and `resources.limits`.
+private struct ContainerSpecJSON: Decodable {
     var name: String?
+    var limits: ResourceListJSON?
 
-    enum CodingKeys: String, CodingKey { case name }
+    enum CodingKeys: String, CodingKey { case name, resources }
 
     init(from decoder: any Decoder) throws {
-        name = try decoder.container(keyedBy: CodingKeys.self).nonEmptyString(.name)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = c.nonEmptyString(.name)
+        limits = c.lenient(ResourcesJSON.self, .resources)?.limits
+    }
+}
+
+/// `resources`; only `limits` is read.
+private struct ResourcesJSON: Decodable {
+    var limits: ResourceListJSON?
+
+    enum CodingKeys: String, CodingKey { case limits }
+
+    init(from decoder: any Decoder) throws {
+        limits = try decoder.container(keyedBy: CodingKeys.self).lenient(ResourceListJSON.self, .limits)
+    }
+}
+
+/// A resource list such as `{"cpu": "500m", "memory": "64Mi"}`: CPU in cores, memory in bytes.
+private struct ResourceListJSON: Decodable {
+    var cpu: Double?
+    var memory: Double?
+
+    enum CodingKeys: String, CodingKey { case cpu, memory }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cpu = c.nonEmptyString(.cpu).flatMap { KubernetesParser.parseQuantity($0) }
+        memory = c.nonEmptyString(.memory).flatMap { KubernetesParser.parseQuantity($0) }
+    }
+}
+
+/// One `PodMetrics` item of `/apis/metrics.k8s.io/v1beta1/pods`.
+private struct PodMetricsJSON: Decodable {
+    struct Container: Decodable {
+        var usage: ResourceListJSON?
+    }
+
+    var metadata: MetadataJSON?
+    var containers: [Container]
+
+    enum CodingKeys: String, CodingKey { case metadata, containers }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        metadata = c.lenient(MetadataJSON.self, .metadata)
+        containers = c.lenient(LossyArray<Container>.self, .containers)?.elements ?? []
+    }
+
+    /// The containers' usage summed; a resource no container reports stays `nil`.
+    func metrics() -> PodMetrics? {
+        guard let name = metadata?.name else { return nil }
+        let cpu = containers.compactMap { $0.usage?.cpu }
+        let memory = containers.compactMap { $0.usage?.memory }
+        return PodMetrics(
+            namespace: metadata?.namespace ?? "default",
+            name: name,
+            cpuMillicores: cpu.isEmpty ? nil : KubernetesParser.millicores(cpu.reduce(0, +)),
+            memUsedBytes: memory.isEmpty ? nil : KubernetesParser.roundedUp(memory.reduce(0, +))
+        )
     }
 }
 

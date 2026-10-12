@@ -1,5 +1,6 @@
 import AeroCore
 import AppKit
+import AskpassProtocol
 import Foundation
 import KeyAgent
 import Observation
@@ -19,6 +20,9 @@ import SSHKit
 /// - Config: rewritten whenever hosts change (``HostInventoryObserver``), keys change or the
 ///   agent choice changes.
 /// - Host keys: ``HostKeyStore``; ``hostKeyBlocks`` mirrors its blocks for the UI.
+/// - Passwords: ``HostPasswordVault`` over a second ``SecretStore``, handed to ssh
+///   only through ``AskpassServer`` on `askpass.sock` and the bundled `aeroops-askpass`.
+///   ``passwordGate`` keeps background ssh from retrying a rejected password.
 @MainActor
 @Observable
 final class SSHServices {
@@ -54,26 +58,43 @@ final class SSHServices {
     private(set) var configError: String?
     /// In-app agent, or the system one (the fallback toggle).
     private(set) var agentChoice: SSHContext.AgentChoice
+    /// How ssh asks for passwords; `nil` until the askpass server runs, or when it cannot.
+    private(set) var askpassRoute: AskpassRoute?
+    /// Why password hosts cannot log in from the background, if they cannot.
+    private(set) var askpassError: String?
+    /// Password hosts whose saved password failed. ssh does not try them again until the
+    /// password is saved again, a test connection succeeds or the host's settings change.
+    private(set) var rejectedPasswords: Set<RemoteHost.ID> = []
+    /// Why `aeroops-askpass` last got no password for a host (safe to show).
+    private(set) var askpassRefusals: [RemoteHost.ID: String] = [:]
 
     @ObservationIgnored let keyStore: KeyStore?
     @ObservationIgnored let secretStore: any SecretStore
     @ObservationIgnored let hostKeys: HostKeyStore
     @ObservationIgnored let authorizer: PolicySigningAuthorizer
+    @ObservationIgnored let passwords: HostPasswordVault
+    @ObservationIgnored let passwordGate: PasswordAttemptGate
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private var agent: SSHAgentServer?
     @ObservationIgnored private var eventPump: Task<Void, Never>?
+    @ObservationIgnored private var askpassServer: AskpassServer?
+    @ObservationIgnored private var askpassObservers: [Task<Void, Never>] = []
     @ObservationIgnored private var sessionObservers: [Task<Void, Never>] = []
     @ObservationIgnored private var hosts: [RemoteHost] = []
     @ObservationIgnored private(set) var isStarted = false
     /// Called after ``trust(_:for:replacingPinned:)`` or ``recheckHostKey(_:)`` changed what is
     /// pinned or blocked for a host, so ``MonitorService`` can resume polling it.
     @ObservationIgnored var hostKeysDidChange: (@MainActor (RemoteHost) -> Void)?
+    /// Called after a host's password was saved, so ``MonitorService`` can retry it at once.
+    @ObservationIgnored var passwordsDidChange: (@MainActor (RemoteHost.ID) -> Void)?
 
     /// - Parameters:
     ///   - defaults: Where the agent toggle is persisted; `nil` keeps it in memory (self-test, previews).
+    ///   - passwordStore: Where host passwords are kept; `nil` keeps them in memory (self-test, previews).
     init(
         paths: AeroPaths,
         secretStore: any SecretStore,
+        passwordStore: (any SecretStore)? = nil,
         defaults: UserDefaults?,
         authorizer: PolicySigningAuthorizer = .localAuthentication()
     ) {
@@ -81,6 +102,9 @@ final class SSHServices {
         self.secretStore = secretStore
         self.defaults = defaults
         self.authorizer = authorizer
+        let passwords = HostPasswordVault(store: passwordStore ?? InMemorySecretStore())
+        self.passwords = passwords
+        passwordGate = PasswordAttemptGate { passwords.hasPassword(for: $0) }
         agentChoice = defaults?.bool(forKey: Self.systemAgentDefaultsKey) == true ? .system : .inApp
         hostKeys = HostKeyStore(context: SSHContext(paths: paths))
         do {
@@ -91,17 +115,24 @@ final class SSHServices {
         }
     }
 
-    /// The SSHKit context for the current agent choice.
-    var context: SSHContext { SSHContext(paths: paths, agent: agentChoice) }
+    /// The SSHKit context for the current agent choice and askpass route.
+    var context: SSHContext {
+        var context = SSHContext(paths: paths, agent: agentChoice)
+        context.askpass = askpassRoute
+        return context
+    }
 
-    /// Runs commands on hosts; refuses blocked hosts.
-    var runner: SSHRunner { SSHRunner(context: context, hostKeys: hostKeys) }
+    /// Runs commands on hosts; refuses blocked hosts and password hosts the gate holds back.
+    var runner: SSHRunner { SSHRunner(context: context, hostKeys: hostKeys, passwords: passwordGate) }
 
     // MARK: - Lifecycle
 
-    /// Writes the public key files, starts the agent (unless the system agent is chosen) and
-    /// writes `ssh_config`. Failures are reported in ``agentStatus``, ``keyStoreError`` and
-    /// ``configError``; nothing here throws.
+    /// Writes the public key files, starts the agent (unless the system agent is chosen) and the
+    /// askpass server, and writes `ssh_config`. Failures are reported in ``agentStatus``,
+    /// ``askpassError``, ``keyStoreError`` and ``configError``; nothing here throws.
+    ///
+    /// Runs before monitoring starts (``AppModel/startServices()``), so the first runner already
+    /// has the askpass route.
     func start() async {
         guard !isStarted else { return }
         isStarted = true
@@ -112,6 +143,7 @@ final class SSHServices {
         }
         await reloadKeys(rewritingPublicKeyFiles: true)
         await applyAgentChoice()
+        startAskpass()
         writeConfig()
         await refreshHostKeyBlocks()
         observeSessionEnd()
@@ -136,6 +168,11 @@ final class SSHServices {
         eventPump = nil
         sessionObservers.forEach { $0.cancel() }
         sessionObservers = []
+        askpassObservers.forEach { $0.cancel() }
+        askpassObservers = []
+        askpassServer?.stop()
+        askpassServer = nil
+        askpassRoute = nil
         if case .running = agentStatus { agentStatus = .stopped }
         let masters = ControlMaster(context: context)
         let agent = agent
@@ -206,6 +243,74 @@ final class SSHServices {
             }
         case .identitiesListed, .sessionBound, .refused, .disconnected:
             break
+        }
+    }
+
+    // MARK: - Askpass
+
+    /// `AeroOps.app/Contents/MacOS/aeroops-askpass`, if the bundle has it.
+    nonisolated static var bundledAskpassHelper: URL? {
+        guard let executable = Bundle.main.executableURL else { return nil }
+        let helper = executable.deletingLastPathComponent().appending(path: Askpass.helperName)
+        return FileManager.default.isExecutableFile(atPath: helper.path(percentEncoded: false)) ? helper : nil
+    }
+
+    /// Starts the askpass server and sets ``askpassRoute``. Without a route, password hosts fail
+    /// authentication in the background (ssh keeps `BatchMode=yes`, so no password is tried) and
+    /// terminal tabs prompt for the password.
+    private func startAskpass() {
+        let server = AskpassServer(socketURL: paths.askpassSocket, vault: passwords, validator: SignedAskpassPeerValidator())
+        askpassServer = server
+        observeAskpass(server)
+        guard let helper = Self.bundledAskpassHelper else {
+            askpassError = "\(Askpass.helperName) is missing from the app bundle."
+            return
+        }
+        guard SignedAskpassPeerValidator.ownTeamIdentifier() != nil else {
+            askpassError = "AeroOps is not signed with a team ID, so it cannot verify \(Askpass.helperName)."
+            return
+        }
+        do {
+            try server.start()
+            askpassRoute = AskpassRoute(helper: helper, socket: server.socketURL)
+            askpassError = nil
+        } catch {
+            askpassError = error.localizedDescription
+        }
+    }
+
+    private func observeAskpass(_ server: AskpassServer) {
+        let events = server.events
+        let gate = passwordGate
+        askpassObservers = [
+            Task { [weak self] in
+                for await event in events {
+                    guard let self else { return }
+                    await self.record(event)
+                }
+            },
+            Task { [weak self] in
+                for await rejected in await gate.changes() {
+                    guard let self else { return }
+                    self.rejectedPasswords = rejected
+                }
+            },
+        ]
+    }
+
+    /// Keeps the refusal reason, and closes the gate when askpass refused a saved password:
+    /// terminal tabs reach the server without going through the runner.
+    private func record(_ event: AskpassEvent) async {
+        guard let host = event.host, !event.viaToken else { return }
+        switch event.outcome {
+        case .answered:
+            askpassRefusals[host] = nil
+        case .refused(.untrustedPeer), .refused(.malformedRequest):
+            // Not from ssh that the app started; the host id is not to be trusted.
+            break
+        case .refused(let refusal):
+            askpassRefusals[host] = refusal.description
+            await passwordGate.reject(host)
         }
     }
 
@@ -327,6 +432,49 @@ final class SSHServices {
         }
     }
 
+    // MARK: - Passwords
+
+    /// Whether `host` uses a password and one is saved.
+    func hasPassword(for host: RemoteHost) -> Bool {
+        host.auth == .password && passwords.hasPassword(for: host.id)
+    }
+
+    /// Whether a password is saved for `id`, asking the Keychain (the cache only covers saved
+    /// password hosts). For the host editor.
+    func hasSavedPassword(for id: RemoteHost.ID) -> Bool {
+        passwords.isSaved(id)
+    }
+
+    /// Saves `password` for the host `id` in the Keychain, then lets ssh try it again.
+    func setPassword(_ password: String, for id: RemoteHost.ID) throws(HostPasswordError) {
+        try passwords.save(password, for: id)
+        askpassRefusals[id] = nil
+        let gate = passwordGate
+        Task { [weak self] in
+            await gate.reset(id)
+            self?.passwordsDidChange?(id)
+        }
+    }
+
+    /// Deletes the saved password of the host `id`, e.g. when the host is deleted or switched to
+    /// key authentication.
+    func deletePassword(for id: RemoteHost.ID) throws(SecretStoreError) {
+        try passwords.delete(for: id)
+        askpassRefusals[id] = nil
+        let gate = passwordGate
+        Task { await gate.reset(id) }
+    }
+
+    /// The context for a terminal tab to `host`. A password host without a usable saved
+    /// password prompts in the tab instead of asking `aeroops-askpass`.
+    func terminalContext(for host: RemoteHost) -> SSHContext {
+        var context = self.context
+        if host.auth == .password, !hasPassword(for: host) || rejectedPasswords.contains(host.id) {
+            context.askpass = nil
+        }
+        return context
+    }
+
     // MARK: - Host keys
 
     /// The block for `host`, if its key changed.
@@ -362,7 +510,18 @@ final class SSHServices {
 
 extension SSHServices: HostInventoryObserver {
     func hostsDidChange(_ hosts: [RemoteHost]) {
+        let previous = Dictionary(self.hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.hosts = hosts
+        passwords.setPasswordHosts(Set(hosts.lazy.filter { $0.auth == .password }.map(\.id)))
+        // New connection settings deserve a fresh attempt with the saved password.
+        for host in hosts where host.auth == .password {
+            guard let old = previous[host.id],
+                  old.address != host.address || old.port != host.port || old.user != host.user || old.auth != host.auth
+            else { continue }
+            askpassRefusals[host.id] = nil
+            let gate = passwordGate
+            Task { await gate.reset(host.id) }
+        }
         if isStarted { writeConfig() }
     }
 }

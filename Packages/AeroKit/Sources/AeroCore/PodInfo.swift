@@ -3,7 +3,8 @@ import Foundation
 /// One Kubernetes pod, from `kubectl get pods -A -o json`.
 ///
 /// Built by ``KubernetesParser``. Also the row type of the MCP `list_pods` tool. Only the fields
-/// the plan reads are kept: namespace, name, phase, container statuses, node and creation time.
+/// the plan reads are kept: namespace, name, phase, container statuses, node, creation time,
+/// resource limits, and CPU and memory use from the metrics API.
 public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
     /// Namespace.
     public var namespace: String
@@ -18,6 +19,16 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
     public var nodeName: String?
     /// `metadata.creationTimestamp`, used for the age column.
     public var createdAt: Date?
+    /// CPU in use, in millicores (rounded up, like `kubectl top`), from the metrics API
+    /// (`metrics.k8s.io`). `nil` when the pod is not running or the cluster has no metrics-server.
+    public var cpuMillicores: Int?
+    /// Memory in use (working set), in bytes, from the metrics API. `nil` as ``cpuMillicores``.
+    public var memUsedBytes: Int64?
+    /// The pod's CPU limit, in millicores: `spec.resources.limits.cpu`, else the sum of the
+    /// containers' limits. `nil` when a container has no CPU limit.
+    public var cpuLimitMillicores: Int?
+    /// The pod's memory limit, in bytes, chosen as ``cpuLimitMillicores``.
+    public var memLimitBytes: Int64?
 
     /// Identity is `namespace/name`.
     public var id: String { "\(namespace)/\(name)" }
@@ -35,7 +46,11 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
         phase: PodPhase,
         containers: [PodContainerStatus] = [],
         nodeName: String? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        cpuMillicores: Int? = nil,
+        memUsedBytes: Int64? = nil,
+        cpuLimitMillicores: Int? = nil,
+        memLimitBytes: Int64? = nil
     ) {
         self.namespace = namespace
         self.name = name
@@ -43,6 +58,10 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
         self.containers = containers
         self.nodeName = nodeName
         self.createdAt = createdAt
+        self.cpuMillicores = cpuMillicores
+        self.memUsedBytes = memUsedBytes
+        self.cpuLimitMillicores = cpuLimitMillicores
+        self.memLimitBytes = memLimitBytes
     }
 }
 

@@ -32,6 +32,11 @@ import Foundation
 /// - With ``SSHContext/AgentChoice/system`` every host gets `IdentityAgent SSH_AUTH_SOCK`,
 ///   `IdentityFile none` and `IdentitiesOnly no`: ssh offers the keys the system agent holds and
 ///   reads no key files.
+/// - A password host (``HostAuthMethod/password``) offers no key at all (`IdentityAgent none`,
+///   `IdentityFile none`, `PubkeyAuthentication no`), tries only `password` and
+///   `keyboard-interactive`, and sends at most one password per connection
+///   (`NumberOfPasswordPrompts 1`), so a wrong password costs one failed attempt on the server,
+///   not three.
 /// - Every value is validated; newlines, control characters, quotes, backslashes and `$` are
 ///   rejected, `%` is escaped as `%%` where ssh expands tokens, and anything outside a plain
 ///   character set is double-quoted. An invalid host is left out and reported in
@@ -132,6 +137,9 @@ public struct SSHConfigWriter: Sendable {
         let identityFile: String
         var identitiesOnly = "yes"
         switch identity {
+        case _ where host.auth == .password:
+            identityAgent = "none"
+            identityFile = "none"
         case .agent where context.agent == .system:
             if let keyId = host.keyId, !HostValidation.isValidKeyID(keyId) { throw .invalidKeyID(keyId) }
             identityAgent = "SSH_AUTH_SOCK"
@@ -152,13 +160,22 @@ public struct SSHConfigWriter: Sendable {
         let controlDirectory = try ConfigValue.path(context.controlMasterDirectory, trimmingTrailingSlash: true)
         let controlPath = ConfigValue.appendingUnquoted(controlDirectory, "/%C")
 
-        let lines: [(String, String)] = [
+        var lines: [(String, String)] = [
             ("HostName", try ConfigValue.render(host.address, expandsTokens: true)),
             ("User", try ConfigValue.render(host.user, expandsTokens: false)),
             ("Port", String(host.port)),
             ("IdentityAgent", identityAgent),
             ("IdentityFile", identityFile),
             ("IdentitiesOnly", identitiesOnly),
+        ]
+        if host.auth == .password {
+            lines += [
+                ("PubkeyAuthentication", "no"),
+                ("PreferredAuthentications", "password,keyboard-interactive"),
+                ("NumberOfPasswordPrompts", "1"),
+            ]
+        }
+        lines += [
             ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile)),
             ("StrictHostKeyChecking", "yes"),
             ("ControlMaster", "auto"),

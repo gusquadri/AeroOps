@@ -1,0 +1,120 @@
+{
+    "kind": "PodMetricsList",
+    "apiVersion": "metrics.k8s.io/v1beta1",
+    "metadata": {},
+    "items": [
+        {
+            "metadata": {
+                "name": "crasher-89b4b56b4-djl5b",
+                "namespace": "demo",
+                "creationTimestamp": "2026-10-11T07:31:02Z",
+                "labels": {
+                    "app": "crasher",
+                    "pod-template-hash": "89b4b56b4"
+                }
+            },
+            "timestamp": "2026-10-11T07:30:51Z",
+            "window": "10.019s",
+            "containers": [
+                {
+                    "name": "crasher",
+                    "usage": {
+                        "cpu": "0",
+                        "memory": "1234Ki"
+                    }
+                }
+            ]
+        },
+        {
+            "metadata": {
+                "name": "web-7b56d94874-b8t9q",
+                "namespace": "demo",
+                "creationTimestamp": "2026-10-11T07:31:02Z",
+                "labels": {
+                    "app": "web",
+                    "pod-template-hash": "7b56d94874"
+                }
+            },
+            "timestamp": "2026-10-11T07:30:54Z",
+            "window": "10.007s",
+            "containers": [
+                {
+                    "name": "nginx",
+                    "usage": {
+                        "cpu": "152341n",
+                        "memory": "3164Ki"
+                    }
+                },
+                {
+                    "name": "log-sidecar",
+                    "usage": {
+                        "cpu": "2003456n",
+                        "memory": "512Ki"
+                    }
+                }
+            ]
+        },
+        {
+            "metadata": {
+                "name": "gone-6d4cf56db6-q2x7m",
+                "namespace": "demo",
+                "creationTimestamp": "2026-10-11T07:31:02Z"
+            },
+            "timestamp": "2026-10-11T07:30:49Z",
+            "window": "10.012s",
+            "containers": [
+                {
+                    "name": "app",
+                    "usage": {
+                        "cpu": "7m",
+                        "memory": "20Mi"
+                    }
+                }
+            ]
+        },
+        {
+            "metadata": {
+                "name": "coredns-7cfb7bc9c7-sdcln",
+                "namespace": "kube-system",
+                "creationTimestamp": "2026-10-11T07:31:02Z",
+                "labels": {
+                    "k8s-app": "kube-dns",
+                    "pod-template-hash": "7cfb7bc9c7"
+                }
+            },
+            "timestamp": "2026-10-11T07:30:56Z",
+            "window": "10.022s",
+            "containers": [
+                {
+                    "name": "coredns",
+                    "usage": {
+                        "cpu": "3m",
+                        "memory": "13924Ki"
+                    }
+                }
+            ]
+        },
+        {
+            "metadata": {
+                "name": "local-path-provisioner-77b9867795-www4x",
+                "namespace": "kube-system",
+                "creationTimestamp": "2026-10-11T07:31:02Z",
+                "labels": {
+                    "app": "local-path-provisioner",
+                    "pod-template-hash": "77b9867795"
+                }
+            },
+            "timestamp": "2026-10-11T07:30:50Z",
+            "window": "10.03s",
+            "containers": [
+                {
+                    "name": "local-path-provisioner",
+                    "usage": {
+                        "cpu": "1103117n",
+                        "memory": "7752Ki"
+                    }
+                }
+            ]
+        }
+    ]
+}

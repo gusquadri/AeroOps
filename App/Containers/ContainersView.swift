@@ -487,6 +487,39 @@ extension ContainerInfo {
     }
 }
 
+extension PodInfo {
+    /// `true` when the metrics API reported this pod.
+    var hasUsage: Bool { cpuMillicores != nil || memUsedBytes != nil }
+
+    /// Millicores as `kubectl top` prints them (`12m`), or an em dash.
+    var cpuText: String {
+        guard let cpuMillicores else { return MetricText.missing }
+        return "\(cpuMillicores)m"
+    }
+
+    /// `250m of 500m limit (50.0%)`, or that there is no limit.
+    var cpuHelp: String? {
+        guard let cpuMillicores else { return nil }
+        guard let limit = cpuLimitMillicores, limit > 0 else { return "\(cpuMillicores)m, no CPU limit" }
+        let percent = (Double(cpuMillicores) / Double(limit)).formatted(.percent.precision(.fractionLength(1)))
+        return "\(cpuMillicores)m of \(limit)m limit (\(percent))"
+    }
+
+    /// `12.3 MB` (working set), or an em dash.
+    var memoryText: String {
+        MetricText.bytes(memUsedBytes)
+    }
+
+    /// `12.3 MB of 64 MB limit (19.2%)`, or that there is no limit.
+    var memoryHelp: String? {
+        guard let used = memUsedBytes else { return nil }
+        let usedText = used.formatted(.byteCount(style: .memory))
+        guard let limit = memLimitBytes, limit > 0 else { return "\(usedText), no memory limit" }
+        let percent = (Double(used) / Double(limit)).formatted(.percent.precision(.fractionLength(1)))
+        return "\(usedText) of \(limit.formatted(.byteCount(style: .memory))) limit (\(percent))"
+    }
+}
+
 #Preview("Containers · host selected") {
     let model = AppModel.preview()
     model.selection = SampleData.hosts[2].id

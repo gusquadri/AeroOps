@@ -77,6 +77,8 @@ targets:
       - package: AeroKit
         product: KeyAgent
       - package: AeroKit
+        product: AskpassProtocol
+      - package: AeroKit
         product: Collectors
       - package: AeroKit
         product: TerminalKit
@@ -90,6 +92,12 @@ targets:
       - package: Sparkle
       # Build the MCP CLI first and copy it to AeroOps.app/Contents/MacOS/aeroops-mcp.
       - target: aeroops-mcp
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      # The SSH_ASKPASS helper for password hosts, at AeroOps.app/Contents/MacOS/aeroops-askpass.
+      - target: aeroops-askpass
         embed: true
         codeSign: true
         copy:
@@ -122,6 +130,27 @@ targets:
         # entitlement a bare tool cannot back with a provisioning profile under Developer ID.
         ENTITLEMENTS_REQUIRED: NO
 
+  aeroops-askpass:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Askpass
+    # SSH_ASKPASS helper: ssh runs it for password hosts and it asks the app for the password over
+    # ~/.aeroops/askpass.sock. The app only answers it when
+    # it carries the app's team ID and this bundle identifier, so it is signed like the app.
+    dependencies:
+      - package: AeroKit
+        product: AskpassProtocol
+    settings:
+      base:
+        PRODUCT_NAME: aeroops-askpass
+        PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.askpass
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+        # No entitlements, for the same reason as aeroops-mcp.
+        ENTITLEMENTS_REQUIRED: NO
+
 schemes:
   AeroOps:
     build:
@@ -138,6 +167,7 @@ schemes:
         - package: AeroKit/CollectorsTests
         - package: AeroKit/TerminalKitTests
         - package: AeroKit/BridgeProtocolTests
+        - package: AeroKit/AskpassProtocolTests
         - package: AeroKit/AgentBridgeTests
         - package: AeroKit/AeroThemeTests
     profile:

@@ -1,4 +1,5 @@
 import AeroCore
+import AskpassProtocol
 import Foundation
 
 /// Where SSHKit finds its executables and runtime files.
@@ -50,6 +51,15 @@ public struct SSHContext: Sendable, Hashable {
     /// throwaway config. `nil` (the default) means ``AeroPaths/sshConfig``.
     public var configFileOverride: URL?
 
+    /// How ssh gets password hosts' passwords: the `aeroops-askpass` helper and the app's askpass
+    /// socket. `nil` when the app has no askpass server (tests, previews) or the helper is missing
+    /// from the bundle; background ssh for password hosts then keeps `BatchMode=yes` and fails
+    /// authentication instead of prompting.
+    public var askpass: AskpassRoute?
+    /// A one-time token the askpass server maps to a password that is not saved yet (Test
+    /// Connection on an unsaved draft). Passed to the helper as `AEROOPS_ASKPASS_TOKEN`.
+    public var askpassToken: String?
+
     /// `~/.aeroops/ssh_config`, unless ``configFileOverride`` is set.
     public var configFile: URL { configFileOverride ?? paths.sshConfig }
     /// `~/.aeroops/agent.sock`, exported to every `ssh` as `SSH_AUTH_SOCK`.
@@ -71,16 +81,59 @@ public struct SSHContext: Sendable, Hashable {
         }
     }
 
+    /// Whether ssh can get `host`'s password without a terminal: a password host and an
+    /// ``askpass`` route.
+    public func usesAskpass(_ host: RemoteHost) -> Bool {
+        host.auth == .password && askpass != nil
+    }
+
+    /// ``environmentOverrides`` plus, for a password host with an ``askpass`` route, the
+    /// variables that make ssh ask `aeroops-askpass` for the password:
+    ///
+    /// - `SSH_ASKPASS` (the helper) and `SSH_ASKPASS_REQUIRE=force`, so ssh uses the helper even
+    ///   without `DISPLAY` and even in a terminal tab.
+    /// - `AEROOPS_ASKPASS_SOCKET`, `AEROOPS_ASKPASS_HOST` (the host id) and, with
+    ///   ``askpassToken``, `AEROOPS_ASKPASS_TOKEN`. None of them is a secret.
+    public func environment(for host: RemoteHost) -> [String: String] {
+        var environment = environmentOverrides
+        guard usesAskpass(host), let askpass else { return environment }
+        environment["SSH_ASKPASS"] = askpass.helper.filePath
+        environment["SSH_ASKPASS_REQUIRE"] = "force"
+        environment[Askpass.Environment.socket] = askpass.socket.filePath
+        environment[Askpass.Environment.host] = host.id.uuidString
+        if let askpassToken { environment[Askpass.Environment.token] = askpassToken }
+        return environment
+    }
+
     /// The command a terminal tab runs for `host`: `/usr/bin/ssh -F <config> aero-<id>`.
     ///
     /// Interactive, so no `BatchMode`: the user can answer prompts in the terminal.
     /// TerminalKit applies ``SSHCommandLine/environment`` on top of the tab's environment.
+    /// A password host without an ``askpass`` route prompts in the tab, with ssh's usual three
+    /// tries instead of the config's one.
     public func terminalCommand(for host: RemoteHost) -> SSHCommandLine {
-        SSHCommandLine(
+        var arguments = ["-F", configFile.filePath]
+        if host.auth == .password, askpass == nil {
+            arguments += ["-o", "NumberOfPasswordPrompts=3"]
+        }
+        return SSHCommandLine(
             executable: sshExecutable,
-            arguments: ["-F", configFile.filePath, host.sshAlias],
-            environment: environmentOverrides
+            arguments: arguments + [host.sshAlias],
+            environment: environment(for: host)
         )
+    }
+}
+
+/// Where ssh finds the askpass helper and the helper finds the app.
+public struct AskpassRoute: Sendable, Hashable {
+    /// `AeroOps.app/Contents/MacOS/aeroops-askpass`.
+    public var helper: URL
+    /// `~/.aeroops/askpass.sock`.
+    public var socket: URL
+
+    public init(helper: URL, socket: URL) {
+        self.helper = helper
+        self.socket = socket
     }
 }
 

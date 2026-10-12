@@ -101,6 +101,7 @@ final class MonitorService {
             }
         }
         ssh.hostKeysDidChange = { [weak self] host in self?.hostKeysDidChange(for: host) }
+        ssh.passwordsDidChange = { [weak self] id in self?.passwordDidChange(for: id) }
         observeActivity()
         isRunning = true
         applyHosts()
@@ -120,6 +121,7 @@ final class MonitorService {
         observers = []
         pending = [:]
         ssh.hostKeysDidChange = nil
+        ssh.passwordsDidChange = nil
         guard let coordinator else { return nil }
         self.coordinator = nil
         let monitors = coordinator.monitoredHostIDs.compactMap(coordinator.monitor(for:))
@@ -221,6 +223,12 @@ final class MonitorService {
         coordinator.refresh(host.id)
     }
 
+    /// A password was saved for the host: poll it again if its last poll failed to log in.
+    private func passwordDidChange(for id: RemoteHost.ID) {
+        guard let coordinator, coordinator.latestUpdate(for: id)?.lastError == .authFailed else { return }
+        coordinator.refresh(id)
+    }
+
     // MARK: - Hosts
 
     private func applyHosts() {
@@ -239,11 +247,12 @@ final class MonitorService {
         }
     }
 
-    /// Keeps the runner's agent environment in step with Settings › Keys' agent choice.
+    /// Keeps the runner's agent environment and askpass route in step with ``SSHServices``.
     private func trackAgentChoice() {
         guard !isShutDown else { return }
         withObservationTracking {
             _ = ssh.agentChoice
+            _ = ssh.askpassRoute
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }

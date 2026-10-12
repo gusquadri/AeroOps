@@ -57,13 +57,43 @@ struct KubernetesPrefixTests {
 
 @Suite("Kubectl commands")
 struct KubernetesCommandTests {
-    @Test("Pods, all namespaces or one")
+    @Test("Pods and their metrics, all namespaces or one")
     func pods() throws {
         let plain = try KubectlCommands(prefix: nil)
-        #expect(try plain.pods() == "LC_ALL=C kubectl get pods -A -o json")
-        #expect(try plain.pods(namespace: "demo") == "LC_ALL=C kubectl get pods -n 'demo' -o json")
+        #expect(try plain.pods() == #"""
+            LC_ALL=C sh -c 'kubectl get pods -A -o json || exit $?; echo; echo @@aero-pod-metrics; \#
+            kubectl get --raw '\''/apis/metrics.k8s.io/v1beta1/pods'\'' --request-timeout=5s 2>/dev/null || true'
+            """#)
+        #expect(try plain.pods(namespace: "demo") == #"""
+            LC_ALL=C sh -c 'kubectl get pods -n '\''demo'\'' -o json || exit $?; echo; echo @@aero-pod-metrics; \#
+            kubectl get --raw '\''/apis/metrics.k8s.io/v1beta1/namespaces/demo/pods'\'' --request-timeout=5s 2>/dev/null || true'
+            """#)
         let k3s = try KubectlCommands(host: ProbeTestData.host(kubectlPrefix: "sudo -n k3s kubectl"))
-        #expect(try k3s.pods() == "LC_ALL=C sudo -n k3s kubectl get pods -A -o json")
+        #expect(try k3s.pods() == Self.k3sPods)
+        #expect(throws: CollectorInputError.self) { try plain.pods(namespace: "demo/../x") }
+    }
+
+    static let k3sPods = #"""
+        LC_ALL=C sh -c 'sudo -n k3s kubectl get pods -A -o json || exit $?; echo; echo @@aero-pod-metrics; \#
+        sudo -n k3s kubectl get --raw '\''/apis/metrics.k8s.io/v1beta1/pods'\'' --request-timeout=5s 2>/dev/null || true'
+        """#
+
+    @Test("Pods output splits at the marker line")
+    func splitPodsOutput() {
+        let pods = Data(#"{"items":[{"metadata":{"name":"@@aero-pod-metrics"}}]}"#.utf8)
+        let metrics = Data(#"{"items":[]}"#.utf8)
+        let joined = pods + Data("\n\n@@aero-pod-metrics\n".utf8) + metrics + Data("\n".utf8)
+        let parts = KubectlCommands.splitPodsOutput(joined)
+        #expect(parts.pods == pods + Data("\n".utf8))
+        #expect(parts.metrics == metrics + Data("\n".utf8))
+
+        let failed = KubectlCommands.splitPodsOutput(pods + Data("\n\n@@aero-pod-metrics\n".utf8))
+        #expect(failed.pods == pods + Data("\n".utf8))
+        #expect(failed.metrics.isEmpty)
+
+        let bare = KubectlCommands.splitPodsOutput(pods)
+        #expect(bare.pods == pods)
+        #expect(bare.metrics.isEmpty)
     }
 
     @Test("Logs: container, previous, tail, timestamps, since, follow")
@@ -115,7 +145,23 @@ struct KubernetesCollectorTests {
         let crasher = try #require(pods.first { $0.name.hasPrefix("crasher-") })
         #expect(crasher.namespace == "demo")
         #expect(crasher.restarts > 0)
-        #expect(runner.commands == ["LC_ALL=C sudo -n k3s kubectl get pods -A -o json"])
+        #expect(crasher.cpuMillicores == nil)
+        #expect(runner.commands == [KubernetesCommandTests.k3sPods])
+    }
+
+    @Test("Pods carry CPU and memory when the metrics API answers")
+    func podsWithMetrics() async throws {
+        let output = try Fixtures.data("kubectl/pods-all.json") + Data("\n@@aero-pod-metrics\n".utf8)
+            + (try Fixtures.data("kubectl/synthetic-metrics-pods.json"))
+        let runner = ProbeScriptedRunner(result: SSHResult(exitCode: 0, stdout: output))
+        let pods = try await KubernetesCollector(runner: runner).pods(on: k3sHost)
+
+        #expect(pods.count == 7)
+        let web = try #require(pods.first { $0.name.hasPrefix("web-") })
+        #expect(web.cpuMillicores == 3)
+        #expect(web.memUsedBytes == 3_764_224)
+        #expect(web.memLimitBytes == 96 << 20)
+        #expect(pods.first { $0.name.hasPrefix("pending-") }?.memUsedBytes == nil)
     }
 
     @Test("An invalid prefix fails before ssh")

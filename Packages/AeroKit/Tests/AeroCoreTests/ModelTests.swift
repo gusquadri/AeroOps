@@ -10,7 +10,7 @@ struct ModelTests {
     func hostRoundTrip() throws {
         let host = RemoteHost(
             id: id, name: "web-01", address: "10.0.0.12", port: 2222, user: "deploy",
-            keyId: "key-1", tags: ["prod", "eu"], kubectlPrefix: "sudo -n k3s kubectl",
+            keyId: "key-1", auth: .password, tags: ["prod", "eu"], kubectlPrefix: "sudo -n k3s kubectl",
             dockerSudo: true, mcpTier: .readExec
         )
         let decoded = try JSONDecoder().decode(RemoteHost.self, from: JSONEncoder().encode(host))
@@ -27,6 +27,7 @@ struct ModelTests {
         #expect(host.id == id)
         #expect(host.port == 22)
         #expect(host.keyId == nil)
+        #expect(host.auth == .key)
         #expect(host.tags.isEmpty)
         #expect(host.kubectlPrefix == nil)
         #expect(host.dockerSudo == false)
@@ -52,6 +53,18 @@ struct ModelTests {
         #expect(try decode("off") == .off)
         #expect(try decode("sessions") == .off)
         #expect(try decode("READ") == .off)
+    }
+
+    @Test("HostAuthMethod defaults to key, unknown values fall back to key")
+    func authMethod() throws {
+        #expect(RemoteHost(name: "n", address: "a", user: "u").auth == .key)
+        let decode = { (raw: String) in try JSONDecoder().decode(HostAuthMethod.self, from: Data("\"\(raw)\"".utf8)) }
+        #expect(try decode("password") == .password)
+        #expect(try decode("key") == .key)
+        #expect(try decode("keyboard-interactive") == .key)
+        #expect(try decode("PASSWORD") == .key)
+        let json = try String(decoding: JSONEncoder().encode(RemoteHost(name: "n", address: "a", user: "u", auth: .password)), as: UTF8.self)
+        #expect(json.contains(#""auth":"password""#))
     }
 
     @Test("Container state and pod phase decode unknown strings tolerantly")
@@ -141,6 +154,7 @@ struct ModelTests {
     func paths() {
         let paths = AeroPaths(home: URL(fileURLWithPath: "/Users/test"))
         #expect(paths.agentSocket.path == "/Users/test/.aeroops/agent.sock")
+        #expect(paths.askpassSocket.path == "/Users/test/.aeroops/askpass.sock")
         #expect(paths.bridgeSocket.path == "/Users/test/.aeroops/bridge.sock")
         #expect(paths.controlMasterDirectory.path == "/Users/test/.aeroops/cm")
         #expect(paths.sshConfig.path == "/Users/test/.aeroops/ssh_config")

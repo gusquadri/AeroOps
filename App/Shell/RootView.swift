@@ -45,7 +45,7 @@ extension EnvironmentValues {
     @Entry var sidebarVisibility: Binding<NavigationSplitViewVisibility> = .constant(.all)
 }
 
-/// The segmented tab control in the toolbar. ⌘1–⌘4 live in the View menu (``AppCommands``).
+/// The segmented tab control in the toolbar. ⌘1–⌘5 live in the View menu (``AppCommands``).
 struct TabSwitcher: View {
     @Binding var selection: AppTab
 
@@ -73,6 +73,7 @@ struct TabContent: View {
         case .dashboard: DashboardView()
         case .containers: ContainersView()
         case .terminals: TerminalsView()
+        case .files: FilesView()
         case .activity: ActivityView()
         }
     }

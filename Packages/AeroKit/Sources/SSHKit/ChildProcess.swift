@@ -10,6 +10,9 @@ struct ChildSpec: Sendable {
     var environment: [String: String]
     /// Written to the child's stdin, which is then closed. `nil` connects stdin to `/dev/null`.
     var stdin: Data?
+    /// Keep stdin open after `stdin` was written, for ``ChildProcess/write(_:)``, until
+    /// ``ChildProcess/closeStdin()`` or exit. Stdin is a pipe even when `stdin` is `nil`.
+    var interactiveStdin = false
     /// Wall-clock limit; on expiry the whole process group gets SIGTERM, then SIGKILL.
     var timeout: Duration?
     /// Bytes kept per output stream; the rest is read and discarded.
@@ -115,6 +118,7 @@ final class ChildProcess: @unchecked Sendable {
     typealias LineHandler = @Sendable (String) -> Void
     /// `isStdout`, then the bytes.
     typealias ChunkHandler = @Sendable (Bool, Data) -> Void
+    typealias DataHandler = @Sendable (Data) -> Void
 
     enum OutputMode: Sendable {
         /// Keep stdout and stderr, each capped at ``ChildSpec/outputLimit``.
@@ -124,6 +128,9 @@ final class ChildProcess: @unchecked Sendable {
         /// Like ``collect``, and also hand every kept piece of either stream to `handler` as it
         /// arrives (on the child's queue). Bytes beyond the cap are neither kept nor delivered.
         case observe(handler: ChunkHandler)
+        /// Hand every byte of stdout to `handler` as it arrives (on the child's queue), uncapped
+        /// and not kept; stderr is still collected. For binary protocols such as SFTP.
+        case stream(handler: DataHandler)
     }
 
     let pid: pid_t
@@ -132,6 +139,7 @@ final class ChildProcess: @unchecked Sendable {
     private let completion: @Sendable (ChildOutcome) -> Void
     private let lineHandler: LineHandler?
     private let chunkHandler: ChunkHandler?
+    private let dataHandler: DataHandler?
     private let startedAt: ContinuousClock.Instant
     /// `false` only in tests that report the exit themselves (``reportExitForTesting()``).
     private let watchesExit: Bool
@@ -152,6 +160,12 @@ final class ChildProcess: @unchecked Sendable {
     private var stderrOpen = true
     private var pendingStdin: Data
     private var stdinOffset = 0
+    /// The parent's end of the stdin pipe, or -1 once closed (or never opened).
+    private var stdinFD: Int32 = -1
+    /// Close stdin as soon as everything pending was written.
+    private var stdinClosing = false
+    /// The write source is only armed while the pipe is full; between bursts it is suspended.
+    private var stdinSourceSuspended = false
     private var termination: ChildTermination?
     private var exitedAt: ContinuousClock.Instant?
     private var terminating = false
@@ -170,20 +184,23 @@ final class ChildProcess: @unchecked Sendable {
         self.stdout = CappedOutput(limit: spec.outputLimit)
         self.stderr = CappedOutput(limit: spec.outputLimit)
         self.pendingStdin = spec.stdin ?? Data()
+        var lineHandler: LineHandler?
+        var chunkHandler: ChunkHandler?
+        var dataHandler: DataHandler?
         switch mode {
         case .collect:
-            lineHandler = nil
-            chunkHandler = nil
-            splitter = nil
+            break
         case .lines(let maxLength, let handler):
             lineHandler = handler
-            chunkHandler = nil
             splitter = LineSplitter(maxLength: maxLength)
         case .observe(let handler):
-            lineHandler = nil
             chunkHandler = handler
-            splitter = nil
+        case .stream(let handler):
+            dataHandler = handler
         }
+        self.lineHandler = lineHandler
+        self.chunkHandler = chunkHandler
+        self.dataHandler = dataHandler
     }
 
     deinit {
@@ -218,7 +235,7 @@ final class ChildProcess: @unchecked Sendable {
         let stdoutPipe: (read: Int32, write: Int32)
         let stderrPipe: (read: Int32, write: Int32)
         do {
-            stdinPipe = spec.stdin == nil ? nil : try makePipe()
+            stdinPipe = spec.stdin == nil && !spec.interactiveStdin ? nil : try makePipe()
             stdoutPipe = try makePipe()
             stderrPipe = try makePipe()
         } catch {
@@ -297,6 +314,31 @@ final class ChildProcess: @unchecked Sendable {
         }
     }
 
+    /// Queues `data` for the child's stdin (``ChildSpec/interactiveStdin``) and writes it as the
+    /// pipe accepts it, in order. Dropped once stdin was closed or the child stopped reading.
+    func write(_ data: Data) {
+        guard !data.isEmpty else { return }
+        queue.async { [self] in
+            guard stdinFD >= 0, !stdinClosing else { return }
+            if stdinOffset >= 1 << 20 {
+                // Drop what was written so a long backlog does not keep it alive.
+                pendingStdin = pendingStdin.subdata(in: (pendingStdin.startIndex + stdinOffset)..<pendingStdin.endIndex)
+                stdinOffset = 0
+            }
+            pendingStdin.append(data)
+            flushStdin()
+        }
+    }
+
+    /// Closes the child's stdin once everything queued was written, so it reads EOF.
+    func closeStdin() {
+        queue.async { [self] in
+            guard stdinFD >= 0 else { return }
+            stdinClosing = true
+            flushStdin()
+        }
+    }
+
     /// Tests only: delivers the process source's exit report now, the way the kernel may deliver
     /// it before the exiting child is waitable.
     func reportExitForTesting() {
@@ -370,6 +412,10 @@ final class ChildProcess: @unchecked Sendable {
                 splitter?.append(bytes, emit: handler)
                 return
             }
+            if let dataHandler {
+                dataHandler(Data(bytes))
+                return
+            }
             kept = stdout.append(bytes)
         } else {
             kept = stderr.append(bytes)
@@ -380,34 +426,73 @@ final class ChildProcess: @unchecked Sendable {
     }
 
     private func startWriter(fd: Int32) {
-        guard !pendingStdin.isEmpty else {
-            close(fd)
-            return
-        }
-        let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: queue)
-        source.setEventHandler { [self] in writeAvailable(fd: fd) }
-        source.setCancelHandler { close(fd) }
-        stdinSource = source
-        source.activate()
+        stdinFD = fd
+        stdinClosing = !spec.interactiveStdin
+        flushStdin()
     }
 
-    private func writeAvailable(fd: Int32) {
-        let data = pendingStdin
-        while stdinOffset < data.count {
+    /// Writes as much pending stdin as the pipe takes; arms the write source when it is full.
+    private func flushStdin() {
+        guard stdinFD >= 0 else { return }
+        while stdinOffset < pendingStdin.count {
             let offset = stdinOffset
-            let count = data.withUnsafeBytes { raw in write(fd, raw.baseAddress! + offset, raw.count - offset) }
+            let count = pendingStdin.withUnsafeBytes { raw in Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset) }
             if count > 0 {
                 stdinOffset += count
             } else if count < 0 && errno == EINTR {
                 continue
             } else if count < 0 && errno == EAGAIN {
+                armWriter()
                 return
             } else {
-                break // EPIPE: the child closed stdin; the rest is dropped.
+                // EPIPE: the child closed stdin; the rest is dropped.
+                pendingStdin = Data()
+                stdinOffset = 0
+                closeStdinFD()
+                return
             }
         }
         pendingStdin = Data()
-        stdinSource?.cancel()
+        stdinOffset = 0
+        if stdinClosing {
+            closeStdinFD()
+        } else if let stdinSource, !stdinSourceSuspended {
+            stdinSource.suspend()
+            stdinSourceSuspended = true
+        }
+    }
+
+    private func armWriter() {
+        if let stdinSource {
+            if stdinSourceSuspended {
+                stdinSourceSuspended = false
+                stdinSource.resume()
+            }
+            return
+        }
+        let fd = stdinFD
+        let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: queue)
+        source.setEventHandler { [self] in flushStdin() }
+        source.setCancelHandler { close(fd) }
+        stdinSource = source
+        source.activate()
+    }
+
+    /// Closes stdin. With a write source the fd is closed by its cancel handler, never before.
+    private func closeStdinFD() {
+        guard stdinFD >= 0 else { return }
+        let fd = stdinFD
+        stdinFD = -1
+        guard let stdinSource else {
+            close(fd)
+            return
+        }
+        // A suspended source never runs its cancel handler.
+        if stdinSourceSuspended {
+            stdinSourceSuspended = false
+            stdinSource.resume()
+        }
+        stdinSource.cancel()
     }
 
     /// Reaps the child if it exited.
@@ -447,7 +532,7 @@ final class ChildProcess: @unchecked Sendable {
         processSource?.cancel()
         timeoutTimer?.cancel()
         killTimer?.cancel()
-        stdinSource?.cancel()
+        closeStdinFD()
         if stdoutOpen || stderrOpen {
             // Descendants (e.g. a backgrounded `sleep`) may still hold the pipes open.
             let grace = cancelled ? .zero : spec.drainGrace
@@ -485,6 +570,7 @@ final class ChildProcess: @unchecked Sendable {
         )
         // Cancel everything and drop the sources, which breaks the source <-> self cycles that
         // kept this object alive while the child ran.
+        closeStdinFD()
         for source in [stdoutSource, stderrSource, stdinSource, processSource, timeoutTimer, killTimer, drainTimer] as [(any DispatchSourceProtocol)?] {
             source?.cancel()
         }

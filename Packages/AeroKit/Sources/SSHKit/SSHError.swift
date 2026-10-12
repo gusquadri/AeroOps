@@ -12,7 +12,8 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
     /// The server's key differs from the pinned one (`REMOTE HOST IDENTIFICATION HAS CHANGED`).
     /// The host is blocked until the user decides.
     case hostKeyChanged
-    /// `Permission denied (publickey,...)`: the key is not authorized, or the agent is locked.
+    /// `Permission denied (publickey,...)`: the key is not authorized, the agent is locked, or the
+    /// password was rejected (or, for a password host, there is none to try).
     case authFailed
     /// Nothing listens on the port.
     case connectionRefused
@@ -36,6 +37,9 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
     /// Longest stderr kept in ``other(_:)`` and ``remoteCommandFailed(exitCode:stderr:)``.
     static let messageLimit = 4096
 
+    /// How `aeroops-askpass` starts its error messages on ssh's stderr.
+    public static let askpassMarker = "aeroops-askpass: "
+
     /// Maps ssh's stderr (after exit status 255) to an error.
     public static func classify(stderr: String) -> SSHError {
         let text = stderr
@@ -49,6 +53,7 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
             return .hostKeyUnknown
         }
         if text.contains("Permission denied (")
+            || text.contains(askpassMarker)
             || text.contains("Too many authentication failures")
             || text.contains("No more authentication methods") {
             return .authFailed
@@ -93,7 +98,7 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
         switch self {
         case .hostKeyUnknown: "The host key is not trusted yet."
         case .hostKeyChanged: "The host key has changed. Connections are blocked until you review it."
-        case .authFailed: "Authentication failed. Check that the host's key is authorized and the agent is unlocked."
+        case .authFailed: "Authentication failed. Check the host's key or password."
         case .connectionRefused: "The connection was refused."
         case .timeout: "The connection timed out."
         case .hostUnreachable: "The host is unreachable."

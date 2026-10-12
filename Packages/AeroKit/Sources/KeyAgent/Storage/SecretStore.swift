@@ -13,6 +13,14 @@ public protocol SecretStore: Sendable {
     func load(for id: UUID) throws(SecretStoreError) -> Data?
     /// Removes the secret for `id`. Succeeds when there is none.
     func delete(for id: UUID) throws(SecretStoreError)
+    /// Whether a secret is stored for `id`, without reading it where the store can.
+    func contains(_ id: UUID) throws(SecretStoreError) -> Bool
+}
+
+extension SecretStore {
+    public func contains(_ id: UUID) throws(SecretStoreError) -> Bool {
+        try load(for: id) != nil
+    }
 }
 
 /// A ``SecretStore`` failure.

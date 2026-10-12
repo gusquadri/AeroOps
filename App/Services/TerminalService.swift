@@ -97,12 +97,14 @@ final class TerminalService {
 
     /// Whether a terminal can be opened to `host` now: it renders into `ssh_config`, is not
     /// blocked by a changed host key, and something can sign for it (its key and the running
-    /// in-app agent, or the system agent).
+    /// in-app agent, or the system agent). Password hosts need no agent: the tab gets the saved
+    /// password through `aeroops-askpass`, or prompts for it.
     func canOpen(_ host: RemoteHost) -> Bool {
         guard ssh.hostKeyBlock(for: host) == nil,
               ssh.configError == nil,
               ssh.configRejections[host.id] == nil
         else { return false }
+        if host.auth == .password { return ssh.agentStatus != .stopped }
         switch ssh.agentChoice {
         case .system:
             return ssh.agentStatus == .usingSystemAgent
@@ -118,6 +120,9 @@ final class TerminalService {
         if ssh.hostKeyBlock(for: host) != nil { return "The host key changed. Review it in the host editor first." }
         if let error = ssh.configError { return "ssh_config could not be written: \(error)" }
         if let rejection = ssh.configRejections[host.id] { return rejection }
+        if host.auth == .password {
+            return ssh.agentStatus == .stopped ? "The SSH services have not started yet." : nil
+        }
         switch ssh.agentChoice {
         case .system:
             return ssh.agentStatus == .usingSystemAgent ? nil : "The SSH services have not started yet."
@@ -214,7 +219,7 @@ final class TerminalService {
         }
         let base = Self.baseTitle(hostName: host.name, kind: kind)
         let tab = Tab(hostID: host.id, kind: kind, baseTitle: base, ordinal: ordinal ?? nextOrdinal(for: base))
-        let spec = Self.launchSpec(for: host, kind: kind, context: ssh.context, title: tab.title)
+        let spec = Self.launchSpec(for: host, kind: kind, context: ssh.terminalContext(for: host), title: tab.title)
         let session = manager.open(spec)
         tabs[session.id] = tab
         if let index, index < manager.sessions.count - 1 {

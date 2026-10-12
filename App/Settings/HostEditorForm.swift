@@ -8,6 +8,9 @@ import SwiftUI
 /// Used inline in Settings › Hosts and in the main window's ``HostEditorSheet``. The caller
 /// decides what saving means through `onSave`; a thrown ``HostStoreError`` is shown in the footer.
 /// Give the form `.id(host.id)` so its state resets when the edited host changes.
+///
+/// A typed password goes to the Keychain before `onSave` runs and is then cleared from the form;
+/// switching a host back to a key deletes its saved password.
 struct HostEditorForm: View {
     @Environment(AppModel.self) private var model
 
@@ -24,6 +27,9 @@ struct HostEditorForm: View {
     @State private var test = TestState.idle
     @State private var testTask: Task<Void, Never>?
     @State private var trustRequest: TrustRequest?
+    /// Whether the Keychain holds a password for this host. Read when the form appears.
+    @State private var hasSavedPassword = false
+    @State private var passwordError: String?
 
     private enum TestState: Equatable {
         case idle
@@ -68,7 +74,10 @@ struct HostEditorForm: View {
     private var hasChanges: Bool { draft != baseline }
 
     var body: some View {
-        let validation = draft.validate(otherHostNames: model.hosts.lazy.filter { $0.id != draft.id }.map(\.name))
+        let validation = draft.validate(
+            otherHostNames: model.hosts.lazy.filter { $0.id != draft.id }.map(\.name),
+            hasSavedPassword: hasSavedPassword
+        )
         let keyHost = draft.makeHost()
         let keyBlock = model.ssh.hostKeyBlock(for: keyHost)
         VStack(spacing: 0) {
@@ -91,7 +100,15 @@ struct HostEditorForm: View {
                     field(.user, validation) {
                         TextField("User", text: $draft.user, prompt: Text("deploy"))
                     }
-                    keyPicker
+                    Picker("Sign in with", selection: $draft.auth) {
+                        Text("SSH key").tag(HostAuthMethod.key)
+                        Text("Password").tag(HostAuthMethod.password)
+                    }
+                    .pickerStyle(.segmented)
+                    switch draft.auth {
+                    case .key: keyPicker
+                    case .password: passwordField(validation)
+                    }
                 }
                 Section("Organisation") {
                     field(.tags, validation, help: "Separate tags with commas.") {
@@ -139,6 +156,7 @@ struct HostEditorForm: View {
         .onChange(of: keyBlock == nil) { _, unblocked in
             if unblocked { resetTest() }
         }
+        .onAppear { hasSavedPassword = model.ssh.hasSavedPassword(for: draft.id) }
         .onDisappear { testTask?.cancel() }
         .sheet(item: $trustRequest) { request in
             HostKeyTrustSheet(
@@ -213,6 +231,25 @@ struct HostEditorForm: View {
     }
 
     @ViewBuilder
+    private func passwordField(_ validation: HostDraft.Validation) -> some View {
+        field(.password, validation, help: hasSavedPassword
+              ? "Saved in the Keychain. Type a new one to replace it."
+              : "Kept in the Keychain and handed only to ssh, through AeroOps’ askpass helper.") {
+            SecureField("Password", text: $draft.password, prompt: Text(hasSavedPassword ? "Saved" : "Required"))
+                .textContentType(.password)
+        }
+        if let passwordError {
+            ValidationMessage(text: "The password could not be saved: \(passwordError)")
+        } else if let original, original.auth == .password, model.ssh.rejectedPasswords.contains(original.id) {
+            let reason = model.ssh.askpassRefusals[original.id].map { " (\($0))" } ?? ""
+            ValidationMessage(text: "The saved password did not work\(reason). AeroOps stopped trying it; save it again or run Test Connection.")
+        }
+        if let error = model.ssh.askpassError {
+            ValidationMessage(text: "Monitoring can’t use the password: \(error) Terminal tabs ask for it instead.")
+        }
+    }
+
+    @ViewBuilder
     private func testRow(_ validation: HostDraft.Validation) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -224,7 +261,9 @@ struct HostEditorForm: View {
                     case .idle:
                         Text(validation.canTestConnection
                              ? "Checks that AeroOps can sign in with these settings."
-                             : "Enter a valid address, port and user first.")
+                             : draft.auth == .password
+                                ? "Enter a valid address, port, user and password first."
+                                : "Enter a valid address, port and user first.")
                             .foregroundStyle(Aero.text.secondary)
                     case .running:
                         ProgressView().controlSize(.small)
@@ -291,21 +330,39 @@ struct HostEditorForm: View {
 
     // MARK: - Actions
 
+    /// Saves a typed password to the Keychain first, so the host never exists without the
+    /// password it was saved with; a new host's password is removed again if `onSave` fails.
     private func save(_ validation: HostDraft.Validation) {
         guard validation.isValid else {
             revealAllIssues = true
             return
         }
         let host = draft.makeHost()
+        let newPassword = host.auth == .password && !draft.password.isEmpty ? draft.password : nil
+        if let newPassword {
+            do {
+                try model.ssh.setPassword(newPassword, for: host.id)
+            } catch {
+                passwordError = error.localizedDescription
+                return
+            }
+        }
+        passwordError = nil
         do {
             try onSave(host)
-            saveError = nil
-            revealAllIssues = false
-            draft = HostDraft(host: host)
-            baseline = draft
         } catch {
+            if newPassword != nil, isNew { try? model.ssh.deletePassword(for: host.id) }
             saveError = error
+            return
         }
+        if host.auth == .key, original?.auth == .password {
+            try? model.ssh.deletePassword(for: host.id)
+        }
+        hasSavedPassword = model.ssh.hasSavedPassword(for: host.id)
+        saveError = nil
+        revealAllIssues = false
+        draft = HostDraft(host: host)
+        baseline = draft
     }
 
     private func revert() {
@@ -314,18 +371,20 @@ struct HostEditorForm: View {
         saveError = nil
     }
 
-    /// Address, port, user and key: changing any of them invalidates a test result.
+    /// Address, port, user, sign-in method, key and typed password: changing any of them
+    /// invalidates a test result.
     private var connectionKey: [String] {
-        [draft.address, draft.port, draft.user, draft.keyId ?? ""]
+        [draft.address, draft.port, draft.user, draft.auth.rawValue, draft.keyId ?? "", draft.password]
     }
 
     private func runTest() {
         testTask?.cancel()
         let host = draft.makeHost()
+        let password = host.auth == .password && !draft.password.isEmpty ? draft.password : nil
         let tester = model.connectionTester
         test = .running
         testTask = Task {
-            let result = await tester.testConnection(to: host)
+            let result = await tester.testConnection(to: host, password: password)
             guard !Task.isCancelled else { return }
             test = .finished(result)
             if case .hostKeyUnknown(let offered) = result.outcome, !offered.isEmpty {
