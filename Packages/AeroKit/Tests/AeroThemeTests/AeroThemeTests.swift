@@ -69,6 +69,16 @@ struct AeroThemeTests {
         #expect(GlossyGauge.percent(-0.2) == 0)
     }
 
+    @Test("gauge spring ends once less than 0.1% of the change is left")
+    func gaugeSpringCutoff() {
+        let settling = SettlingSpring(duration: 0.6, remaining: 0.001)
+        let left = { (time: Double) in 1 - settling.spring.value(target: 1.0, time: time) }
+        #expect(settling.spring == Spring(duration: 0.6, bounce: 0))
+        #expect(left(settling.cutoff) < 0.001)
+        #expect(left(settling.cutoff - 0.05) > 0.001)
+        #expect((0.8...1.0).contains(settling.cutoff))
+    }
+
     @Test("gauge colour band follows the thresholds", arguments: [
         (nil, GlossyGauge.Level.none),
         (Double.nan, .none),

@@ -71,7 +71,7 @@ public struct GlossyGauge: View {
             }
             // Keyed on the shown percentage: a sub-percent move (under 2 pt of ring) lands in
             // one frame instead of running the 0.6 s spring at the display rate.
-            .animation(accessibility.animation(.smooth(duration: 0.6)), value: Self.percent(value))
+            .animation(accessibility.animation(Self.animation), value: Self.percent(value))
             Text(label)
                 .font(Aero.font(.caption, weight: .semibold))
                 .foregroundStyle(strong ? Aero.text.primary : Aero.text.secondary)
@@ -84,6 +84,12 @@ public struct GlossyGauge: View {
     }
 
     private var lineWidth: CGFloat { max(6, diameter * 0.14) }
+
+    /// The ring's move to a new value: `.smooth(duration: 0.6)`'s curve, ended once it is
+    /// within 0.1% of the change (under 0.2 pt of ring even for a 0-to-100% swing). Evaluating
+    /// it costs a fraction of SwiftUI's own spring, which was a tenth of each animation frame
+    /// with twenty hosts on the Dashboard.
+    nonisolated static let animation = Animation(SettlingSpring(duration: 0.6, remaining: 0.001))
 
     // MARK: Logic (unit-tested)
 
@@ -133,6 +139,37 @@ public struct GlossyGauge: View {
             case .critical: [Aero.sun, Aero.coral]
             }
         }
+    }
+}
+
+// MARK: - Animation
+
+/// A critically damped spring (`Spring(duration:bounce: 0)`, the curve of
+/// `.smooth(duration:)`) that ends once less than `remaining` of the change is left.
+///
+/// A change that lands mid-animation is added on top of the running one rather than merged
+/// into it; both follow the same curve, so the ring still glides to the newest value.
+struct SettlingSpring: CustomAnimation {
+    let spring: Spring
+    /// Time after which less than `remaining` of the change is left; the animation ends there.
+    let cutoff: TimeInterval
+
+    init(duration: TimeInterval, remaining: Double) {
+        spring = Spring(duration: duration, bounce: 0)
+        cutoff = spring.settlingDuration(target: 1.0, epsilon: remaining)
+    }
+
+    func animate<V: VectorArithmetic>(
+        value: V, time: TimeInterval, context: inout AnimationContext<V>
+    ) -> V? {
+        guard time < cutoff else { return nil }
+        return spring.value(target: value, time: time)
+    }
+
+    func velocity<V: VectorArithmetic>(
+        value: V, time: TimeInterval, context: AnimationContext<V>
+    ) -> V? {
+        spring.velocity(target: value, time: time)
     }
 }
 
