@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the Info.plist Xcode generates (GENERATE_INFOPLIST_FILE), so it only holds keys
+  that have no INFOPLIST_KEY_ build setting.
+  AEROOPS_FEED_URL and AEROOPS_SPARKLE_PUBLIC_KEY are empty unless a release build sets them
+  (Scripts/release.sh); while either is empty the app never starts the updater.
+-->
+<plist version="1.0">
+<dict>
+	<key>SUFeedURL</key>
+	<string>$(AEROOPS_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(AEROOPS_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+</dict>
+</plist>

@@ -38,6 +38,10 @@ packages:
   swift-log:
     url: https://github.com/apple/swift-log
     from: 1.5.0
+  # Sparkle 2 updates, pinned exactly.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 targets:
   AeroOps:
@@ -59,6 +63,12 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         ENABLE_APP_SANDBOX: NO
         ENABLE_PREVIEWS: YES
+        # Sparkle keys (SUFeedURL, SUPublicEDKey) come from App/Info.plist, merged into the
+        # generated one. Both are empty here, so the updater never starts in dev builds;
+        # Scripts/release.sh sets them.
+        INFOPLIST_FILE: App/Info.plist
+        AEROOPS_FEED_URL: ""
+        AEROOPS_SPARKLE_PUBLIC_KEY: ""
     dependencies:
       - package: AeroKit
         product: AeroCore
@@ -74,6 +84,7 @@ targets:
         product: AgentBridge
       - package: AeroKit
         product: AeroTheme
+      - package: Sparkle
       # Build the MCP CLI first and copy it to AeroOps.app/Contents/MacOS/aeroops-mcp.
       - target: aeroops-mcp
         embed: true
