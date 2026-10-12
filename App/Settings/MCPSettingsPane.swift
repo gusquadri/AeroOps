@@ -82,7 +82,8 @@ private struct BridgeStatusSection: View {
     }
 }
 
-private struct LabeledPath: View {
+/// A caption label and a selectable monospaced path. Also used by onboarding.
+struct LabeledPath: View {
     let label: String
     let path: String
 
@@ -104,8 +105,9 @@ private struct LabeledPath: View {
 
 // MARK: - Connect an agent
 
-/// Config snippets for MCP clients, using the path of the aeroops-mcp in this app bundle.
-private struct ConnectAgentSection: View {
+/// Config snippets for MCP clients, using the path of the aeroops-mcp in this app bundle. Also
+/// onboarding's "AI agents" step.
+struct ConnectAgentSection: View {
     @State private var copied: MCPClientConfig.Client?
 
     var body: some View {

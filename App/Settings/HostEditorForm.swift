@@ -15,6 +15,7 @@ struct HostEditorForm: View {
     let onSave: (RemoteHost) throws(HostStoreError) -> Void
     let onCancel: (() -> Void)?
     let onDelete: (() -> Void)?
+    let onDraftChange: ((HostDraft) -> Void)?
 
     @State private var draft: HostDraft
     @State private var baseline: HostDraft
@@ -42,17 +43,23 @@ struct HostEditorForm: View {
     ///   - onSave: Persists the validated, normalised host.
     ///   - onCancel: Shows a Cancel button (sheets). Without it the form offers Revert instead.
     ///   - onDelete: Shows a Delete button.
+    ///   - initialDraft: For a new host, the fields to start from (onboarding's unsaved draft
+    ///     with its key preselected) instead of a blank draft.
+    ///   - onDraftChange: Called after every edit, so a caller can keep an unsaved draft.
     init(
         original: RemoteHost?,
         onSave: @escaping (RemoteHost) throws(HostStoreError) -> Void,
         onCancel: (() -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        initialDraft: HostDraft? = nil,
+        onDraftChange: ((HostDraft) -> Void)? = nil
     ) {
         self.original = original
         self.onSave = onSave
         self.onCancel = onCancel
         self.onDelete = onDelete
-        let draft = original.map(HostDraft.init(host:)) ?? HostDraft()
+        self.onDraftChange = onDraftChange
+        let draft = original.map(HostDraft.init(host:)) ?? initialDraft ?? HostDraft()
         _draft = State(initialValue: draft)
         _baseline = State(initialValue: draft)
     }
@@ -127,6 +134,7 @@ struct HostEditorForm: View {
             footer(validation)
         }
         .onChange(of: connectionKey) { resetTest() }
+        .onChange(of: draft) { _, draft in onDraftChange?(draft) }
         // Trusting the new key lifts the block: the old "key changed" result no longer applies.
         .onChange(of: keyBlock == nil) { _, unblocked in
             if unblocked { resetTest() }

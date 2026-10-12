@@ -79,16 +79,7 @@ struct KeysSettingsPane: View {
         } message: { key in
             Text(deletionMessage(for: key))
         }
-        .confirmationDialog(
-            "Move “\(importedFile?.lastPathComponent ?? "")” to the Trash?",
-            isPresented: isPresent($importedFile),
-            presenting: importedFile
-        ) { url in
-            Button("Move to Trash", role: .destructive) { moveToTrash(url) }
-            Button("Keep File", role: .cancel) {}
-        } message: { _ in
-            Text("The key is now in your Keychain and served by AeroOps’ agent. Moving the unencrypted file to the Trash leaves no readable copy of the private key on disk. Its .pub file is left alone.")
-        }
+        .trashImportedKeyDialog(file: $importedFile) { actionError = $0 }
     }
 
     // MARK: - Sections
@@ -152,30 +143,11 @@ struct KeysSettingsPane: View {
     }
 
     private func importKey() {
-        let panel = NSOpenPanel()
-        panel.title = "Import SSH Key"
-        panel.message = "Choose an unencrypted OpenSSH private key (for example id_ed25519). Passphrase-protected keys are not supported yet."
-        panel.prompt = "Import"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.directoryURL = URL(filePath: NSHomeDirectory(), directoryHint: .isDirectory).appending(path: ".ssh", directoryHint: .isDirectory)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = KeyFileImport.chooseFile() else { return }
         let ssh = model.ssh
         perform {
-            _ = try await ssh.importKey(contentsOf: url, policy: .oncePerSession)
+            _ = try await ssh.importKey(contentsOf: url, policy: KeyFileImport.policy)
             importedFile = url
-        }
-    }
-
-    private func moveToTrash(_ url: URL) {
-        Task {
-            do {
-                _ = try await NSWorkspace.shared.recycle([url])
-            } catch {
-                actionError = "Could not move \(url.lastPathComponent) to the Trash: \(error.localizedDescription)"
-            }
         }
     }
 
@@ -189,11 +161,6 @@ struct KeysSettingsPane: View {
             }
         }
     }
-}
-
-/// A `Binding<Bool>` that is true while `item` is set and clears it when dismissed.
-private func isPresent<Item>(_ item: Binding<Item?>) -> Binding<Bool> {
-    Binding(get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } })
 }
 
 // MARK: - Key card
@@ -347,19 +314,7 @@ private struct AgentSection: View {
                     }
                 }
 
-                Toggle(isOn: Binding(
-                    get: { ssh.agentChoice == .system },
-                    set: { useSystem in Task { await ssh.setAgentChoice(useSystem ? .system : .inApp) } }
-                )) {
-                    Text("Use system ssh-agent instead")
-                        .font(Aero.font(.callout, weight: .medium))
-                        .foregroundStyle(Aero.text.primary)
-                    Text("ssh then uses the agent in $SSH_AUTH_SOCK (for example 1Password or Secretive) and the keys above are not offered. Turn this on only if your keys live in another agent.")
-                        .font(Aero.font(.caption))
-                        .foregroundStyle(Aero.text.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .toggleStyle(.switch)
+                SystemAgentToggle()
             }
         } accessory: {
             if !ssh.agentEvents.isEmpty {
@@ -418,13 +373,9 @@ private struct GenerateKeySheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = ""
-    @State private var type: KeyGenerationType = SecureEnclave.isAvailable ? .secureEnclaveP256 : .ed25519
-    @State private var policy: SigningPolicy = .oncePerSession
+    @State private var draft = NewKeyDraft()
     @State private var isWorking = false
     @State private var error: String?
-
-    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -433,26 +384,7 @@ private struct GenerateKeySheet: View {
                 .foregroundStyle(Aero.text.primary)
                 .padding([.horizontal, .top], 20)
             Form {
-                TextField("Name", text: $name, prompt: Text("MacBook key"))
-                Picker("Type", selection: $type) {
-                    ForEach(KeyGenerationType.allCases, id: \.self) { type in
-                        Text(type.title).tag(type)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                Text(type.explanation)
-                    .font(Aero.font(.caption))
-                    .foregroundStyle(Aero.text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Picker("Touch ID", selection: $policy) {
-                    ForEach(SigningPolicy.allCases, id: \.self) { policy in
-                        Text(policy.title).tag(policy)
-                    }
-                }
-                Text(policy.explanation)
-                    .font(Aero.font(.caption))
-                    .foregroundStyle(Aero.text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                KeyGenerationFields(draft: $draft)
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
@@ -471,7 +403,7 @@ private struct GenerateKeySheet: View {
                 Button("Generate", action: generate)
                     .buttonStyle(.aqua)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(trimmedName.isEmpty || isWorking || (type == .secureEnclaveP256 && !SecureEnclave.isAvailable))
+                    .disabled(!draft.canGenerate || isWorking)
             }
             .padding(16)
         }
@@ -483,9 +415,10 @@ private struct GenerateKeySheet: View {
         isWorking = true
         error = nil
         let ssh = model.ssh
+        let draft = draft
         Task {
             do {
-                _ = try await ssh.generateKey(type, name: trimmedName, policy: policy)
+                _ = try await ssh.generateKey(draft.type, name: draft.trimmedName, policy: draft.policy)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription
