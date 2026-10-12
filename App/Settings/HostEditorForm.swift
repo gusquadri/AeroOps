@@ -95,12 +95,13 @@ struct HostEditorForm: View {
                     }
                 }
                 Section("Containers") {
-                    field(.kubectlPrefix, validation, help: "Replaces “kubectl”, e.g. “sudo -n k3s kubectl” on k3s. Leave empty for plain kubectl.") {
-                        TextField("kubectl prefix", text: $draft.kubectlPrefix, prompt: Text("kubectl"))
+                    field(.kubectlPrefix, validation, help: "Runs instead of “kubectl”. On k3s the kubeconfig is root-only, so use “sudo -n k3s kubectl” (needs passwordless sudo). Leave empty for plain kubectl.") {
+                        TextField("kubectl prefix", text: $draft.kubectlPrefix, prompt: Text("sudo -n k3s kubectl"))
+                            .autocorrectionDisabled()
                     }
                     Toggle(isOn: $draft.dockerSudo) {
                         Text("Run docker with sudo -n")
-                        Text("For users outside the docker group. Needs passwordless sudo for docker.")
+                        Text("For users outside the docker group: runs “sudo -n docker”. Needs a passwordless (NOPASSWD) sudo rule for docker; AeroOps never asks for a password.")
                     }
                 }
                 Section("AI agents (MCP)") {

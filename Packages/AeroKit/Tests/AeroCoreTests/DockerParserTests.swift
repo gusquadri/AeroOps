@@ -169,6 +169,14 @@ struct DockerParserTests {
         #expect(DockerError.failed(message: "x").hint == nil)
     }
 
+    @Test("hints name the host editor's docker sudo toggle exactly")
+    func hintsNameTheToggle() {
+        let toggle = "\"Run docker with sudo -n\""
+        #expect(DockerError.permissionDenied(socket: nil).hint?.contains(toggle) == true)
+        #expect(DockerError.sudoRefused.hint?.contains(toggle) == true)
+        #expect(DockerError.permissionDenied(socket: nil).hint?.contains("Use sudo -n for Docker") == false)
+    }
+
     @Test("empty ps output is no containers, not an error")
     func emptyPS() throws {
         #expect(try DockerParser.parseContainers(ps: "").isEmpty)
