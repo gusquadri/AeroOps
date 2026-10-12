@@ -31,7 +31,10 @@ final class ApprovalPresenter {
             panel.hide()
             return
         }
-        guard !new.isEmpty else { return }
+        guard !new.isEmpty else {
+            if !resolved.isEmpty { panel.contentDidChange() }
+            return
+        }
         panel.show()
         guard !NSApp.isActive else { return }
         guard let notifier else {
