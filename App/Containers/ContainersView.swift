@@ -62,7 +62,7 @@ struct HostContainersView: View {
         }
         .inspector(isPresented: $containers.inspectorPresented) {
             PodInspectorView(containers: containers)
-                .inspectorColumnWidth(min: 300, ideal: 380, max: 560)
+                .inspectorColumnWidth(min: 300, ideal: 340, max: 560)
         }
     }
 
@@ -107,7 +107,9 @@ private struct ContainersHeader: View {
                     .foregroundStyle(Aero.text.primary)
                 HStack(spacing: 6) {
                     ForEach(capabilityTags, id: \.text) { tag in
+                        // The tags keep their text; the updated label gives way first.
                         AeroTag(tag.text, systemImage: tag.symbol, tint: tag.tint)
+                            .fixedSize()
                     }
                     updatedLabel
                 }

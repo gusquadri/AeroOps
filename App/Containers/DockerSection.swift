@@ -48,56 +48,125 @@ struct DockerSection: View {
     }
 }
 
-/// The containers table: name, image, state, status, CPU, memory, ports and actions.
+/// The containers table's columns. Fixed widths fit the content and the header: the
+/// Restarting chip, "100.0%", "123.4 MB" and three row buttons.
+private enum ContainerColumn: Hashable {
+    case name, image, state, status, cpu, memory, ports, actions
+
+    static let nameMinimum: CGFloat = 90
+    /// A typical Compose container name (`aeroops-web-1`) with its orb, with room to spare.
+    static let nameComfort: CGFloat = 130
+    static let imageWidths = (min: CGFloat(80), ideal: CGFloat(140), max: CGFloat(320))
+    static let statusWidths = (min: CGFloat(90), ideal: CGFloat(130), max: CGFloat(240))
+    static let portsWidths = (min: CGFloat(70), ideal: CGFloat(110), max: CGFloat(280))
+
+    /// Ports give way first, then image, status, memory and CPU.
+    static func layout(width: CGFloat) -> WorkloadTableLayout<ContainerColumn> {
+        WorkloadTableLayout(
+            width: width,
+            columns: [
+                .init(.name, width: nameMinimum),
+                .init(.image, min: imageWidths.min, ideal: imageWidths.ideal),
+                .init(.state, width: 84),
+                .init(.status, min: statusWidths.min, ideal: statusWidths.ideal),
+                .init(.cpu, width: 50),
+                .init(.memory, width: 62),
+                .init(.ports, min: portsWidths.min, ideal: portsWidths.ideal),
+                .init(.actions, width: 66),
+            ],
+            name: .name,
+            nameComfort: nameComfort,
+            dropOrder: [.ports, .image, .status, .memory, .cpu]
+        )
+    }
+}
+
+/// The containers table: name, image, state, status, CPU, memory, ports and actions. When the
+/// table is too narrow for every column, optional ones give way
+/// (``ContainerColumn/layout(width:)``) rather than the table scrolling sideways.
 private struct DockerTable: View {
     let host: RemoteHost
     @Bindable var containers: HostContainersModel
+    @State private var width: CGFloat = 0
 
     var body: some View {
         let rows = containers.filteredContainers
+        let layout = ContainerColumn.layout(width: width)
         AeroCard(padding: 0) {
-            Table(rows, selection: $containers.selectedContainerID) {
-                TableColumn("Name") { container in
-                    HStack(spacing: 8) {
-                        StatusOrb(tone: container.health.workloadTone, size: 10)
-                        Text(container.name)
-                            .font(Aero.font(.callout, weight: .semibold))
-                            .lineLimit(1)
+            ScrollViewReader { proxy in
+                table(rows, layout: layout)
+                    // A new table starts at the top; bring the selected container back into view.
+                    .id(layout.identity)
+                    .task(id: layout.identity) {
+                        await Task.yield()
+                        if let id = containers.selectedContainerID, rows.contains(where: { $0.id == id }) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
                     }
-                    .help(container.id)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+
+    private func table(_ rows: [ContainerInfo], layout: WorkloadTableLayout<ContainerColumn>) -> some View {
+        Table(rows, selection: $containers.selectedContainerID) {
+            TableColumn("Name") { container in
+                HStack(spacing: 8) {
+                    StatusOrb(tone: container.health.workloadTone, size: 10)
+                    Text(container.name)
+                        .font(Aero.font(.callout, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .width(min: 100, ideal: 140)
+                .help(container.id)
+            }
+            .width(min: ContainerColumn.nameMinimum, ideal: layout.width(.name))
+            if layout.shows(.image) {
                 TableColumn("Image") { container in
                     Text(container.image)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(container.image)
                 }
-                .width(min: 80, ideal: 120)
-                TableColumn("State") { container in
-                    AeroTag(container.state.rawValue.capitalized, tone: container.health.workloadTone)
-                }
-                .width(min: 72, ideal: 84, max: 120)
+                .width(
+                    min: ContainerColumn.imageWidths.min, ideal: layout.width(.image),
+                    max: ContainerColumn.imageWidths.max
+                )
+            }
+            TableColumn("State") { container in
+                AeroTag(container.state.rawValue.capitalized, tone: container.health.workloadTone)
+            }
+            .width(layout.width(.state))
+            if layout.shows(.status) {
                 TableColumn("Status") { container in
                     Text(container.status)
                         .lineLimit(1)
                         .foregroundStyle(Aero.text.secondary)
                         .help(container.status)
                 }
-                .width(min: 80, ideal: 110)
+                .width(
+                    min: ContainerColumn.statusWidths.min, ideal: layout.width(.status),
+                    max: ContainerColumn.statusWidths.max
+                )
+            }
+            if layout.shows(.cpu) {
                 TableColumn("CPU") { container in
                     Text(container.cpuText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .width(min: 44, ideal: 52, max: 80)
+                .width(layout.width(.cpu))
+            }
+            if layout.shows(.memory) {
                 TableColumn("Memory") { container in
                     Text(container.memoryText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .help(container.memoryHelp ?? "")
                 }
-                .width(min: 60, ideal: 68, max: 110)
+                .width(layout.width(.memory))
+            }
+            if layout.shows(.ports) {
                 TableColumn("Ports") { container in
                     Text(container.portsText)
                         .lineLimit(1)
@@ -105,53 +174,56 @@ private struct DockerTable: View {
                         .foregroundStyle(Aero.text.secondary)
                         .help(container.ports ?? "")
                 }
-                .width(min: 60, ideal: 80)
-                TableColumn("") { container in
-                    HStack(spacing: 10) {
-                        RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
-                            containers.showLogs(container)
-                        }
-                        RowActionButton(title: "Inspect", systemImage: "info.circle") {
-                            containers.inspect(container)
-                        }
-                        RowActionButton(
-                            title: "Open logs in terminal", systemImage: "terminal",
-                            disabled: !containers.canOpenTerminal
-                        ) {
-                            containers.openLogsInTerminal(container)
-                        }
+                .width(
+                    min: ContainerColumn.portsWidths.min, ideal: layout.width(.ports),
+                    max: ContainerColumn.portsWidths.max
+                )
+            }
+            TableColumn("") { container in
+                HStack(spacing: 10) {
+                    RowActionButton(title: "Logs", systemImage: "doc.text.magnifyingglass") {
+                        containers.showLogs(container)
+                    }
+                    RowActionButton(title: "Inspect", systemImage: "info.circle") {
+                        containers.inspect(container)
+                    }
+                    RowActionButton(
+                        title: "Open logs in terminal", systemImage: "terminal",
+                        disabled: !containers.canOpenTerminal
+                    ) {
+                        containers.openLogsInTerminal(container)
                     }
                 }
-                .width(84)
             }
-            .contextMenu(forSelectionType: ContainerInfo.ID.self) { ids in
-                if let container = container(ids) {
-                    Button("Logs", systemImage: "doc.text.magnifyingglass") { containers.showLogs(container) }
-                    Button("Inspect", systemImage: "info.circle") { containers.inspect(container) }
-                    Button("Open Logs in Terminal", systemImage: "terminal") { containers.openLogsInTerminal(container) }
-                        .disabled(!containers.canOpenTerminal)
-                    Divider()
-                    Button("Copy Name", systemImage: "doc.on.doc") { copy(container.name) }
-                    Button("Copy ID", systemImage: "number") { copy(container.id) }
-                }
-            } primaryAction: { ids in
-                if let container = container(ids) { containers.showLogs(container) }
-            }
-            .font(Aero.font(.callout))
-            .foregroundStyle(Aero.text.primary)
-            .scrollContentBackground(.hidden)
-            .alternatingRowBackgrounds(.disabled)
-            .overlay {
-                if rows.isEmpty, containers.dockerLoaded {
-                    Text(containers.containers.isEmpty ? "No containers on this host." : "No containers match.")
-                        .font(Aero.font(.callout))
-                        .foregroundStyle(Aero.text.secondary)
-                } else if !containers.dockerLoaded {
-                    ProgressView().controlSize(.small)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: Aero.radius.card, style: .continuous))
+            .width(layout.width(.actions))
         }
+        .contextMenu(forSelectionType: ContainerInfo.ID.self) { ids in
+            if let container = container(ids) {
+                Button("Logs", systemImage: "doc.text.magnifyingglass") { containers.showLogs(container) }
+                Button("Inspect", systemImage: "info.circle") { containers.inspect(container) }
+                Button("Open Logs in Terminal", systemImage: "terminal") { containers.openLogsInTerminal(container) }
+                    .disabled(!containers.canOpenTerminal)
+                Divider()
+                Button("Copy Name", systemImage: "doc.on.doc") { copy(container.name) }
+                Button("Copy ID", systemImage: "number") { copy(container.id) }
+            }
+        } primaryAction: { ids in
+            if let container = container(ids) { containers.showLogs(container) }
+        }
+        .font(Aero.font(.callout))
+        .foregroundStyle(Aero.text.primary)
+        .scrollContentBackground(.hidden)
+        .alternatingRowBackgrounds(.disabled)
+        .overlay {
+            if rows.isEmpty, containers.dockerLoaded {
+                Text(containers.containers.isEmpty ? "No containers on this host." : "No containers match.")
+                    .font(Aero.font(.callout))
+                    .foregroundStyle(Aero.text.secondary)
+            } else if !containers.dockerLoaded {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Aero.radius.card, style: .continuous))
     }
 
     private func container(_ ids: Set<ContainerInfo.ID>) -> ContainerInfo? {
