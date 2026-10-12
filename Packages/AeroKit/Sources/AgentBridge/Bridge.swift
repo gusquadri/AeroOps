@@ -249,12 +249,18 @@ struct BridgePipeline: BridgeRequestHandler {
         let heartbeat = Task {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: interval) } catch { return }
+                guard !Task.isCancelled else { return }
                 let left = max(0, Int((deadline - ContinuousClock.now).timeInterval.rounded()))
                 progress("Waiting for approval in AeroOps (\(left) s left)")
             }
         }
-        defer { heartbeat.cancel() }
-        return await approvals.authorize(ask)
+        let outcome = await approvals.authorize(ask)
+        // Cancelling alone is not enough: a heartbeat whose sleep had already ended could still
+        // send a stale "Waiting for approval" line after the caller's next progress line
+        // ("Running on <host>"), which happened under load. Wait until it has stopped.
+        heartbeat.cancel()
+        await heartbeat.value
+        return outcome
     }
 
     private func refuse(_ record: Record, _ error: BridgeError) async -> BridgeReply {
