@@ -25,14 +25,14 @@ struct TerminalAppearanceTests {
         #expect(settings.contains { $0.key == "palette" && $0.value == "1=f2605a" })
     }
 
-    @Test("ghostty config carries the command and the exit-reporting settings")
+    @Test("ghostty config carries the exit-reporting settings and no command")
     func configSettings() {
         var appearance = TerminalAppearance.aero
         appearance.fontSize = 13.5
         appearance.fontFamily = "Menlo\nfont-size = 99"
-        let settings = GhosttyConfig.settings(appearance: appearance, command: "/usr/bin/env /bin/sh -c 'x'")
+        let settings = GhosttyConfig.settings(appearance: appearance)
         let dict = Dictionary(settings.map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
-        #expect(dict["command"] == "/usr/bin/env /bin/sh -c 'x'")
+        #expect(dict["command"] == nil)
         #expect(dict["wait-after-command"] == "false")
         #expect(dict["abnormal-command-exit-runtime"] == "0")
         #expect(dict["clipboard-read"] == "deny")

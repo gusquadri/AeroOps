@@ -36,9 +36,9 @@ public struct TerminalLaunchSpec: Sendable, Hashable {
 public enum TerminalLaunchError: Error, Sendable, Hashable, CustomStringConvertible {
     /// The executable is not an absolute path.
     case relativeExecutable(String)
-    /// A value contains a NUL, newline or other control character. libghostty reads the
-    /// command from a line-based config file and argv cannot carry NUL, so such values are
-    /// rejected instead of being mangled.
+    /// A value contains a NUL, newline or other control character. argv and the environment
+    /// cannot carry NUL, and the others have no business in a command line, so such values
+    /// are rejected instead of being mangled.
     case controlCharacter(field: String)
     /// An environment variable name is not a portable shell name (`[A-Za-z_][A-Za-z0-9_]*`).
     case invalidEnvironmentName(String)
@@ -56,7 +56,7 @@ public enum TerminalLaunchError: Error, Sendable, Hashable, CustomStringConverti
 }
 
 extension TerminalLaunchSpec {
-    /// Throws when the spec cannot be passed safely to libghostty.
+    /// Throws when the spec cannot be launched safely.
     public func validate() throws(TerminalLaunchError) {
         guard executable.hasPrefix("/") else { throw .relativeExecutable(executable) }
         if Self.hasControlCharacter(executable) { throw .controlCharacter(field: "executable") }

@@ -2,26 +2,34 @@ import AeroCore
 import AeroTheme
 import SSHKit
 import SwiftUI
+import TerminalKit
 
 /// The main window's sidebar: every host with its status orb, name and tags, an Add Host
-/// button, and a context menu per host.
+/// button, and a context menu per host. Under each host, its open terminal tabs (click one to
+/// show it in Terminals) and a New Terminal row.
 struct HostSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var deletionCandidate: RemoteHost?
+    /// Hosts whose terminals are listed. A host opens when it gets a new terminal.
+    @State private var expanded: Set<RemoteHost.ID> = []
 
     var body: some View {
-        @Bindable var model = model
-        List(selection: $model.selection) {
+        List(selection: selection) {
             Section("Hosts") {
                 ForEach(model.hosts) { host in
-                    HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
-                        .contextMenu {
-                            HostContextMenu(
-                                host: host,
-                                onEdit: { model.requestEdit(host.id) },
-                                onDelete: { deletionCandidate = host }
-                            )
-                        }
+                    DisclosureGroup(isExpanded: isExpanded(host.id)) {
+                        HostTerminalRows(host: host)
+                    } label: {
+                        HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
+                            .contextMenu {
+                                HostContextMenu(
+                                    host: host,
+                                    onEdit: { model.requestEdit(host.id) },
+                                    onDelete: { deletionCandidate = host }
+                                )
+                            }
+                    }
+                    .tag(SidebarItem.host(host.id))
                 }
             }
         }
@@ -38,8 +46,136 @@ struct HostSidebar: View {
                 .padding(12)
                 .help("Add a server to monitor (⌘N)")
         }
+        .onAppear { expanded.formUnion(hostsWithTerminals) }
+        .onChange(of: hostsWithTerminals) { old, new in
+            expanded.formUnion(new.subtracting(old))
+        }
         .hostDeletionConfirmation($deletionCandidate)
         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 340)
+    }
+
+    private var hostsWithTerminals: Set<RemoteHost.ID> {
+        let terminals = model.terminals
+        return Set(terminals.sessions.compactMap { terminals.tab(for: $0.id)?.hostID })
+    }
+
+    private func isExpanded(_ id: RemoteHost.ID) -> Binding<Bool> {
+        Binding(
+            get: { expanded.contains(id) },
+            set: { open in
+                if open { expanded.insert(id) } else { expanded.remove(id) }
+            }
+        )
+    }
+
+    /// While Terminals is shown, the row of the shown tab (if its host is the selected one and
+    /// open); otherwise the selected host. Picking a terminal shows it in Terminals; picking a
+    /// host there shows that host's first tab.
+    private var selection: Binding<SidebarItem?> {
+        Binding(
+            get: {
+                let terminals = model.terminals
+                if model.selectedTab == .terminals, let session = terminals.selectedSession,
+                   let hostID = terminals.tab(for: session.id)?.hostID,
+                   hostID == model.selection, expanded.contains(hostID) {
+                    return .terminal(session.id)
+                }
+                return model.selection.map(SidebarItem.host)
+            },
+            set: { item in
+                let terminals = model.terminals
+                switch item {
+                case let .host(id):
+                    model.selection = id
+                    guard model.selectedTab == .terminals,
+                          terminals.selectedSession.flatMap({ terminals.tab(for: $0.id)?.hostID }) != id,
+                          let first = terminals.sessions(on: id).first else { return }
+                    terminals.selectedID = first.id
+                case let .terminal(id):
+                    guard let tab = terminals.tab(for: id) else { return }
+                    model.selection = tab.hostID
+                    terminals.selectedID = id
+                    model.selectedTab = .terminals
+                case nil:
+                    model.selection = nil
+                }
+            }
+        )
+    }
+}
+
+/// A row of ``HostSidebar``.
+private enum SidebarItem: Hashable {
+    case host(RemoteHost.ID)
+    case terminal(TerminalSession.ID)
+}
+
+/// A host's terminal tabs and its New Terminal row.
+private struct HostTerminalRows: View {
+    @Environment(AppModel.self) private var model
+    let host: RemoteHost
+
+    var body: some View {
+        let terminals = model.terminals
+        ForEach(terminals.sessions(on: host.id)) { session in
+            SidebarTerminalRow(session: session, tab: terminals.tab(for: session.id))
+                .tag(SidebarItem.terminal(session.id))
+        }
+        Button {
+            model.selection = host.id
+            model.openSSH(host.id)
+        } label: {
+            Label("New Terminal", systemImage: "plus")
+                .font(Aero.font(.callout))
+                .foregroundStyle(Aero.text.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canOpenSSH(host.id))
+        .help(model.terminals.unavailableReason(host) ?? "Open an SSH terminal to \(host.name)")
+    }
+}
+
+/// One terminal tab under its host: status orb and title. A tab whose surface was freed to
+/// save memory is dimmed; its ssh session keeps running.
+private struct SidebarTerminalRow: View {
+    @Environment(AppModel.self) private var model
+    let session: TerminalSession
+    let tab: TerminalService.Tab?
+
+    private var status: TerminalService.Status { TerminalService.status(of: session.state) }
+
+    /// The program's own title (e.g. "user@web-01: ~") once it sets one, else the tab's.
+    private var title: String {
+        guard let tab, session.title == session.spec.title else { return session.title }
+        return tab.title
+    }
+
+    var body: some View {
+        let terminals = model.terminals
+        HStack(spacing: 7) {
+            StatusOrb(tone: status.tone.orbTone, size: 8)
+            Text(title)
+                .font(Aero.font(.callout))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(session.isSuspended ? Aero.text.secondary : Aero.text.primary)
+        }
+        .help(session.isSuspended ? "\(status.text) · in the background to save memory" : status.text)
+        // Terminals shows the confirmations and sheets these can lead to.
+        .contextMenu {
+            Button("Reconnect", systemImage: "arrow.clockwise") {
+                model.selectedTab = .terminals
+                terminals.reconnect(session.id)
+            }
+            .disabled(!terminals.canReconnect(session.id))
+            Divider()
+            Button("Close Tab", systemImage: "xmark") {
+                model.selectedTab = .terminals
+                terminals.requestClose(session.id)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(status.text)")
     }
 }
 

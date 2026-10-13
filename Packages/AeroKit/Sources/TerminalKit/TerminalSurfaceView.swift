@@ -11,8 +11,9 @@ internal import GhosttyTerminal
 /// ``TerminalSession/clipboardPrompt`` itself (`presentsClipboardPrompts: false`).
 ///
 /// The surface view belongs to the session, so showing the same session again (tab switch,
-/// SwiftUI re-creating this view) keeps its screen and scrollback. Show a session in at most
-/// one place at a time.
+/// SwiftUI re-creating this view) keeps its screen and scrollback. If the manager freed the
+/// surface while the session was hidden, it is rebuilt from the program's recent output. Show
+/// a session in at most one place at a time.
 public struct TerminalSurfaceView: View {
     private let session: TerminalSession
     private let focusOnAppear: Bool
@@ -88,20 +89,37 @@ private struct SurfaceHost: NSViewRepresentable {
 }
 
 /// Plain container that adopts the session's surface view and keeps it filling its bounds.
+///
+/// Tells the session when its surface goes on screen and leaves it, so the manager can free
+/// the surfaces of sessions that have not been shown for a while. A freed surface is rebuilt
+/// here once the container is in a window again.
 final class SurfaceContainerView: NSView {
     private weak var session: TerminalSession?
+    /// The session last reported as on screen.
+    private weak var shownSession: TerminalSession?
     private var focusPending = false
 
     override var isFlipped: Bool { true }
 
     func show(_ session: TerminalSession, focusOnAppear: Bool) {
-        let surfaceView = session.terminalView
         if self.session !== session {
+            releaseSurface()
             self.session = session
             focusPending = focusOnAppear
         }
-        guard !session.isClosed else {
+        adoptSurface()
+        focusIfPending()
+    }
+
+    private func adoptSurface() {
+        guard let session, !session.isClosed else {
             releaseSurface()
+            return
+        }
+        // Only a container in a window builds a surface: a hidden tab does not get its freed
+        // surface back.
+        guard let surfaceView = window != nil ? session.surfaceView() : session.terminalView else {
+            updateVisibility()
             return
         }
         if surfaceView.superview !== self {
@@ -109,7 +127,7 @@ final class SurfaceContainerView: NSView {
             surfaceView.frame = bounds
             addSubview(surfaceView)
         }
-        focusIfPending()
+        updateVisibility()
     }
 
     // The surface is sized explicitly rather than with an autoresizing mask: SwiftUI hands the
@@ -135,11 +153,31 @@ final class SurfaceContainerView: NSView {
         if let surfaceView = session?.terminalView, surfaceView.superview === self {
             surfaceView.removeFromSuperview()
         }
+        updateVisibility()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window != nil {
+            // Rebuilds a surface freed while this container was out of a window.
+            adoptSurface()
+        } else {
+            updateVisibility()
+        }
         focusIfPending()
+    }
+
+    /// Reports the session whose surface is in this container while it is in a window.
+    private func updateVisibility() {
+        var visible: TerminalSession?
+        if window != nil, let session, let surfaceView = session.terminalView, surfaceView.superview === self {
+            visible = session
+        }
+        guard visible !== shownSession else { return }
+        let previous = shownSession
+        shownSession = visible
+        previous?.visibilityChanged(false)
+        visible?.visibilityChanged(true)
     }
 
     private func focusIfPending() {
@@ -147,7 +185,7 @@ final class SurfaceContainerView: NSView {
         focusPending = false
         // After the current layout pass, so the surface has its size and is first-responder ready.
         Task { @MainActor [weak self, weak session] in
-            guard let self, let session, session.terminalView.superview === self else { return }
+            guard let self, let session, session.terminalView?.superview === self else { return }
             session.focus()
         }
     }

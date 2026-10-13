@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Ghostty key bindings")
 struct GhosttyKeybindingTests {
-    private static let settings = GhosttyConfig.settings(appearance: .aero, command: "/usr/bin/true")
+    private static let settings = GhosttyConfig.settings(appearance: .aero)
 
     @Test("defaults are cleared before the curated bindings")
     func clearedFirst() {

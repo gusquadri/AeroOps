@@ -10,6 +10,7 @@ import AppKit
 import Darwin
 import Foundation
 import GhosttyTerminal
+import Observation
 import SwiftUI
 @_spi(AeroSelfTest) import TerminalKit
 
@@ -43,11 +44,19 @@ struct Options {
     }
 }
 
+/// Tabs taken off screen, to exercise the manager's surface LRU.
+@MainActor
+@Observable
+final class GridState {
+    var hidden: Set<TerminalSession.ID> = []
+}
+
 struct GridView: View {
     let manager: TerminalSessionManager
+    let state: GridState
 
     var body: some View {
-        let sessions = manager.sessions
+        let sessions = manager.sessions.filter { !state.hidden.contains($0.id) }
         let rows = stride(from: 0, to: sessions.count, by: 2).map { Array(sessions[$0..<min($0 + 2, sessions.count)]) }
         VStack(spacing: 2) {
             ForEach(rows, id: \.first!.id) { row in
@@ -65,6 +74,7 @@ struct GridView: View {
 final class SelfTest {
     let options: Options
     let manager = TerminalSessionManager()
+    let grid = GridState()
     let window: NSWindow
     var failures: [String] = []
 
@@ -79,7 +89,7 @@ final class SelfTest {
         window.title = "TerminalKit self-test"
         // Fixed geometry: by default NSHostingView sizes the window to its content, and an
         // empty grid would shrink the window to nothing before the first tab opens.
-        let host = NSHostingView(rootView: GridView(manager: manager))
+        let host = NSHostingView(rootView: GridView(manager: manager, state: grid))
         host.sizingOptions = []
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
@@ -307,6 +317,38 @@ final class SelfTest {
         check(topDone, "top quits back to the shell")
         if !topDone { dump(sessions[1], "tab 2 (after top)") }
 
+        // Surface LRU: a hidden tab beyond the limit loses its surface, its program keeps
+        // running, and showing it again rebuilds the screen from the recorded output.
+        let lru = sessions[1]
+        let lruRoot = lru.processRootPID
+        lru.type("sleep 2; echo LRU''_LATE\n")
+        manager.liveSurfaceLimit = 1
+        grid.hidden.insert(lru.id)
+        check(await wait(5) { lru.isSuspended }, "a hidden tab beyond the limit is suspended")
+        check(lruRoot.map { kill($0, 0) == 0 } ?? false, "a suspended tab's ssh keeps running")
+        check(lru.state == .running, "a suspended tab stays running (\(lru.state))")
+        try? await Task.sleep(for: .seconds(3))
+        print("MEM 1 tab suspended:", format(memory()))
+        grid.hidden.remove(lru.id)
+        check(await wait(5) { !lru.isSuspended && lines(lru).contains("LRU_LATE") }, "output from while it was hidden is replayed")
+        check(lines(lru).contains("TOP_DONE"), "output from before it was hidden is replayed")
+        check(await run(lru, "true", marker: "LRU_INPUT") != nil, "a rebuilt surface takes input")
+        if !lines(lru).contains("LRU_INPUT") { dump(lru, "tab 2 (rebuilt)") }
+
+        // A full-screen program comes back on its alternate screen.
+        lru.type("vi /tmp/aeroops-selftest-lru-\(getpid()).txt\n")
+        check(await wait { lines(lru).filter { $0 == "~" }.count >= 3 }, "vi draws its screen before the suspend")
+        grid.hidden.insert(lru.id)
+        check(await wait(5) { lru.isSuspended }, "the tab running vi is suspended")
+        grid.hidden.remove(lru.id)
+        check(await wait { !lru.isSuspended && lines(lru).filter { $0 == "~" }.count >= 3 }, "vi's screen is back after the rebuild")
+        lru.pressEscape()
+        try? await Task.sleep(for: .milliseconds(300))
+        lru.type(":q!\n")
+        check(await run(lru, "true", marker: "LRU_VI_DONE") != nil, "vi quits back to the shell after the rebuild")
+        if !lines(lru).contains("LRU_VI_DONE") { dump(lru, "tab 2 (vi rebuilt)") }
+        manager.liveSurfaceLimit = 3
+
         // Title from OSC 2.
         sessions[3].type(#"printf '\033]2;AERO''_TITLE\007'"# + "\n")
         check(await wait(5) { sessions[3].title == "AERO_TITLE" }, "OSC 2 updates the title (\(sessions[3].title))")
@@ -330,7 +372,7 @@ final class SelfTest {
         manager.close(sessions[0].id)
         _ = await wait(3) { leftovers().count <= beforeClose - 3 }
         let rootGone = closedRoot.map { kill($0, 0) != 0 } ?? false
-        check(rootGone, "close() ends the tab's wrapper (pid \(closedRoot.map(String.init) ?? "?"))")
+        check(rootGone, "close() ends the tab's process (pid \(closedRoot.map(String.init) ?? "?"))")
         check(sessions[0].state == .exited(code: nil), "closed tab state exited(code: nil) (\(sessions[0].state))")
 
         // Connection failure: closed port.
@@ -390,7 +432,7 @@ Task { @MainActor in
 }
 // Watchdog: never hang a CI shell.
 Task { @MainActor in
-    try? await Task.sleep(for: .seconds(180))
+    try? await Task.sleep(for: .seconds(240))
     print("RESULT FAIL (timeout)")
     exit(3)
 }

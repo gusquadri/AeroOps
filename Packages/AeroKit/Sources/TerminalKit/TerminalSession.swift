@@ -14,10 +14,14 @@ public struct TerminalGridSize: Sendable, Hashable {
     }
 }
 
-/// One terminal tab: a libghostty surface running a ``TerminalLaunchSpec``.
+/// One terminal tab: a ``TerminalLaunchSpec`` running on a pseudo-terminal, shown in a
+/// libghostty surface.
 ///
 /// Created by ``TerminalSessionManager/open(_:appearance:)``. The session owns its AppKit
-/// surface view, so scrollback survives SwiftUI re-creating ``TerminalSurfaceView``.
+/// surface view, so scrollback survives SwiftUI re-creating ``TerminalSurfaceView``. The
+/// surface is the memory-heavy part and can be freed while the tab is hidden
+/// (``suspend()``); the program keeps running, and the next time the tab is shown a new surface
+/// is rebuilt from the program's recent output.
 @MainActor
 @Observable
 public final class TerminalSession: Identifiable {
@@ -56,17 +60,26 @@ public final class TerminalSession: Identifiable {
     public private(set) var isFocused = false
     /// `true` once ``close()`` ran; the surface is gone and the session is inert.
     public private(set) var isClosed = false
+    /// The surface was freed to save memory while the tab is hidden; the program still runs.
+    /// Showing the session again rebuilds it.
+    public private(set) var isSuspended = false
     /// A clipboard request waiting for the user (an unsafe multi-line paste). Shown by
     /// ``TerminalSurfaceView``; answer it with ``TerminalClipboardPrompt/allow()`` or
     /// ``TerminalClipboardPrompt/deny()``.
     public internal(set) var clipboardPrompt: TerminalClipboardPrompt?
 
-    @ObservationIgnored let commandLine: TerminalCommandLine
-    @ObservationIgnored let terminalView: AppTerminalView
-    @ObservationIgnored private let bridge: SurfaceDelegateBridge
+    /// The surface view while the session has one (created when first shown, freed by
+    /// ``suspend()`` and ``close()``).
+    @ObservationIgnored private(set) var terminalView: AppTerminalView?
+    @ObservationIgnored private var bridge: SurfaceDelegateBridge?
     @ObservationIgnored private var controller: TerminalController?
     @ObservationIgnored private var surface: TerminalSurface?
-    /// PID of the wrapper `sh`, the root of the program's process tree.
+    /// The surface's I/O and its token with ``process``.
+    @ObservationIgnored private var surfaceIO: InMemoryTerminalSession?
+    @ObservationIgnored private var surfaceToken = 0
+    /// `nil` when the session failed before it could start.
+    @ObservationIgnored private var process: TerminalProcess?
+    /// PID of the program, the root of its process tree.
     @ObservationIgnored private var rootPID: pid_t?
     @ObservationIgnored private var reportedExitCode: Int32?
     /// libghostty asked to close the surface because the program ended.
@@ -75,6 +88,9 @@ public final class TerminalSession: Identifiable {
     /// while the program runs, or a key press after it ended ("Press any key to close the
     /// terminal", which libghostty prints on every exit). The manager handles it.
     @ObservationIgnored var onCloseRequest: ((TerminalSession) -> Void)?
+    /// Called when the surface goes on screen (`true`) or leaves it (`false`). The manager
+    /// uses it to free the surfaces of the least recently shown sessions.
+    @ObservationIgnored var onVisibilityChange: ((TerminalSession, Bool) -> Void)?
     @ObservationIgnored package private(set) var lastReapReport: ReapReport?
 
     init(spec: TerminalLaunchSpec, appearance: TerminalAppearance) {
@@ -83,12 +99,6 @@ public final class TerminalSession: Identifiable {
         self.appearance = appearance
         title = spec.title
         fontSize = appearance.clampedFontSize
-        commandLine = TerminalCommandLine(spec: spec)
-        terminalView = AppTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
-        bridge = SurfaceDelegateBridge()
-        bridge.session = self
-        // Delegate before controller and configuration, so the surface's first callbacks land.
-        terminalView.delegate = bridge
 
         do throws(TerminalLaunchError) {
             try spec.validate()
@@ -97,24 +107,103 @@ public final class TerminalSession: Identifiable {
             return
         }
 
-        let controller = TerminalController(
-            configuration: GhosttyConfig.configuration(appearance: appearance, command: commandLine.command),
-            theme: GhosttyConfig.theme(appearance: appearance)
-        )
-        // A rejected config falls back to libghostty's defaults, which would start the user's
-        // login shell instead of the spec. Never attach such a controller.
+        // Checked once here; the first surface uses this controller.
+        let controller = Self.makeController(appearance: appearance)
         if let issue = controller.lastConfigurationIssue {
             state = .failed(message: "terminal configuration rejected: \(issue)")
             return
         }
         self.controller = controller
-        terminalView.configuration = TerminalSurfaceOptions(
-            backend: .exec,
-            workingDirectory: spec.workingDirectory,
-            envVars: spec.environment
+        // Events arrive on the process's queues; main.async keeps their order.
+        process = TerminalProcess(spec: spec) { [weak self] event in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.processEvent(event)
+                }
+            }
+        }
+    }
+
+    private static func makeController(appearance: TerminalAppearance) -> TerminalController {
+        TerminalController(
+            configuration: GhosttyConfig.configuration(appearance: appearance),
+            theme: GhosttyConfig.theme(appearance: appearance)
         )
-        // The surface (and the process) starts once the view is in a window with a size.
-        terminalView.controller = controller
+    }
+
+    // MARK: - Surface
+
+    /// The surface view, created on first use and again after ``suspend()``; `nil` once
+    /// closed or when the session failed to start. The program starts once the first
+    /// surface's size has settled.
+    func surfaceView() -> AppTerminalView? {
+        if let terminalView { return terminalView }
+        guard !isClosed, let process else { return nil }
+
+        let controller = controller ?? Self.makeController(appearance: appearance)
+        let token = process.makeToken()
+        let io = InMemoryTerminalSession(
+            write: { [weak process] data in process?.write(data, token: token) },
+            resize: { [weak process] viewport in process?.resize(viewport, token: token) }
+        )
+        let bridge = SurfaceDelegateBridge()
+        bridge.session = self
+        let view = AppTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        // Delegate before controller and configuration, so the surface's first callbacks land.
+        view.delegate = bridge
+        view.configuration = TerminalSurfaceOptions(
+            backend: .inMemory(io),
+            // A zoom carries over to the rebuilt surface.
+            fontSize: fontSize == appearance.clampedFontSize ? nil : fontSize
+        )
+        // The surface starts once the view is in a window with a size.
+        view.controller = controller
+
+        self.controller = controller
+        self.bridge = bridge
+        surfaceIO = io
+        surfaceToken = token
+        terminalView = view
+        isSuspended = false
+        return view
+    }
+
+    /// Whether the session holds a surface view now.
+    var hasSurface: Bool { terminalView != nil }
+
+    /// Whether the surface view is in a window.
+    var isOnScreen: Bool { terminalView?.window != nil }
+
+    /// Frees the surface, its libghostty app and its view (the memory-heavy part) while the
+    /// program keeps running; its output keeps being recorded. Showing the session again
+    /// rebuilds the surface. Does nothing while the surface is on screen.
+    public func suspend() {
+        guard !isClosed, hasSurface, !isOnScreen else { return }
+        tearDownSurface()
+        isSuspended = true
+    }
+
+    private func tearDownSurface() {
+        clipboardPrompt?.deny()
+        clipboardPrompt = nil
+        process?.detach(token: surfaceToken)
+        if let terminalView {
+            terminalView.delegate = nil
+            // Synchronous: tears down and frees the surface.
+            terminalView.controller = nil
+            terminalView.removeFromSuperview()
+        }
+        bridge?.session = nil
+        bridge = nil
+        terminalView = nil
+        controller = nil
+        surface = nil
+        surfaceIO = nil
+        isFocused = false
+    }
+
+    func visibilityChanged(_ visible: Bool) {
+        onVisibilityChange?(self, visible)
     }
 
     // MARK: - Commands
@@ -136,7 +225,7 @@ public final class TerminalSession: Identifiable {
     @discardableResult
     public func copySelection() -> Bool {
         guard !isClosed else { return false }
-        return terminalView.copySelectedTextToPasteboard()
+        return terminalView?.copySelectedTextToPasteboard() ?? false
     }
 
     /// Pastes the general pasteboard (with libghostty's unsafe-paste protection).
@@ -151,17 +240,16 @@ public final class TerminalSession: Identifiable {
     /// Gives the surface keyboard focus; `false` while it is not in a window.
     @discardableResult
     public func focus() -> Bool {
-        guard !isClosed else { return false }
+        guard !isClosed, let terminalView else { return false }
         return terminalView.acquireProgrammaticFocus()
     }
 
     /// Ends the session: frees the surface and makes sure the program's process tree is gone.
     ///
-    /// Freeing the surface makes libghostty SIGHUP the process group and wait for its direct
-    /// child (the `login` wrapper, which waits for the program). Anything of ours that is
-    /// still alive afterwards (e.g. an ssh `ProxyCommand` that ignores SIGHUP) gets SIGTERM and
-    /// then SIGKILL on a background thread. An ssh `ControlPersist` master has detached into
-    /// its own session by design and is left alone.
+    /// The program's process group gets SIGHUP and its terminal is closed. Anything of ours
+    /// that is still alive afterwards (e.g. an ssh `ProxyCommand` that ignores SIGHUP) gets
+    /// SIGTERM and then SIGKILL on a background thread. An ssh `ControlPersist` master has
+    /// detached into its own session by design and is left alone.
     public func close() {
         let targets = shutDown()
         guard !targets.isEmpty else { return }
@@ -188,15 +276,8 @@ public final class TerminalSession: Identifiable {
         isClosed = true
         let targets = rootPID.map { ProcessTable.tree(rootedAt: $0, in: ProcessTable.snapshot()) } ?? []
 
-        clipboardPrompt?.deny()
-        clipboardPrompt = nil
-        terminalView.delegate = nil
-        // Synchronous: tears down and frees the surface (SIGHUP + wait, see above).
-        terminalView.controller = nil
-        terminalView.removeFromSuperview()
-        controller = nil
-        surface = nil
-        isFocused = false
+        tearDownSurface()
+        process?.terminate()
         if !state.isFinished {
             state = .exited(code: reportedExitCode)
         }
@@ -205,36 +286,43 @@ public final class TerminalSession: Identifiable {
 
     private func performBindingAction(_ action: String) {
         guard !isClosed else { return }
-        _ = terminalView.performBindingAction(action)
+        _ = terminalView?.performBindingAction(action)
     }
 
     // MARK: - Surface callbacks (via SurfaceDelegateBridge)
 
     fileprivate func surfaceAttached(_ surface: TerminalSurface) {
         self.surface = surface
+        // A new surface reports the end of an exited program again.
+        programEndedCloseSeen = false
+        if let surfaceIO {
+            process?.attach(surfaceIO, token: surfaceToken)
+        }
     }
 
     fileprivate func surfaceDetached() {
         surface = nil
+        process?.detach(token: surfaceToken)
     }
 
     fileprivate func titleChanged(_ newTitle: String) {
-        if commandLine.isReport(newTitle) {
-            reportReceived(commandLine.decode(title: newTitle))
-            return
-        }
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != title else { return }
         title = trimmed
     }
 
-    private func reportReceived(_ report: TerminalCommandLine.Report?) {
-        switch report {
+    private func processEvent(_ event: TerminalProcess.Event) {
+        guard !isClosed else { return }
+        switch event {
         case let .started(pid):
             guard rootPID == nil else { return }
             rootPID = pid
             if state == .starting {
                 state = .running
+            }
+        case let .failed(message):
+            if !state.isFinished {
+                state = .failed(message: message)
             }
         case let .exited(code):
             guard reportedExitCode == nil else { return }
@@ -242,8 +330,6 @@ public final class TerminalSession: Identifiable {
             if !state.isFinished {
                 state = .exited(code: code)
             }
-        case nil:
-            break
         }
     }
 
@@ -264,8 +350,8 @@ public final class TerminalSession: Identifiable {
             return
         }
         // The program ended. Keep the surface so its last output stays readable. The exit
-        // report is output and this close is a process event, so they can arrive in either
-        // order: give a late report a moment before settling without a code.
+        // event reaches the main thread on its own path, so it can come after this close:
+        // give it a moment before settling without a code.
         programEndedCloseSeen = true
         guard !state.isFinished else { return }
         Task { [weak self] in
@@ -323,13 +409,13 @@ public final class TerminalSession: Identifiable {
 /// `@_spi(AeroSelfTest) import TerminalKit` (the package self-test and the app's DEBUG
 /// self-tests) sees them.
 extension TerminalSession {
-    /// PID of the wrapper shell once the program started.
+    /// PID of the program once it started.
     @_spi(AeroSelfTest) public var processRootPID: pid_t? { rootPID }
 
     /// Types `text` as key presses (US layout); `\n` presses Return, `\u{7f}` Backspace.
     @discardableResult
     @_spi(AeroSelfTest) public func type(_ text: String) -> Bool {
-        guard !isClosed else { return false }
+        guard !isClosed, let terminalView else { return false }
         for character in text {
             let sent: Bool
             if character == "\n" {
@@ -349,7 +435,7 @@ extension TerminalSession {
     /// Presses Escape.
     @discardableResult
     @_spi(AeroSelfTest) public func pressEscape() -> Bool {
-        guard !isClosed else { return false }
+        guard !isClosed, let terminalView else { return false }
         return terminalView.sendKey(.escape)
     }
 

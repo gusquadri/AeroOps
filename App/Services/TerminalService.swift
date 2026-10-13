@@ -91,6 +91,11 @@ final class TerminalService {
         tabs[id]
     }
 
+    /// The open sessions to `hostID`, in tab order.
+    func sessions(on hostID: RemoteHost.ID) -> [TerminalSession] {
+        manager.sessions.filter { tabs[$0.id]?.hostID == hostID }
+    }
+
     func session(id: TerminalSession.ID) -> TerminalSession? {
         manager.session(id: id)
     }

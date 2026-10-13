@@ -6,7 +6,8 @@ import TerminalKit
 /// Terminals tab: one libghostty ssh session per tab (Phase 4).
 ///
 /// The tab strip sits above the selected session's surface. Only the selected session is on
-/// screen; the others keep running and keep their scrollback. First contact with a host shows
+/// screen; the others keep running and keep their scrollback. Tabs not shown for a while give
+/// up their surface to save memory and get it back when shown. First contact with a host shows
 /// the host-key trust sheet here, closing a running tab asks first, and unsafe pastes ask in a
 /// sheet.
 struct TerminalsView: View {

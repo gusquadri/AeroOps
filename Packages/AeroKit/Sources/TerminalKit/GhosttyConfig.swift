@@ -1,15 +1,15 @@
 import Foundation
 internal import GhosttyTerminal
 
-/// Builds the libghostty configuration for one session.
+/// Builds the libghostty configuration for one session's surface.
 ///
-/// The command lives in the app-level config, not in `TerminalSurfaceOptions.command`:
-/// upstream forces `wait-after-command = true` for a per-surface command, which would keep the
-/// surface waiting for a key press instead of reporting the exit. Hence one
-/// `TerminalController` (one `ghostty_app_t`) per session.
+/// Surfaces use the host-managed backend: the program runs on TerminalKit's own
+/// pseudo-terminal (``TerminalProcess``), so the config carries no command. One
+/// `TerminalController` (one `ghostty_app_t`) per surface, freed with it when the session is
+/// suspended.
 enum GhosttyConfig {
     /// `key = value` settings, in order, excluding colours (those go into the theme).
-    static func settings(appearance: TerminalAppearance, command: String) -> [(key: String, value: String)] {
+    static func settings(appearance: TerminalAppearance) -> [(key: String, value: String)] {
         var settings: [(String, String)] = []
         if let family = appearance.sanitizedFontFamily {
             settings.append(("font-family", family))
@@ -20,17 +20,15 @@ enum GhosttyConfig {
             ("cursor-style-blink", "true"),
             ("window-padding-x", "4"),
             ("window-padding-y", "4"),
-            ("command", command),
             // Report the exit (close callback) as soon as the program ends ...
             ("wait-after-command", "false"),
             // ... even when it fails fast (ssh to a closed port exits 255 within milliseconds).
             ("abnormal-command-exit-runtime", "0"),
-            // Remote hosts rarely have xterm-ghostty terminfo.
+            // Remote hosts rarely have xterm-ghostty terminfo. TerminalProcess sets the same
+            // TERM; this keeps the terminal's own answers consistent with it.
             ("term", "xterm-256color"),
-            // The wrapper is sh; nothing to inject, and no GHOSTTY_* env leaking to ssh.
             ("shell-integration", "none"),
-            // Remote OSC 9/777 notifications are not surfaced (yet); the session's own
-            // reports use titles (see TerminalCommandLine).
+            // Remote OSC 9/777 notifications are not surfaced (yet).
             ("desktop-notifications", "false"),
             // Remote programs may set the clipboard (vim/tmux yank) but never read it.
             ("clipboard-read", "deny"),
@@ -47,7 +45,7 @@ enum GhosttyConfig {
     ///
     /// The defaults are a standalone terminal app's (Cmd+T new tab, Cmd+W close, Cmd+1...9 go
     /// to tab, Ctrl+Tab next tab, Cmd+Q quit, Cmd+N new window, ...). A focused surface takes
-    /// every key that is a binding before the main menu sees it, and the wrapper ignores the
+    /// every key that is a binding before the main menu sees it, and the session ignores the
     /// app-level actions, so those keys would either do nothing (Cmd+Q) or bypass the host
     /// app (Cmd+W closing a running tab without asking). Without them the keys reach the
     /// host app's menus.
@@ -75,9 +73,9 @@ enum GhosttyConfig {
         [("keybind", "clear")] + keybindings.map { ("keybind", $0) }
     }
 
-    static func configuration(appearance: TerminalAppearance, command: String) -> TerminalConfiguration {
+    static func configuration(appearance: TerminalAppearance) -> TerminalConfiguration {
         TerminalConfiguration { builder in
-            for (key, value) in settings(appearance: appearance, command: command) {
+            for (key, value) in settings(appearance: appearance) {
                 builder.withCustom(key, value)
             }
         }

@@ -98,8 +98,8 @@ package struct ReapReport: Sendable, Hashable {
 
 /// Makes sure a set of processes is gone: waits `grace`, then SIGTERM, then SIGKILL.
 ///
-/// Only processes owned by the current user are signalled (the root-owned `login` wrapper
-/// exits by itself once its child is gone), and only if PID and start time still match.
+/// Only processes owned by the current user are signalled, and only if PID and start time
+/// still match.
 enum ProcessReaper {
     static func reap(_ targets: [ProcessEntry], grace: Duration = .milliseconds(300)) -> ReapReport {
         let uid = getuid()

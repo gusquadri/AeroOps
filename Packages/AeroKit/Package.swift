@@ -48,8 +48,12 @@ let package = Package(
         // arguments), so it does not depend on SSHKit; the app builds the ssh command line.
         .target(
             name: "TerminalKit",
-            dependencies: ["AeroCore", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+            dependencies: ["AeroCore", "CTerminalPTY", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
         ),
+
+        // Pseudo-terminal spawn for TerminalKit (fork + exec needs C: Swift cannot call
+        // `fork` safely or the variadic `ioctl`).
+        .target(name: "CTerminalPTY"),
 
         // Interactive self-test for TerminalKit against the dev SSH container (needs a window
         // server). Not a product, so it never ships in the app. Run via
@@ -92,7 +96,10 @@ let package = Package(
         .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AskpassProtocol", "AeroTestSupport"]),
         .testTarget(name: "AskpassProtocolTests", dependencies: ["AskpassProtocol"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
-        .testTarget(name: "TerminalKitTests", dependencies: ["TerminalKit", "AeroCore"]),
+        .testTarget(
+            name: "TerminalKitTests",
+            dependencies: ["TerminalKit", "AeroCore", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+        ),
         .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),
         .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit", "AeroTestSupport"]),
         .testTarget(name: "AeroThemeTests", dependencies: ["AeroTheme"]),

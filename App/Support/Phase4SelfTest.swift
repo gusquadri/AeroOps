@@ -75,7 +75,7 @@ final class Phase4SelfTest {
         var processesWithTabsOpen: [String] = []
         var processesAfterClosingTabs: [String] = []
         var processesAfterQuitPath: [String] = []
-        /// What the agent's "started by AeroOps" walk sees from each shell tab's wrapper process.
+        /// What the agent's "started by AeroOps" walk sees from each shell tab's ssh process.
         var tabLineages: [String] = []
         /// Every agent connection: the peer, how it was classified and its parent chain.
         var agentPeers: [String] = []
@@ -198,7 +198,7 @@ final class Phase4SelfTest {
         var shells: [TerminalSession] = []
         var lineages: [(ok: Bool, detail: String)] = []
         // A tab's ssh signs through the agent whenever no ControlMaster for its host is up yet,
-        // so the agent must see it as started by AeroOps (through the root-owned login wrapper).
+        // so the agent must see it as started by AeroOps (ssh is a direct child of the app).
         func lineageStep() {
             report.tabLineages = lineages.map(\.detail)
             step("agent sees tabs as started by AeroOps", !lineages.isEmpty && lineages.allSatisfy(\.ok), lineages.map(\.detail).joined(separator: " | "))
@@ -638,7 +638,7 @@ final class Phase4SelfTest {
         await capture("terminals-closed")
         step(
             "close every tab", empty && others.isEmpty && masters.count <= 3 && rootsGone && asked > 0,
-            "\(report.processesWithTabsOpen.count) processes with tabs open; after closing: \(masters.count) ControlPersist master(s) (expected ≤ 3, one per host), \(others.count) other(s); tab wrappers gone \(rootsGone); \(asked) running tab(s) asked first"
+            "\(report.processesWithTabsOpen.count) processes with tabs open; after closing: \(masters.count) ControlPersist master(s) (expected ≤ 3, one per host), \(others.count) other(s); tab processes gone \(rootsGone); \(asked) running tab(s) asked first"
         )
     }
 
@@ -768,8 +768,8 @@ final class Phase4SelfTest {
         session.type(" \u{7f}")
     }
 
-    /// The agent's parent-chain walk (``ProcessAncestry``) from a tab's wrapper shell, whose child
-    /// is the tab's ssh: `pid name ← pid name ← …`, and whether it reaches AeroOps.
+    /// The agent's parent-chain walk (``ProcessAncestry``) from a tab's ssh process:
+    /// `pid name ← pid name ← …`, and whether it reaches AeroOps.
     private func lineage(_ session: TerminalSession) -> (ok: Bool, detail: String) {
         let title = terminals.tab(for: session.id)?.title ?? "?"
         guard let root = session.processRootPID else { return (false, "\(title): no process") }
