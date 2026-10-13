@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Merged into the Info.plist Xcode generates (GENERATE_INFOPLIST_FILE), so it only holds keys
-  that have no INFOPLIST_KEY_ build setting.
+  that have no INFOPLIST_KEY_ build setting. Sparkle checks for updates
+  automatically, every hour.
   AEROOPS_FEED_URL and AEROOPS_SPARKLE_PUBLIC_KEY are empty unless a release build sets them
   (Scripts/release.sh); while either is empty the app never starts the updater.
 -->
@@ -13,7 +14,9 @@
 	<key>SUPublicEDKey</key>
 	<string>$(AEROOPS_SPARKLE_PUBLIC_KEY)</string>
 	<key>SUEnableAutomaticChecks</key>
-	<false/>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>3600</integer>
 	<key>SUAutomaticallyUpdate</key>
 	<false/>
 	<key>SUVerifyUpdateBeforeExtraction</key>

@@ -1,7 +1,8 @@
 import AeroTheme
 import SwiftUI
 
-/// Settings › Updates: Sparkle's automatic-check opt-in, automatic downloads and a manual check.
+/// Settings › Updates: Sparkle's automatic checks (on by default), automatic downloads and a
+/// manual check.
 ///
 /// Builds without an update feed (every development build) show why updates are off and offer
 /// no controls; see ``UpdateService``.
@@ -28,7 +29,7 @@ struct UpdatesSettingsPane: View {
             Text("Updates")
                 .font(Aero.font(.title2, weight: .semibold))
                 .foregroundStyle(Aero.text.primary)
-            Text("AeroOps checks for new versions only when you ask, or automatically if you turn that on. Updates are signed and verified before they are installed.")
+            Text("AeroOps checks GitHub for new versions every hour and asks before installing one. Updates are signed and verified before they are installed.")
                 .font(Aero.font(.callout))
                 .foregroundStyle(Aero.text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -43,7 +44,7 @@ struct UpdatesSettingsPane: View {
                     Text("Check for updates automatically")
                         .font(Aero.font(.callout, weight: .medium))
                         .foregroundStyle(Aero.text.primary)
-                    Text("Once a day AeroOps downloads the update feed. Nothing is sent but the request itself.")
+                    Text("Every hour AeroOps downloads the update feed. Nothing is sent but the request itself.")
                         .font(Aero.font(.caption))
                         .foregroundStyle(Aero.text.secondary)
                         .fixedSize(horizontal: false, vertical: true)

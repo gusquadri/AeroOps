@@ -16,6 +16,7 @@
 - Tests: `swift test --package-path Packages/AeroKit`
 - Dev SSH server: `docker compose -f dev/compose.yml up -d` (dev@localhost:2222)
 - Authorize a public key on the dev SSH server: `dev/add-key.sh <path-to.pub>`
+- Release: push a `vX.Y.Z` tag; `.github/workflows/release.yml` builds, notarizes and publishes it
 
 ## Workflow
 - Before calling a task done: build, run tests, fix failures.

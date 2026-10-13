@@ -183,6 +183,8 @@ Packages/AeroKit/       Swift package with one target per module:
   Tests/                  one test target per module, plus BridgeHarness and test helpers
 Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)
 Scripts/release.sh      signed, notarized release build
+Scripts/verify-appcast.swift  checks a release's Sparkle signature against the app's public key
+.github/workflows/      release.yml: tag vX.Y.Z → tested, signed, notarized GitHub Release + appcast
 dev/                    dev servers, VM, fixtures and self-test helpers
 docs/                   plan, decisions, release guide, screenshots
 spikes/                 Phase 0 throwaway spikes
@@ -196,8 +198,8 @@ Phases 0 to 8 are done: spikes, the host inventory, keys and transport, the dash
 Still open:
 
 - **Release signing.**
-  - Done: the hardened runtime, Sparkle wiring and `Scripts/release.sh`.
-  - Left: the Developer ID certificate, notarization credentials and the Sparkle signing key.A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
+  - Done: the hardened runtime, Sparkle wiring, `Scripts/release.sh` and the GitHub Actions release. Pushing a `vX.Y.Z` tag publishes a GitHub Release, and installed copies check its appcast every hour.
+  - Left: the Developer ID certificate, the notarization key and the Sparkle signing key, stored as GitHub secrets, and making the repository public so Sparkle can download the feed.A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
 - **Performance pass (in progress).** The target is that 20 polled hosts keep the app under 3% CPU.
 - **T3 Code check.** The copy-config buttons are done, but nobody has yet confirmed by hand that the tools work from T3 Code.
 

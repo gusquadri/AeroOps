@@ -16,6 +16,8 @@ settings:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode (XcodeGen's preset default is 5.0)
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "26.0"
+    # What development builds show. Releases take the version from the vX.Y.Z tag and the build
+    # number from the commit count (Scripts/release.sh).
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_HARDENED_RUNTIME: YES

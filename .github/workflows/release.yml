@@ -1,0 +1,357 @@
+# Builds, signs, notarizes and publishes an AeroOps release, and the Sparkle feed that updates
+# every installed copy. Push a version tag, or run it from the Actions tab:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# The GitHub Release gets the DMG (new installs), the Sparkle zip and appcast.xml. Installed apps
+# read https://github.com/<repo>/releases/latest/download/appcast.xml, which always follows the
+# newest non-prerelease release.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release from the selected branch, for example 0.2.0 (creates the tag v0.2.0)"
+        required: true
+        type: string
+
+# One release at a time, and a running release is never canceled halfway through publishing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The Xcode the app is developed with. The xcode-27 runner image has it.
+  DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+
+jobs:
+  # Picks the version, tag and build number, and writes the release notes every later job uses.
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      build: ${{ steps.meta.outputs.build }}
+      ref: ${{ steps.meta.outputs.ref }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      feed_url: ${{ steps.meta.outputs.feed_url }}
+      download_url_prefix: ${{ steps.meta.outputs.download_url_prefix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: meta
+        name: Resolve release version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          FEED_URL_OVERRIDE: ${{ vars.AEROOPS_FEED_URL }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="${DISPATCH_VERSION#v}"
+            if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+              echo "::error::Tag v$version already exists. Push that tag again or pick a new version."
+              exit 1
+            fi
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Invalid release version: $version (expected 1.2.3 or 1.2.3-beta.1)"
+            exit 1
+          fi
+          tag="v$version"
+          ref="$GITHUB_SHA"
+          # Sparkle compares CFBundleVersion. The commit count grows with every commit on the
+          # release branch, so each release has a larger build number than the one before.
+          build="$(git rev-list --count "$ref")"
+          if [[ "$version" == *-* ]]; then prerelease=true; else prerelease=false; fi
+          feed_url="${FEED_URL_OVERRIDE:-https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml}"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "build=$build"
+            echo "ref=$ref"
+            echo "prerelease=$prerelease"
+            echo "feed_url=$feed_url"
+            echo "download_url_prefix=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/"
+          } >> "$GITHUB_OUTPUT"
+          echo "AeroOps $version (build $build) from $ref, prerelease: $prerelease" >> "$GITHUB_STEP_SUMMARY"
+
+      # The same Markdown is the GitHub Release body and is embedded in the appcast, so Sparkle's
+      # update window shows it.
+      - name: Write release notes
+        shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          REF: ${{ steps.meta.outputs.ref }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # A stable release lists everything since the previous stable one.
+          exclude=()
+          [[ "$PRERELEASE" == true ]] || exclude=(--exclude 'v*-*')
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${exclude[@]}" "$REF^" 2> /dev/null || true)"
+          {
+            echo "## What's changed"
+            echo
+            if [[ -n "$previous" ]]; then
+              git log --no-merges --format='- %s' "$previous..$REF"
+              echo
+              echo "**Full changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$previous...$TAG"
+            else
+              echo "First release of AeroOps."
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  test:
+    name: Tests
+    needs: [preflight]
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Test AeroKit
+        run: swift test --package-path Packages/AeroKit
+
+  build:
+    name: Build, sign and notarize
+    needs: [preflight]
+    runs-on: xcode-27
+    timeout-minutes: 90
+    # Signing secrets can be scoped to this environment (Settings › Environments › release).
+    environment: release
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      BUILD: ${{ needs.preflight.outputs.build }}
+      FEED_URL: ${{ needs.preflight.outputs.feed_url }}
+      DOWNLOAD_URL_PREFIX: ${{ needs.preflight.outputs.download_url_prefix }}
+      SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+      UPDATES_DIR: build/updates
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check signing secrets
+        shell: bash
+        env:
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          missing=()
+          for name in DEVELOPER_ID_CERTIFICATE_P12 DEVELOPER_ID_CERTIFICATE_PASSWORD APPLE_API_KEY_P8 \
+                      APPLE_API_KEY_ID APPLE_API_ISSUER_ID SPARKLE_PRIVATE_KEY SPARKLE_PUBLIC_KEY; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if [[ ${#missing[@]} -ne 0 ]]; then
+            echo "::error::Missing release secrets or variables: ${missing[*]}."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        shell: bash
+        env:
+          XCODEGEN_VERSION: 2.45.3
+          XCODEGEN_SHA256: 0c90f4d28ca57335f9fa78cf5bf6dabfe20a232036dabe36de2eef79cb7c0878
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      # A throwaway keychain holds the Developer ID identity and the notarytool profile for this
+      # job only. The .p12 and the App Store Connect key touch the disk just long enough to be
+      # imported, and the keychain is deleted at the end of the job.
+      - name: Import signing identity and notary credentials
+        shell: bash
+        env:
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          SIGNING_KEYCHAIN="$RUNNER_TEMP/aeroops-release.keychain-db"
+          echo "SIGNING_KEYCHAIN=$SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+          keychain_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$keychain_password"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          api_key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          trap 'rm -f "$certificate" "$api_key"' EXIT
+
+          security create-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$certificate"
+          security import "$certificate" -k "$SIGNING_KEYCHAIN" -f pkcs12 \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" \
+            "$SIGNING_KEYCHAIN" > /dev/null
+          # Put the new keychain first in the search list, ahead of the existing ones.
+          security list-keychains -d user | xargs security list-keychains -d user -s "$SIGNING_KEYCHAIN"
+
+          identity="$(security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" \
+            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$identity" ]]; then
+            echo "::error::DEVELOPER_ID_CERTIFICATE_P12 holds no Developer ID Application identity."
+            exit 1
+          fi
+          echo "AEROOPS_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+          printf '%s' "$APPLE_API_KEY_P8" > "$api_key"
+          xcrun notarytool store-credentials aeroops-notary --keychain "$SIGNING_KEYCHAIN" \
+            --key "$api_key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID"
+
+      - name: Build, sign and notarize
+        run: |
+          Scripts/release.sh \
+            --version "$VERSION" --build "$BUILD" \
+            --identity "$AEROOPS_SIGNING_IDENTITY" \
+            --notary-profile aeroops-notary --notary-keychain "$SIGNING_KEYCHAIN" \
+            --feed-url "$FEED_URL" --public-key "$SPARKLE_PUBLIC_KEY" \
+            --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
+            --updates-dir "$UPDATES_DIR" --output build/release
+
+      - name: Download release notes
+        uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes
+
+      # generate_appcast signs the zip with the Sparkle private key, read from standard input so
+      # it never touches the disk, and embeds the release notes next to the zip.
+      - name: Write the appcast
+        shell: bash
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          REPOSITORY_URL: https://github.com/${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/release-notes/release-notes.md" "$UPDATES_DIR/AeroOps-$VERSION.md"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            build/release/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast \
+              --ed-key-file - \
+              --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
+              --embed-release-notes \
+              --full-release-notes-url "$REPOSITORY_URL/releases/tag/$TAG" \
+              --link "$REPOSITORY_URL/releases/latest" \
+              "$UPDATES_DIR"
+          swift Scripts/verify-appcast.swift "$UPDATES_DIR/appcast.xml" "$UPDATES_DIR/AeroOps-$VERSION.zip" \
+            "$SPARKLE_PUBLIC_KEY" "$VERSION" "$BUILD" "$DOWNLOAD_URL_PREFIX"
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp build/release/run-*/"AeroOps-$VERSION.dmg" "$UPDATES_DIR/AeroOps-$VERSION.zip" \
+            "$UPDATES_DIR/appcast.xml" release-assets/
+          (cd release-assets && shasum -a 256 AeroOps-*.dmg AeroOps-*.zip appcast.xml > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+      # Archive, export and notarization logs; they hold no secrets.
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-logs
+          path: |
+            build/release/run-*/*.log
+            build/release/run-*/*.json
+          retention-days: 7
+
+      - name: Delete the signing keychain
+        if: always()
+        run: |
+          if [[ -n "${SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" 2> /dev/null || true
+          fi
+
+  # The only job with a write token, and it never sees a signing secret. gh uploads every asset
+  # to a draft before publishing it, so the appcast at releases/latest never points at a zip
+  # that is not there yet.
+  publish:
+    name: Publish GitHub Release
+    needs: [preflight, test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Download release notes
+        uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: release-notes
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          REF: ${{ needs.preflight.outputs.ref }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null)"; then
+            if [[ "$is_draft" != true ]]; then
+              echo "::error::Release $TAG is already published. Delete it first to publish it again."
+              exit 1
+            fi
+            # A draft left behind by an earlier attempt whose upload failed.
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          flags=(--latest)
+          if [[ "$PRERELEASE" == true ]]; then flags=(--prerelease --latest=false); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$REF" \
+            --title "AeroOps $TAG" --notes-file release-notes/release-notes.md "${flags[@]}" \
+            release-assets/*
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

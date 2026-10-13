@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds a notarized AeroOps release: Developer ID archive and export, notarization and
 # stapling, the Sparkle update zip and a signed DMG. Then prints the generate_appcast step.
+# .github/workflows/release.yml runs it on every vX.Y.Z tag.
 #
 #   Scripts/release.sh \
 #       --identity "Developer ID Application: Jane Doe (VUDQQS32NW)" \
@@ -18,6 +19,11 @@
 # Options (each can also come from the environment variable in brackets):
 #   --identity NAME          Developer ID Application identity, name or SHA-1 [AEROOPS_SIGNING_IDENTITY]
 #   --notary-profile NAME    notarytool keychain profile (store-credentials) [AEROOPS_NOTARY_PROFILE]
+#   --notary-keychain PATH   keychain that holds the notarytool profile (default: the search
+#                            list; CI uses a temporary one) [AEROOPS_NOTARY_KEYCHAIN]
+#   --version X.Y.Z          marketing version (default: MARKETING_VERSION in project.yml) [AEROOPS_VERSION]
+#   --build N                build number, compared by Sparkle (default: the number of commits
+#                            in HEAD, so it grows with every commit) [AEROOPS_BUILD]
 #   --feed-url URL           https appcast URL, becomes SUFeedURL [AEROOPS_FEED_URL]
 #   --public-key KEY         Sparkle EdDSA public key, becomes SUPublicEDKey [AEROOPS_SPARKLE_PUBLIC_KEY]
 #   --team ID                Apple team ID (default VUDQQS32NW) [AEROOPS_TEAM_ID]
@@ -57,6 +63,9 @@ run_logged() {
 
 identity=${AEROOPS_SIGNING_IDENTITY:-}
 notary_profile=${AEROOPS_NOTARY_PROFILE:-}
+notary_keychain=${AEROOPS_NOTARY_KEYCHAIN:-}
+version=${AEROOPS_VERSION:-}
+build=${AEROOPS_BUILD:-}
 feed_url=${AEROOPS_FEED_URL:-}
 public_key=${AEROOPS_SPARKLE_PUBLIC_KEY:-}
 team=${AEROOPS_TEAM_ID:-VUDQQS32NW}
@@ -70,6 +79,9 @@ while [ $# -gt 0 ]; do
     case $1 in
         --identity) identity=${2:?--identity needs a value}; shift 2 ;;
         --notary-profile) notary_profile=${2:?--notary-profile needs a value}; shift 2 ;;
+        --notary-keychain) notary_keychain=${2:?--notary-keychain needs a value}; shift 2 ;;
+        --version) version=${2:?--version needs a value}; shift 2 ;;
+        --build) build=${2:?--build needs a value}; shift 2 ;;
         --feed-url) feed_url=${2:?--feed-url needs a value}; shift 2 ;;
         --public-key) public_key=${2:?--public-key needs a value}; shift 2 ;;
         --team) team=${2:?--team needs a value}; shift 2 ;;
@@ -117,19 +129,28 @@ case $download_prefix in
     *) die "the download URL prefix must be https and end in /: $download_prefix" ;;
 esac
 
-version=$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' project.yml | head -1)
-build=$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' project.yml | head -1)
-[ -n "$version" ] && [ -n "$build" ] || die "could not read MARKETING_VERSION and CURRENT_PROJECT_VERSION from project.yml"
+[ -n "$version" ] || version=$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' project.yml | head -1)
+[ -n "$build" ] || build=$(git rev-list --count HEAD 2> /dev/null || true)
+[ -n "$version" ] || die "missing --version and no MARKETING_VERSION in project.yml"
+[ -n "$build" ] || die "missing --build and HEAD has no git history to count"
+printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die "version must look like 1.2.3 or 1.2.3-beta.1: $version"
+printf '%s' "$build" | grep -Eq '^[1-9][0-9]*$' || die "build must be a positive integer: $build"
+if [ -n "$notary_keychain" ]; then
+    [ "$dry_run" = 1 ] || [ -f "$notary_keychain" ] || die "no keychain at $notary_keychain"
+    notary_keychain_args=(--keychain "$notary_keychain")
+else
+    notary_keychain_args=()
+fi
 note "version $version (build $build), team $team"
 note "identity: $identity"
-note "notary profile: $notary_profile"
+note "notary profile: $notary_profile${notary_keychain:+ (keychain $notary_keychain)}"
 note "feed: $feed_url"
 note "downloads: $download_prefix"
 
 update_zip="$updates_dir/AeroOps-$version.zip"
-[ ! -e "$update_zip" ] || die "$update_zip exists; bump MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml"
+[ ! -e "$update_zip" ] || die "$update_zip exists; release a new version (--version or MARKETING_VERSION in project.yml)"
 if [ -f "$updates_dir/appcast.xml" ] && grep -q "<sparkle:version>$build</sparkle:version>" "$updates_dir/appcast.xml"; then
-    die "build $build is already in $updates_dir/appcast.xml; bump CURRENT_PROJECT_VERSION in project.yml"
+    die "build $build is already in $updates_dir/appcast.xml; commit first or pass a larger --build"
 fi
 
 step "Checking tools"
@@ -171,6 +192,8 @@ run_logged "$run_dir/archive.log" xcodebuild \
     CODE_SIGN_STYLE=Manual \
     "CODE_SIGN_IDENTITY=$identity" \
     "DEVELOPMENT_TEAM=$team" \
+    "MARKETING_VERSION=$version" \
+    "CURRENT_PROJECT_VERSION=$build" \
     "AEROOPS_FEED_URL=$feed_url" \
     "AEROOPS_SPARKLE_PUBLIC_KEY=$public_key"
 
@@ -222,10 +245,12 @@ verify_app() {
     value=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist")
     [ "$value" = "$public_key" ] || die "SUPublicEDKey does not match --public-key"
     value=$(/usr/libexec/PlistBuddy -c 'Print :SUEnableAutomaticChecks' "$plist")
-    [ "$value" = false ] || die "SUEnableAutomaticChecks must stay NO (opt-in only)"
+    [ "$value" = true ] || die "SUEnableAutomaticChecks must be YES"
     value=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
-    [ "$value" = "$version" ] || die "the app says version $value, project.yml says $version"
-    note "Info.plist: feed, public key, automatic checks off, version $version"
+    [ "$value" = "$version" ] || die "the app says version $value, expected $version"
+    value=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+    [ "$value" = "$build" ] || die "the app says build $value, expected $build"
+    note "Info.plist: feed, public key, automatic checks on, version $version ($build)"
 
     # The app's bridge only accepts aeroops-mcp signed by the same team with this identifier.
     local cli="$app/Contents/MacOS/aeroops-mcp"
@@ -257,16 +282,19 @@ fi
 notarize() {
     local file=$1 label=$2
     local result="$run_dir/notary-$label.json" log="$run_dir/notary-$label-log.json"
-    printf '+ xcrun notarytool submit %q --keychain-profile %q --wait --output-format json > %q\n' \
-        "$file" "$notary_profile" "$result"
+    printf '+ xcrun notarytool submit %q --keychain-profile %q' "$file" "$notary_profile"
+    printf ' %q' ${notary_keychain_args[@]+"${notary_keychain_args[@]}"}
+    printf ' --wait --output-format json > %q\n' "$result"
     [ "$dry_run" = 1 ] && return 0
-    xcrun notarytool submit "$file" --keychain-profile "$notary_profile" --wait --output-format json > "$result" || true
+    xcrun notarytool submit "$file" --keychain-profile "$notary_profile" ${notary_keychain_args[@]+"${notary_keychain_args[@]}"} \
+        --wait --output-format json > "$result" || true
     local id status
     id=$(plutil -extract id raw -o - "$result" 2> /dev/null || true)
     status=$(plutil -extract status raw -o - "$result" 2> /dev/null || echo "no result")
     note "submission ${id:-?}: $status"
     if [ "$status" != Accepted ]; then
-        [ -z "$id" ] || xcrun notarytool log "$id" --keychain-profile "$notary_profile" "$log" || true
+        [ -z "$id" ] || xcrun notarytool log "$id" --keychain-profile "$notary_profile" \
+            ${notary_keychain_args[@]+"${notary_keychain_args[@]}"} "$log" || true
         die "notarization of $file: $status (details: $result, $log)"
     fi
 }

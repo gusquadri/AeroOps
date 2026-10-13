@@ -12,9 +12,10 @@ import SwiftUI
 /// settings, which are empty unless `Scripts/release.sh` sets them, so development builds never
 /// contact a feed: no updater object exists, the menu item is hidden and the pane says so.
 ///
-/// Automatic checks start off (`SUEnableAutomaticChecks` is NO in App/Info.plist, which also
-/// skips Sparkle's own permission prompt). The user opts in under Settings › Updates; Sparkle
-/// keeps that choice in the app's user defaults.
+/// Automatic checks start on, every hour (`SUEnableAutomaticChecks` and `SUScheduledCheckInterval`
+/// in App/Info.plist; setting the key also skips Sparkle's own permission prompt). Sparkle shows its
+/// update window when a release appears; installing still takes a click. The user can turn checks
+/// off under Settings › Updates, and Sparkle keeps that choice in the app's user defaults.
 @MainActor
 @Observable
 final class UpdateService {
@@ -42,7 +43,7 @@ final class UpdateService {
         case idle
         /// Sparkle refused to start (a misconfigured release build); the message says why.
         case failed(String)
-        /// The updater runs: manual checks work, automatic ones if the user turned them on.
+        /// The updater runs: manual checks work, automatic ones unless the user turned them off.
         case running
     }
 
@@ -50,7 +51,7 @@ final class UpdateService {
     private(set) var status: Status
     /// `SPUUpdater.canCheckForUpdates`: `false` before the start and while a check is shown.
     private(set) var canCheckForUpdates = false
-    /// `SPUUpdater.automaticallyChecksForUpdates` (off until the user opts in).
+    /// `SPUUpdater.automaticallyChecksForUpdates` (on unless the user turned it off).
     private(set) var automaticallyChecks = false
     /// `SPUUpdater.automaticallyDownloadsUpdates`.
     private(set) var automaticallyDownloads = false
