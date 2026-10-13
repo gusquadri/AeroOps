@@ -20,7 +20,7 @@ struct OnboardingWelcomeStep: View {
                     .resizable()
                     .frame(width: 112, height: 112)
                     .accessibilityHidden(true)
-                Text("AeroOps watches your Linux servers over SSH: live health cards, Docker containers and Kubernetes pods with their logs, and terminal tabs, all in one window. AI agents such as Claude Code can read the same data through a local MCP server, and any command they want to run waits for your approval.")
+                Text("AeroOps watches your Linux servers over SSH: live health cards, Docker containers and Kubernetes pods with their logs, and terminal tabs, all in one window. AI agents such as Claude Code can read the same data through a local MCP server, and they are told to ask you before running any command.")
                     .font(Aero.font(.body))
                     .foregroundStyle(Aero.text.primary)
                     .multilineTextAlignment(.center)
@@ -378,7 +378,7 @@ struct MCPTierGuide: View {
                     }
                 }
             }
-            Text("Every server starts at Read. Change it under “AI agents (MCP)” in the server’s editor. Agents never see your keys, every call is logged, and every command waits for your approval.")
+            Text("Every server starts at Read. Change it under “AI agents (MCP)” in the server’s editor. Agents never see your keys, every call is logged, and agents are told to ask you before running a command.")
                 .font(Aero.font(.caption))
                 .foregroundStyle(Aero.text.secondary)
                 .fixedSize(horizontal: false, vertical: true)

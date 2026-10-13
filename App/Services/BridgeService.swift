@@ -1,28 +1,25 @@
 import AeroCore
 import AgentBridge
-import AppKit
 import BridgeProtocol
 import Collectors
 import Foundation
-import LocalAuthentication
 import Observation
 import os
 import SSHKit
 import Synchronization
 
 /// Phases 7 and 8: the MCP bridge on `~/.aeroops/bridge.sock` and everything the app shows about
-/// it (approvals, live `run_command` output, connections).
+/// it (live `run_command` output, connections).
 ///
 /// One instance per app, owned by ``AppModel/agents``. ``start()`` runs after the agent and the
 /// monitors are up; ``beginShutdown()`` runs first when the app quits, so no agent call opens a
 /// connection while monitors and ControlMasters close.
 ///
 /// - Every call goes through AgentBridge's pipeline: peer check (the embedded, team-signed
-///   `aeroops-mcp` only), PolicyEngine, ApprovalCenter, CommandExecutor. The app only
-///   supplies data (``AppBridgeHandler``) and the approval UI.
-/// - Approvals: ``decide(_:_:)`` is the only way the UI (panel, notification, Activity tab)
-///   answers one. With ``requiresTouchID`` an allow decision first asks for Touch ID or the
-///   login password (``TouchIDApprovalAuthenticator``).
+///   `aeroops-mcp` only), PolicyEngine, CommandExecutor. The app only supplies data
+///   (``AppBridgeHandler``).
+/// - AeroOps does not ask before `run_command`: the host's MCP tier decides, and the agent is
+///   told to confirm with the user in its own conversation.
 /// - Remote access goes through the app's ``SSHRunner`` (system ssh, `~/.aeroops/ssh_config`,
 ///   the in-app agent), swapped when the agent choice changes.
 @MainActor
@@ -60,57 +57,31 @@ final class BridgeService {
     static let eventLimit = 200
     /// Finished commands kept in the Activity tab (with their output) besides the running ones.
     static let finishedCommandsKept = 5
-    static let touchIDDefaultsKey = "ApprovalsRequireTouchID"
 
     private(set) var status: Status = .stopped
     /// Connected clients, oldest first.
     private(set) var peers: [ConnectedPeer] = []
     /// Bridge connection events, oldest first (at most ``eventLimit``).
     private(set) var connectionEvents: [ConnectionRecord] = []
-    /// Approvals waiting for the user, oldest first.
-    private(set) var pending: [PendingApproval] = []
-    /// Open "allow this host for 15 minutes" windows.
-    private(set) var windows: [AllowWindow] = []
     /// Running `run_command` calls (newest first), then the last few finished ones.
     private(set) var liveCommands: [LiveCommand] = []
-    /// Ask for Touch ID (or the login password) before an allow decision takes effect.
-    var requiresTouchID: Bool {
-        didSet {
-            authenticator.setEnabled(requiresTouchID)
-            defaults?.set(requiresTouchID, forKey: Self.touchIDDefaultsKey)
-        }
-    }
 
     /// `false` keeps the bridge closed (demo and snapshot launches show sample state instead).
     @ObservationIgnored var isEnabled = true
-    /// Show the floating approval panel (and the Dock badge) when an approval arrives.
-    @ObservationIgnored var presentsApprovals = true
-    /// Also post a notification when the app is not frontmost.
-    @ObservationIgnored var postsNotifications = true
-    /// Where ``requiresTouchID`` is persisted; `nil` keeps it in memory (self-test, demo).
-    @ObservationIgnored var defaults: UserDefaults? = .standard
-    /// Called after each approval snapshot is applied (self-test only).
-    @ObservationIgnored var didUpdateApprovals: ((ApprovalSnapshot) -> Void)?
     /// Called after each command event is applied (self-test only).
     @ObservationIgnored var didReceiveCommandActivity: ((CommandActivity) -> Void)?
 
     @ObservationIgnored private let ssh: SSHServices
     @ObservationIgnored private let runner: BridgeCommandRunner
-    @ObservationIgnored private let authenticator: TouchIDApprovalAuthenticator
     @ObservationIgnored private let dataSource = BridgeDataSource()
     @ObservationIgnored private(set) var bridge: Bridge?
-    @ObservationIgnored private var approvals: ApprovalCenter?
     @ObservationIgnored private var executor: CommandExecutor?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
-    @ObservationIgnored private var presenter: ApprovalPresenter?
     @ObservationIgnored private var isShutDown = false
 
     init(ssh: SSHServices) {
         self.ssh = ssh
         runner = BridgeCommandRunner(ssh.runner)
-        let touchID = UserDefaults.standard.bool(forKey: Self.touchIDDefaultsKey)
-        requiresTouchID = touchID
-        authenticator = TouchIDApprovalAuthenticator(enabled: touchID)
     }
 
     /// Connects the read tools to the model's hosts and live state. Called once by ``AppModel``.
@@ -118,15 +89,9 @@ final class BridgeService {
         dataSource.model = model
     }
 
-    /// Keeps settings in memory and turns Touch ID off (self-test and demo launches).
-    func useTransientSettings() {
-        defaults = nil
-        requiresTouchID = false
-    }
-
     /// `~/.aeroops/bridge.sock`, or the debug root's.
     var socketURL: URL { ssh.paths.bridgeSocket }
-    /// Whether an agent call is in progress or waiting.
+    /// Whether an agent command is running.
     var hasRunningCommands: Bool { liveCommands.contains(where: \.isRunning) }
 
     // MARK: - Lifecycle
@@ -137,26 +102,19 @@ final class BridgeService {
         runner.update(ssh.runner)
         trackAgentChoice()
 
-        let approvals = ApprovalCenter(authenticator: authenticator)
         let executor = CommandExecutor(runner: runner)
         let bridge = Bridge(
             socketURL: socketURL,
             handler: AppBridgeHandler(source: dataSource, runner: runner),
             executor: executor,
-            approvals: approvals,
             peerValidator: CodeSignaturePeerValidator.forApp()
         )
         self.bridge = bridge
-        self.approvals = approvals
         self.executor = executor
-        if presentsApprovals {
-            presenter = ApprovalPresenter(service: self, notifications: postsNotifications)
-        }
 
         // Subscribe before the socket opens so no event is missed.
         observe(bridge.events()) { $0.receive($1) }
         observe(executor.activity()) { $0.receive($1) }
-        observeApprovals(approvals)
 
         do {
             try bridge.start()
@@ -167,17 +125,14 @@ final class BridgeService {
         }
     }
 
-    /// Closes the socket on the main actor (in-flight calls are cancelled, pending approvals
-    /// vanish, running commands are killed) and returns the rest: waiting briefly for killed
-    /// commands to end their ssh processes. `nil` if the bridge never started.
+    /// Closes the socket on the main actor (in-flight calls are cancelled, running commands are
+    /// killed) and returns the rest: waiting briefly for killed commands to end their ssh
+    /// processes. `nil` if the bridge never started.
     func beginShutdown() -> (@Sendable () async -> Void)? {
         guard !isShutDown else { return nil }
         isShutDown = true
-        presenter?.close()
-        presenter = nil
         tasks.forEach { $0.cancel() }
         tasks = []
-        approvals = nil
         peers = []
         status = .stopped
         guard let bridge else { return nil }
@@ -195,15 +150,6 @@ final class BridgeService {
 
     // MARK: - Actions
 
-    /// Answers the pending approval `id`, as every approval control does. With
-    /// ``requiresTouchID`` an allow decision asks for Touch ID first. Returns `false` when the
-    /// approval is gone or authentication failed (it then stays pending).
-    @discardableResult
-    func decide(_ id: PendingApproval.ID, _ decision: ApprovalDecision) async -> Bool {
-        guard let approvals else { return false }
-        return await approvals.decide(id, decision)
-    }
-
     /// Stops a running command (the Activity tab's Cancel). ssh is killed and the remote watchdog
     /// kills the command's process group within a few seconds.
     @discardableResult
@@ -212,24 +158,9 @@ final class BridgeService {
         return await executor.cancel(commandID)
     }
 
-    /// Closes the allow window for `hostID` early.
-    func revokeWindow(for hostID: UUID) async {
-        await approvals?.revokeWindow(for: hostID)
-    }
-
-    /// Closes every allow window.
-    func revokeAllWindows() async {
-        await approvals?.revokeAllWindows()
-    }
-
     /// Removes finished commands from the Activity tab.
     func clearFinishedCommands() {
         liveCommands.removeAll { !$0.isRunning }
-    }
-
-    /// Brings the approval panel forward (a notification was clicked, or Activity asked for it).
-    func showApprovalPanel() {
-        presenter?.showPanel()
     }
 
     // MARK: - Events
@@ -239,16 +170,6 @@ final class BridgeService {
             for await element in stream {
                 guard let self else { return }
                 handler(self, element)
-            }
-        })
-    }
-
-    private func observeApprovals(_ approvals: ApprovalCenter) {
-        tasks.append(Task { [weak self] in
-            let updates = await approvals.updates()
-            for await snapshot in updates {
-                guard let self else { return }
-                self.receive(snapshot)
             }
         })
     }
@@ -271,13 +192,6 @@ final class BridgeService {
         if connectionEvents.count > Self.eventLimit {
             connectionEvents.removeFirst(connectionEvents.count - Self.eventLimit)
         }
-    }
-
-    private func receive(_ snapshot: ApprovalSnapshot) {
-        if pending != snapshot.pending { pending = snapshot.pending }
-        if windows != snapshot.windows { windows = snapshot.windows }
-        presenter?.update(pending: snapshot.pending)
-        didUpdateApprovals?(snapshot)
     }
 
     private func receive(_ activity: CommandActivity) {
@@ -324,45 +238,13 @@ final class BridgeService {
     // MARK: - Samples
 
     #if DEBUG
-    /// Sample state for demo and snapshot launches: approvals waiting (one with sudo), an allow
-    /// window, a running command with output, a finished one and connections. The
-    /// approvals live in a private ``ApprovalCenter``, so the controls work; one that times out
-    /// is asked again.
+    /// Sample state for demo and snapshot launches: a running command with output, a finished
+    /// one and a connection.
     func applySampleState(hosts: [RemoteHost]) {
-        guard bridge == nil, approvals == nil, let host = hosts.first else { return }
+        guard bridge == nil, let host = hosts.first else { return }
         let other = hosts.dropFirst().first ?? host
-        let center = ApprovalCenter()
-        approvals = center
-        observeApprovals(center)
         status = .listening
         let now = Date.now
-        let claude = BridgeClientInfo(name: "claude-code", version: "2.1.296")
-        let asks = [
-            ApprovalAsk(client: claude, host: host, command: "docker restart api && docker logs --tail 20 api",
-                        reason: "The api container stopped answering health checks; restarting it should clear the stuck worker."),
-            ApprovalAsk(client: BridgeClientInfo(name: "codex", version: "0.48.0"), host: other,
-                        command: "sudo systemctl restart nginx",
-                        reason: "nginx is serving a stale certificate; a restart picks up the renewed one.",
-                        alwaysAskReasons: CommandInspector.alwaysAskReasons(for: "sudo systemctl restart nginx")),
-        ]
-        for (index, ask) in asks.enumerated() {
-            tasks.append(Task {
-                try? await Task.sleep(for: .milliseconds(100 * index))
-                while !Task.isCancelled, await center.authorize(ask) == .timedOut {}
-            })
-        }
-        // An open window: allow a third request for 15 minutes.
-        if let third = hosts.dropFirst(4).first {
-            tasks.append(Task {
-                try? await Task.sleep(for: .milliseconds(400))
-                async let outcome = center.authorize(ApprovalAsk(client: claude, host: third, command: "uptime", reason: "Sample"))
-                try? await Task.sleep(for: .milliseconds(200))
-                if let id = await center.snapshot().pending.first(where: { $0.hostID == third.id })?.id {
-                    await center.decide(id, .allowHost15Min)
-                }
-                _ = await outcome
-            })
-        }
 
         let peer = BridgePeer(pid: 48213, uid: getuid(), executablePath: "/Applications/AeroOps.app/Contents/MacOS/aeroops-mcp",
                               signingIdentifier: "app.aeroops.mcp", teamIdentifier: "VUDQQS32NW", trust: .codeSignature)
@@ -575,34 +457,5 @@ final class BridgeCommandRunner: RemoteCommandRunner, HostCommandRunning, HostCo
     func stream(_ command: String, on host: RemoteHost, stdin: Data?, timeout: Duration?,
                 maxBufferedLines: Int) async throws -> AsyncThrowingStream<String, any Error> {
         try await runner.stream(command, on: host, stdin: stdin, timeout: timeout, maxBufferedLines: maxBufferedLines)
-    }
-}
-
-// MARK: - Touch ID
-
-/// Asks for Touch ID (or the login password) before an allow decision takes effect, when the
-/// user turned it on in Settings › MCP. Denials never ask.
-final class TouchIDApprovalAuthenticator: ApprovalAuthenticator {
-    private let enabled: Mutex<Bool>
-
-    init(enabled: Bool) {
-        self.enabled = Mutex(enabled)
-    }
-
-    func setEnabled(_ value: Bool) {
-        enabled.withLock { $0 = value }
-    }
-
-    func authenticate(_ approval: PendingApproval, decision: ApprovalDecision) async -> Bool {
-        guard enabled.withLock({ $0 }) else { return true }
-        let context = LAContext()
-        let reason = decision == .allowHost15Min
-            ? "allow agent commands on \(approval.hostName) for 15 minutes"
-            : "allow an agent command on \(approval.hostName)"
-        do {
-            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
-        } catch {
-            return false
-        }
     }
 }

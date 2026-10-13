@@ -4,30 +4,22 @@ import SwiftUI
 
 /// Activity tab (Phases 7 and 8): what AI agents do through AeroOps' MCP bridge.
 ///
-/// Top to bottom: approvals waiting for the user, open 15-minute allow windows, and running and
-/// recent `run_command` calls with live output (Cancel stops one). Text from agents and hosts is
-/// shown as plain text only.
+/// Running and recent `run_command` calls with live output (Cancel stops one). AeroOps does not
+/// ask before a command runs; agents are told to ask the user in their own conversation. Text
+/// from agents and hosts is shown as plain text only.
 struct ActivityView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let agents = model.agents
-        let isEmpty = agents.pending.isEmpty && agents.windows.isEmpty && agents.liveCommands.isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 ActivityHeader(openMCPSettings: openMCPSettings)
-                if !agents.pending.isEmpty {
-                    PendingApprovalsSection()
-                }
-                if !agents.windows.isEmpty {
-                    AllowWindowsSection()
-                }
-                if !agents.liveCommands.isEmpty {
-                    CommandsSection()
-                }
-                if isEmpty {
+                if agents.liveCommands.isEmpty {
                     emptyCard
+                } else {
+                    CommandsSection()
                 }
             }
             .padding(20)
@@ -45,7 +37,7 @@ struct ActivityView: View {
                 Text("No agent activity yet")
                     .font(Aero.font(.title3, weight: .semibold))
                     .foregroundStyle(Aero.text.primary)
-                Text("When AI agents use AeroOps through MCP, commands waiting for your approval appear at the top, followed by the commands they run and their output. Connect an agent in Settings › MCP.")
+                Text("When AI agents run commands through AeroOps' MCP server, they appear here with their live output, and you can cancel them. Agents are told to ask you in the conversation before each command. Connect an agent in Settings › MCP.")
                     .font(Aero.font(.callout))
                     .foregroundStyle(Aero.text.secondary)
                     .multilineTextAlignment(.center)
@@ -116,92 +108,6 @@ extension BridgeService {
         case 1: "1 agent connected"
         default: "\(peers.count) agents connected"
         }
-    }
-}
-
-// MARK: - Pending approvals
-
-/// Approvals waiting for the user, oldest first, each with its own controls.
-private struct PendingApprovalsSection: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let agents = model.agents
-        GlassSection("Waiting for your approval", systemImage: "hand.raised") {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(agents.pending.enumerated()), id: \.element.id) { index, approval in
-                    if index > 0 { Divider() }
-                    ApprovalRequestView(
-                        approval: approval,
-                        position: (index + 1, agents.pending.count),
-                        requiresTouchID: agents.requiresTouchID
-                    ) { decision in
-                        await agents.decide(approval.id, decision)
-                    }
-                    .id(approval.id)
-                }
-            }
-        } accessory: {
-            Button("Show Panel", systemImage: "macwindow.on.rectangle") { agents.showApprovalPanel() }
-                .buttonStyle(.aquaSecondary)
-                .controlSize(.small)
-        }
-    }
-}
-
-// MARK: - Allow windows
-
-/// Hosts whose commands currently run without asking (sudo and similar still ask).
-private struct AllowWindowsSection: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let agents = model.agents
-        GlassSection("Hosts allowed without asking", systemImage: "clock.badge.checkmark") {
-            AllowWindowList(windows: agents.windows) { hostID in
-                Task { await agents.revokeWindow(for: hostID) }
-            }
-        } accessory: {
-            if agents.windows.count > 1 {
-                Button("Revoke All", role: .destructive) { Task { await agents.revokeAllWindows() } }
-                    .buttonStyle(.aquaSecondary)
-                    .controlSize(.small)
-            }
-        }
-    }
-}
-
-/// Allow windows with the time left and a Revoke button. Shared with Settings › MCP.
-struct AllowWindowList: View {
-    let windows: [AllowWindow]
-    let onRevoke: (UUID) -> Void
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(windows, id: \.hostID) { window in
-                    HStack(spacing: 10) {
-                        StatusOrb(tone: .warning, size: 10)
-                        Text(verbatim: window.hostName)
-                            .font(Aero.font(.callout, weight: .semibold))
-                            .foregroundStyle(Aero.text.primary)
-                        Text(Self.remaining(until: window.expiresAt, now: context.date))
-                            .font(Aero.font(.callout))
-                            .monospacedDigit()
-                            .foregroundStyle(Aero.text.secondary)
-                        Spacer()
-                        Button("Revoke", role: .destructive) { onRevoke(window.hostID) }
-                            .buttonStyle(.aquaSecondary)
-                            .controlSize(.small)
-                    }
-                }
-            }
-        }
-    }
-
-    static func remaining(until expiry: Date, now: Date) -> String {
-        let seconds = max(Int(expiry.timeIntervalSince(now).rounded(.up)), 0)
-        return "until \(expiry.formatted(date: .omitted, time: .shortened)) · \(seconds / 60):\(String(format: "%02d", seconds % 60)) left"
     }
 }
 

@@ -5,7 +5,7 @@ import Synchronization
 import Testing
 @testable import AgentBridge
 
-/// The whole pipeline (tool → arguments → host → policy → approval → handler/executor)
+/// The whole pipeline (tool → arguments → host → policy → handler/executor)
 /// through `Bridge.process`, with fakes for the host data, ssh and time.
 @Suite("Bridge pipeline")
 struct BridgePipelineTests {
@@ -14,7 +14,6 @@ struct BridgePipelineTests {
         let clock = FakeClock()
         let handler: FakeToolHandler
         let runner: FakeRunner
-        let approvals: ApprovalCenter
         let bridge: Bridge
 
         init(handler: FakeToolHandler = FakeToolHandler(),
@@ -22,10 +21,9 @@ struct BridgePipelineTests {
             dir = try TempDirectory()
             self.handler = handler
             self.runner = runner
-            approvals = ApprovalCenter(clock: clock)
             bridge = Bridge(socketURL: dir.appending("bridge.sock"), handler: handler,
-                            executor: CommandExecutor(runner: runner, clock: clock), approvals: approvals,
-                            peerValidator: AcceptAllPeers(), clock: clock, progressInterval: .milliseconds(50))
+                            executor: CommandExecutor(runner: runner, clock: clock),
+                            peerValidator: AcceptAllPeers(), clock: clock)
         }
 
         deinit { dir.remove() }
@@ -34,21 +32,6 @@ struct BridgePipelineTests {
             let request = BridgeRequest(id: 1, tool: tool, arguments: arguments,
                                         client: BridgeClientInfo(name: "claude-code", version: "2.1.296"), toolUseId: "toolu_x")
             return await bridge.process(request, peer: testPeer) { progress?.append($0) }
-        }
-
-        /// Starts a call in the background and waits until its approval is pending.
-        func pendingCall(_ arguments: [String: JSONValue], progress: Progress? = nil) async throws -> (Task<BridgeReply?, Never>, PendingApproval) {
-            let before = Set(await approvals.snapshot().pending.map(\.id))
-            let task = Task { await self.call("run_command", arguments, progress: progress) }
-            let deadline = ContinuousClock.now + .seconds(5)
-            while ContinuousClock.now < deadline {
-                if let pending = await approvals.snapshot().pending.first(where: { !before.contains($0.id) }) {
-                    return (task, pending)
-                }
-                try await Task.sleep(for: .milliseconds(5))
-            }
-            task.cancel()
-            throw TestFailure("no approval became pending")
         }
     }
 
@@ -88,7 +71,6 @@ struct BridgePipelineTests {
         let run = try #require(await fixture.call("run_command", Self.run("id", on: "vault")))
         #expect(run.error?.code == .hostNotShared)
         #expect(fixture.handler.calls.isEmpty && fixture.runner.calls.isEmpty)
-        #expect(await fixture.approvals.snapshot().pending.isEmpty)
     }
 
     @Test func readToolsReturnHandlerData() async throws {
@@ -128,7 +110,6 @@ struct BridgePipelineTests {
         let nowhere = try #require(await fixture.call("get_host_metrics", ["host": "db-9"]))
         #expect(nowhere.error?.code == .hostNotFound)
         #expect(fixture.handler.calls.isEmpty && fixture.runner.calls.isEmpty)
-        #expect(await fixture.approvals.snapshot().pending.isEmpty)
     }
 
     @Test func handlerFailuresBecomeToolErrors() async throws {
@@ -139,99 +120,50 @@ struct BridgePipelineTests {
 
     // MARK: run_command
 
-    @Test func readTierRejectsRunCommandWithoutAsking() async throws {
+    @Test func readTierRejectsRunCommand() async throws {
         let fixture = try Fixture()
         let reply = try #require(await fixture.call("run_command", Self.run("uptime", on: "prod")))
         #expect(reply.error?.code == .execNotAllowed)
         #expect(fixture.runner.calls.isEmpty)
-        #expect(await fixture.approvals.snapshot().pending.isEmpty)
     }
 
-    @Test func approvedOnceRuns() async throws {
+    @Test func readExecRunsWithoutAsking() async throws {
         let fixture = try Fixture()
         let progress = Progress()
-        let (task, pending) = try await fixture.pendingCall(Self.run("df -h /", timeout: 20), progress: progress)
-        #expect(pending.command == "df -h /" && pending.reason == "Check the disk." && pending.hostName == "staging")
-        #expect(pending.clientLabel == "claude-code 2.1.296 (self-reported)" && pending.toolUseId == "toolu_x")
-        #expect(fixture.runner.calls.isEmpty, "nothing runs before the user decides")
-        #expect(await eventually { progress.all.count >= 2 })
-        #expect(progress.all.first == "Waiting for approval in AeroOps")
-        #expect(progress.all.dropFirst().first?.hasPrefix("Waiting for approval in AeroOps (") == true)
-
-        #expect(await fixture.approvals.decide(pending.id, .allowOnce))
-        let reply = try #require(await task.value)
+        let reply = try #require(await fixture.call("run_command", Self.run("df -h /", timeout: 20), progress: progress))
         #expect(reply.ok)
         #expect(reply.structuredContent?["exitCode"]?.intValue == 0)
         #expect(reply.structuredContent?["stdout"]?.stringValue == "OUTPUT-7f3a\n")
-        #expect(progress.all.last == "Running on staging")
+        #expect(progress.all == ["Running on staging"])
         let call = try #require(fixture.runner.calls.first)
         #expect(call.remoteCommand == RunCommandScript.remoteCommand("df -h /", timeoutSeconds: 20) && call.timeout == .seconds(20))
-    }
 
-    @Test func deniedAndTimedOutApprovals() async throws {
-        let fixture = try Fixture()
-        let (denied, first) = try await fixture.pendingCall(Self.run("reboot"))
-        await fixture.approvals.decide(first.id, .deny)
-        let deniedReply = try #require(await denied.value)
-        #expect(deniedReply.error?.code == .denied)
-        #expect(deniedReply.error?.message == "The user denied this command in AeroOps. Do not retry it unchanged.")
-
-        let (timed, _) = try await fixture.pendingCall(Self.run("uptime"))
-        fixture.clock.advance(by: 61)
-        let timedReply = try #require(await timed.value)
-        #expect(timedReply.error?.code == .approvalTimedOut)
-        #expect(timedReply.error?.message == "Nobody approved the command in AeroOps within 60 seconds, so it was denied.")
-        #expect(fixture.runner.calls.isEmpty)
-    }
-
-    @Test func agentCancelWhileWaitingRemovesTheApproval() async throws {
-        let fixture = try Fixture()
-        let (task, pending) = try await fixture.pendingCall(Self.run("uptime"))
-        task.cancel()
-        #expect(await task.value == nil, "a cancelled call has no reply")
-        #expect(await fixture.approvals.pending(pending.id) == nil)
-        #expect(fixture.runner.calls.isEmpty)
+        // sudo and the like are up to the agent and the user too.
+        let sudo = try #require(await fixture.call("run_command", Self.run("sudo systemctl restart nginx")))
+        #expect(sudo.ok)
+        #expect(fixture.runner.calls.count == 2)
     }
 
     @Test func agentCancelWhileRunningKillsTheCommand() async throws {
         let fixture = try Fixture(runner: FakeRunner(.hang(seconds: 60)))
-        let (task, pending) = try await fixture.pendingCall(Self.run("sleep 60"))
-        await fixture.approvals.decide(pending.id, .allowOnce)
+        let task = Task { await fixture.call("run_command", Self.run("sleep 60")) }
         #expect(await eventually { fixture.runner.calls.count == 1 })
         task.cancel()
-        #expect(await task.value == nil)
+        #expect(await task.value == nil, "a cancelled call has no reply")
         #expect(fixture.runner.cancellations == 1)
-    }
-
-    @Test func hostWindowSkipsPromptsExceptSudo() async throws {
-        let fixture = try Fixture()
-        let (first, pending) = try await fixture.pendingCall(Self.run("uptime"))
-        await fixture.approvals.decide(pending.id, .allowHost15Min)
-        #expect(try #require(await first.value).ok)
-
-        let second = try #require(await fixture.call("run_command", Self.run("free -m")))
-        #expect(second.ok, "covered by the window, no prompt")
-        let (sudo, sudoPending) = try await fixture.pendingCall(Self.run("sudo systemctl restart nginx"))
-        #expect(sudoPending.alwaysAskReasons == [.sudo])
-        await fixture.approvals.decide(sudoPending.id, .deny)
-        #expect(try #require(await sudo.value).error?.code == .denied)
     }
 
     @Test func commandFailuresMapToToolErrors() async throws {
         let timedOut = try Fixture(runner: FakeRunner(.outcome(RemoteCommandOutcome(exitCode: 143, timedOut: true))))
-        let (t1, p1) = try await timedOut.pendingCall(Self.run("sleep 999", timeout: 5))
-        await timedOut.approvals.decide(p1.id, .allowOnce)
-        #expect(try #require(await t1.value).error == BridgeError(code: .timedOut, message: "The command did not finish within 5 seconds and was killed."))
+        let t1 = try #require(await timedOut.call("run_command", Self.run("sleep 999", timeout: 5)))
+        #expect(t1.error == BridgeError(code: .timedOut, message: "The command did not finish within 5 seconds and was killed."))
 
         let ssh = try Fixture(runner: FakeRunner(.outcome(RemoteCommandOutcome(exitCode: 255, transportFailure: "Permission denied (publickey)."))))
-        let (t2, p2) = try await ssh.pendingCall(Self.run("uptime"))
-        await ssh.approvals.decide(p2.id, .allowOnce)
-        #expect(try #require(await t2.value).error == BridgeError(code: .sshFailed, message: "SSH failed: Permission denied (publickey)."))
+        let t2 = try #require(await ssh.call("run_command", Self.run("uptime")))
+        #expect(t2.error == BridgeError(code: .sshFailed, message: "SSH failed: Permission denied (publickey)."))
 
         let nonZero = try Fixture(runner: FakeRunner(.outcome(RemoteCommandOutcome(exitCode: 2, stderr: Data("no such file\n".utf8)))))
-        let (t3, p3) = try await nonZero.pendingCall(Self.run("ls /nope"))
-        await nonZero.approvals.decide(p3.id, .allowOnce)
-        let reply = try #require(await t3.value)
+        let reply = try #require(await nonZero.call("run_command", Self.run("ls /nope")))
         #expect(reply.ok, "a non-zero exit is a normal result")
         #expect(reply.structuredContent?["exitCode"]?.intValue == 2)
         #expect(reply.structuredContent?["stderr"]?.stringValue == "no such file\n")

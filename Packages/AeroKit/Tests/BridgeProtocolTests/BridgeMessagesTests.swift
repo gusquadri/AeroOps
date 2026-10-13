@@ -36,8 +36,8 @@ struct BridgeMessagesTests {
 
     @Test func replyAndProgressRoundTrip() throws {
         let success = BridgeReply.success(id: 3, content: [.text("line 1\nline 2")], structuredContent: ["count": 2])
-        let failure = BridgeReply.failure(id: 4, .denied, "The user denied it.")
-        let progress = BridgeProgress(id: 5, message: "Waiting for approval in AeroOps")
+        let failure = BridgeReply.failure(id: 4, .execNotAllowed, "Read tools only.")
+        let progress = BridgeProgress(id: 5, message: "Running on staging")
         for message in [BridgeServerMessage.reply(success), .reply(failure), .progress(progress)] {
             let line = try BridgeWire.line(message)
             #expect(line.dropLast().contains(UInt8(ascii: "\n")) == false, "newlines in text are escaped")
@@ -45,7 +45,7 @@ struct BridgeMessagesTests {
         }
         #expect(success.text == "line 1\nline 2")
         #expect(text(try BridgeWire.line(.reply(failure))) ==
-            "{\"error\":{\"code\":\"denied\",\"message\":\"The user denied it.\"},\"id\":4,\"ok\":false}\n")
+            "{\"error\":{\"code\":\"exec_not_allowed\",\"message\":\"Read tools only.\"},\"id\":4,\"ok\":false}\n")
     }
 
     @Test func unknownErrorCodesSurvive() throws {

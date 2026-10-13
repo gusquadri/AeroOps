@@ -34,9 +34,4 @@ public enum BridgeLimits {
     public static let defaultTimeoutSeconds = 60
     /// Cap on each of stdout and stderr of `run_command` (64 KB).
     public static let maxCommandOutputBytes = 64 * 1024
-
-    /// An unanswered approval is denied after this long.
-    public static let approvalTimeout: Duration = .seconds(60)
-    /// Length of an "Allow this host for 15 minutes" window.
-    public static let allowWindow: Duration = .seconds(15 * 60)
 }

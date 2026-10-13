@@ -1,7 +1,6 @@
 import Foundation
 
-/// Wall-clock time and sleeping, injectable so tests can expire approvals and allow windows
-/// without waiting.
+/// Wall-clock time and sleeping, injectable so tests can time out commands without waiting.
 public protocol BridgeClock: Sendable {
     /// The current time.
     var now: Date { get }

@@ -7,21 +7,20 @@ import os
 ///
 /// ```text
 /// socket → peer check → tool lookup → argument validation → host lookup → PolicyEngine
-///        → ApprovalCenter (run_command) → BridgeToolHandler / CommandExecutor → reply
+///        → BridgeToolHandler / CommandExecutor → reply
 /// ```
 ///
-/// While an approval is pending the
-/// CLI gets progress lines ("Waiting for approval in AeroOps"), which it forwards as MCP
-/// progress notifications.
+/// AeroOps does not ask the user before `run_command`: the host's tier decides, and the agent
+/// is told to confirm with the user in its own conversation. The CLI gets progress lines
+/// ("Running on <host>"), which it forwards as MCP progress notifications.
 ///
 /// ```swift
 /// let bridge = Bridge(handler: AppBridgeHandler(store: hostStore, collectors: collectors))
 /// try bridge.start()
-/// for await snapshot in await bridge.approvals.updates() { panel.show(snapshot.pending) }
+/// for await activity in bridge.executor.activity() { activityTab.apply(activity) }
 /// ```
 public final class Bridge: Sendable {
     public let socketURL: URL
-    public let approvals: ApprovalCenter
     public let executor: CommandExecutor
     private let pipeline: BridgePipeline
     private let server: BridgeServer
@@ -29,25 +28,20 @@ public final class Bridge: Sendable {
     /// - Parameters:
     ///   - socketURL: defaults to `~/.aeroops/bridge.sock`.
     ///   - handler: the app's data for the read tools.
-    ///   - executor: runs approved commands; defaults to SSHKit.
+    ///   - executor: runs `run_command` commands; defaults to SSHKit.
     ///   - peerValidator: defaults to ``CodeSignaturePeerValidator/forApp(allowUnsignedPeersInDebug:)``
     ///     (same team as the app; Release builds have no way around it).
-    ///   - progressInterval: how often a pending approval repeats its progress line.
     public init(
         socketURL: URL = AeroPaths.standard.bridgeSocket,
         handler: any BridgeToolHandler,
         executor: CommandExecutor = CommandExecutor(runner: SSHCommandRunner()),
-        approvals: ApprovalCenter = ApprovalCenter(),
         peerValidator: any BridgePeerValidator = CodeSignaturePeerValidator.forApp(),
         policy: PolicyEngine = PolicyEngine(),
-        clock: any BridgeClock = SystemBridgeClock(),
-        progressInterval: Duration = .seconds(5)
+        clock: any BridgeClock = SystemBridgeClock()
     ) {
         self.socketURL = socketURL
-        self.approvals = approvals
         self.executor = executor
-        pipeline = BridgePipeline(handler: handler, executor: executor, approvals: approvals,
-                                  policy: policy, clock: clock, progressInterval: progressInterval)
+        pipeline = BridgePipeline(handler: handler, executor: executor, policy: policy, clock: clock)
         server = BridgeServer(socketURL: socketURL, handler: pipeline, validator: peerValidator)
     }
 
@@ -64,8 +58,8 @@ public final class Bridge: Sendable {
         try server.start()
     }
 
-    /// Closes the socket and every connection. In-flight calls are cancelled: pending approvals
-    /// disappear and running commands are killed.
+    /// Closes the socket and every connection. In-flight calls are cancelled and running
+    /// commands are killed.
     public func stop() {
         server.stop()
     }
@@ -82,10 +76,8 @@ public final class Bridge: Sendable {
 struct BridgePipeline: BridgeRequestHandler {
     let handler: any BridgeToolHandler
     let executor: CommandExecutor
-    let approvals: ApprovalCenter
     let policy: PolicyEngine
     let clock: any BridgeClock
-    let progressInterval: Duration
 
     private static let logger = Logger(subsystem: "app.aeroops", category: "bridge")
 
@@ -113,31 +105,8 @@ struct BridgePipeline: BridgeRequestHandler {
                 return refuse(request, failure.bridgeError)
             }
         }
-        if let host {
-            switch policy.evaluate(tool: tool, host: host, command: call.command) {
-            case .allow:
-                break
-            case .reject(let error):
-                return refuse(request, error)
-            case .requireApproval(let alwaysAsk):
-                guard case .runCommand(let arguments) = call else {
-                    return refuse(request, BridgeError(code: .internalError, message: "Only run_command can be approved."))
-                }
-                let ask = ApprovalAsk(client: request.client, host: host, command: arguments.command, reason: arguments.reason,
-                                      alwaysAskReasons: alwaysAsk, toolUseId: request.toolUseId)
-                switch await waitForApproval(ask, progress: progress) {
-                case .allowedOnce, .allowedHost, .allowedByWindow:
-                    break
-                case .denied:
-                    return refuse(request, BridgeError(code: .denied, message: "The user denied this command in AeroOps. Do not retry it unchanged."))
-                case .timedOut:
-                    return refuse(request, BridgeError(
-                        code: .approvalTimedOut,
-                        message: "Nobody approved the command in AeroOps within \(Int(approvals.timeout.timeInterval)) seconds, so it was denied."))
-                case .cancelled:
-                    return nil
-                }
-            }
+        if let host, case .reject(let error) = policy.evaluate(tool: tool, host: host) {
+            return refuse(request, error)
         }
         if Task.isCancelled { return nil }
 
@@ -178,28 +147,6 @@ struct BridgePipeline: BridgeRequestHandler {
         }
     }
 
-    /// Asks through the ``ApprovalCenter``, sending a progress line now and then while it waits.
-    private func waitForApproval(_ ask: ApprovalAsk, progress: @escaping @Sendable (String) -> Void) async -> ApprovalOutcome {
-        let interval = progressInterval
-        let deadline = ContinuousClock.now + approvals.timeout
-        progress("Waiting for approval in AeroOps")
-        let heartbeat = Task {
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: interval) } catch { return }
-                guard !Task.isCancelled else { return }
-                let left = max(0, Int((deadline - ContinuousClock.now).timeInterval.rounded()))
-                progress("Waiting for approval in AeroOps (\(left) s left)")
-            }
-        }
-        let outcome = await approvals.authorize(ask)
-        // Cancelling alone is not enough: a heartbeat whose sleep had already ended could still
-        // send a stale "Waiting for approval" line after the caller's next progress line
-        // ("Running on <host>"), which happened under load. Wait until it has stopped.
-        heartbeat.cancel()
-        await heartbeat.value
-        return outcome
-    }
-
     private func refuse(_ request: BridgeRequest, _ error: BridgeError) -> BridgeReply {
         .failure(id: request.id, error.code, error.message)
     }
@@ -227,13 +174,5 @@ struct BridgePipeline: BridgeRequestHandler {
             logger.error("Bridge \(tool.rawValue, privacy: .public) failed: \(String(describing: type(of: error)), privacy: .public)")
             return BridgeError(code: .internalError, message: "AeroOps could not complete \(tool.rawValue).")
         }
-    }
-}
-
-extension ToolCall {
-    /// The `run_command` command, if any.
-    var command: String? {
-        if case .runCommand(let arguments) = self { return arguments.command }
-        return nil
     }
 }

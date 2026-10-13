@@ -20,7 +20,7 @@ public struct BridgeHostState: Sendable, Hashable {
 /// before any of these methods is called, so implementations only fetch data. Throw
 /// ``BridgeHandlerError`` for expected failures (its message goes to the agent); any other
 /// error becomes a generic failure. `run_command` does not go through the handler: the bridge
-/// runs it with its ``CommandExecutor`` after approval.
+/// runs it with its ``CommandExecutor``.
 public protocol BridgeToolHandler: Sendable {
     /// Every configured host, Off ones included (the bridge filters them out).
     func hosts() async -> [BridgeHostState]

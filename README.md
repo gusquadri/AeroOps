@@ -1,6 +1,6 @@
 # AeroOps
 
-AeroOps is a native macOS app for keeping an eye on a handful of Linux servers over SSH. Each server gets a live card with CPU, memory, disk, uptime and load. You can browse its Docker containers and Kubernetes pods, read their logs, and open terminal tabs to it. A local MCP server, `aeroops-mcp`, lets AI agents such as Claude Code and Codex use the same servers. Agents never see your keys, and each command they want to run waits for your approval. The only thing a server needs is SSH: nothing is installed on it. Private keys stay in the macOS Keychain or the Secure Enclave.
+AeroOps is a native macOS app for keeping an eye on a handful of Linux servers over SSH. Each server gets a live card with CPU, memory, disk, uptime and load. You can browse its Docker containers and Kubernetes pods, read their logs, and open terminal tabs to it. A local MCP server, `aeroops-mcp`, lets AI agents such as Claude Code and Codex use the same servers. Agents never see your keys, and they are told to ask you before running any command. The only thing a server needs is SSH: nothing is installed on it. Private keys stay in the macOS Keychain or the Secure Enclave.
 
 ![Dashboard with six demo hosts in every card state](docs/screenshots/dashboard.png)
 
@@ -8,8 +8,8 @@ AeroOps is a native macOS app for keeping an eye on a handful of Linux servers o
 | --- | --- |
 | ![Host detail inspector](docs/screenshots/host-detail.png) | ![Kubernetes pods with the Events panel](docs/screenshots/kubernetes.png) |
 | Host detail | Kubernetes pods, with Events for a pending pod |
-| ![Log viewer searching a container's logs](docs/screenshots/logs.png) | ![Two run_command requests waiting for approval](docs/screenshots/approvals.png) |
-| Container logs with search | Agent commands waiting for approval |
+| ![Log viewer searching a container's logs](docs/screenshots/logs.png) | ![Activity tab with a running agent command and its live output](docs/screenshots/activity.png) |
+| Container logs with search | Agent commands with live output in Activity |
 | ![Settings › MCP with copyable client config](docs/screenshots/mcp-settings.png) | ![Onboarding, server step](docs/screenshots/onboarding.png) |
 | Settings › MCP | First-run onboarding |
 | ![Import from ~/.ssh/config sheet](docs/screenshots/ssh-config-import.png) | ![Terminal tabs to three dev servers, one running top](docs/screenshots/terminals.png) |
@@ -28,8 +28,8 @@ The screenshots show the app's built-in demo data and the dev VM described below
 - **MCP tools for AI agents.** Each host has an access tier: **Off**, **Read** (the default) or **Read + Exec**.
   - Read tools: `list_hosts`, `get_host_metrics`, `list_containers`, `list_pods` and `get_logs`.
   - Exec tool: `run_command`.
-- **Approvals.** Every `run_command` waits for you. The panel shows the agent, the host, the exact command and the agent's stated reason. You can choose Deny, Allow once, or Allow host for 15 minutes. A request with no answer after 60 seconds is denied. Touch ID approval is optional. Commands that use `sudo` or `su`, or that run code they build or download, are asked about every time. While a command runs, its output streams live in the Activity tab, and you can cancel it there.
-- **Activity.** The Activity tab shows pending approvals and running and recent agent commands with their output.
+- **Asking before commands.** AeroOps runs `run_command` on a Read + Exec host as soon as the agent calls it. The MCP server's instructions and the tool's description tell the agent to show you the host, the exact command and its reason, and to wait for your yes in the conversation first. The agent skips asking only if you have told it not to ask. This is an instruction to the agent, not something AeroOps enforces. Keep hosts at Read when that matters.
+- **Activity.** The Activity tab shows running and recent agent commands with their live output, and you can cancel a running command there.
 - **Import from `~/.ssh/config`.** The importer follows `Include`, `Host` patterns and `Match all` the way OpenSSH does. It imports each host's name, address, port and user. It only reads the config: key files are never opened and nothing under `~/.ssh` is written. Hosts that use `ProxyJump` or `ProxyCommand` are listed with the reason they can't be imported.
 - **Onboarding.** On first run, a sheet walks through five steps: Welcome, Key, Server, AI agents and Done. It covers creating or importing a key, adding or importing a first server, and connecting an agent. Existing users never see it.
 
@@ -159,7 +159,7 @@ Set each host's tier in Settings › MCP or in the host editor. New hosts start 
 - **Agents never get SSH.**
   - `aeroops-mcp` has no access to the agent socket or the keys.
   - The bridge accepts only an `aeroops-mcp` whose code signature carries AeroOps's team ID and identifier.
-  - Every call goes through the policy engine. Off and Read hosts reject `run_command` without prompting.
+  - Every call goes through the policy engine. Off and Read hosts reject `run_command`. Read + Exec hosts run it without a prompt in AeroOps; the agent is told to ask you first.
 - **Remote output is untrusted.** Logs and command output are labelled as untrusted remote content for the agent.
   - Output is capped at 64 KB per stream and 2,000 log lines.
   - `run_command` times out after at most 300 seconds.
@@ -168,8 +168,8 @@ Set each host's tier in Settings › MCP or in the host editor. New hosts start 
 ## Project layout
 
 ```text
-App/                    SwiftUI app: Dashboard, Containers, Terminals, Activity, Approvals,
-                        Settings, Onboarding, Shell, Services, Model, Components, Support
+App/                    SwiftUI app: Dashboard, Containers, Terminals, Activity, Settings,
+                        Onboarding, Shell, Services, Model, Components, Support
 MCP/                    aeroops-mcp, the stdio MCP server that forwards to the app
 Packages/AeroKit/       Swift package with one target per module:
   Sources/AeroCore        models, parsers, ShellQuote, HostStore, ssh config importer
@@ -178,7 +178,7 @@ Packages/AeroKit/       Swift package with one target per module:
   Sources/Collectors      metrics, Docker and Kubernetes collectors, polling actors
   Sources/TerminalKit     libghostty wrapper
   Sources/BridgeProtocol  bridge.sock messages and client, shared with aeroops-mcp
-  Sources/AgentBridge     bridge server, PolicyEngine, ApprovalCenter, run_command
+  Sources/AgentBridge     bridge server, PolicyEngine, run_command
   Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusOrb, ...)
   Tests/                  one test target per module, plus BridgeHarness and test helpers
 Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)
@@ -191,7 +191,7 @@ project.yml             XcodeGen spec
 
 ## Status
 
-Phases 0 to 8 are done: spikes, the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, and the exec tier with approvals. In Phase 9, ssh-config import and onboarding are done.
+Phases 0 to 8 are done: spikes, the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, and the exec tier. In Phase 9, ssh-config import and onboarding are done.
 
 Still open:
 

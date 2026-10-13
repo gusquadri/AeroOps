@@ -4,30 +4,30 @@ import Foundation
 
 /// What the policy says about one tool call.
 public enum PolicyDecision: Sendable, Hashable {
-    /// Run it (read tools on Read and Read+Exec hosts).
+    /// Run it.
     case allow
-    /// Refuse without asking the user.
+    /// Refuse it.
     case reject(BridgeError)
-    /// Ask the user through ``ApprovalCenter``. With `alwaysAsk` reasons, an allow window does
-    /// not apply.
-    case requireApproval(alwaysAsk: [AlwaysAskReason])
 }
 
 /// The per-host MCP tier rules:
 ///
-/// | Tier       | Read tools | `run_command`                              |
-/// | ---------- | ---------- | ------------------------------------------ |
-/// | Off        | rejected   | rejected                                   |
-/// | Read       | allowed    | rejected, no prompt                        |
-/// | Read+Exec  | allowed    | approval; `sudo` & co. always ask          |
+/// | Tier       | Read tools | `run_command`       |
+/// | ---------- | ---------- | ------------------- |
+/// | Off        | rejected   | rejected            |
+/// | Read       | allowed    | rejected            |
+/// | Read+Exec  | allowed    | allowed             |
+///
+/// AeroOps does not ask the user before `run_command`; the agent is told to ask in its own
+/// conversation (``ToolCatalog/serverInstructions``).
 ///
 /// Pure and synchronous; ``Bridge`` calls it for every request, after validation and before
-/// any approval or remote work. Tests use it with hosts at the tiers they need.
+/// any remote work. Tests use it with hosts at the tiers they need.
 public struct PolicyEngine: Sendable {
     public init() {}
 
-    /// Decides `tool` on `host`. `command` is the `run_command` command, if any.
-    public func evaluate(tool: BridgeTool, host: RemoteHost, command: String? = nil) -> PolicyDecision {
+    /// Decides `tool` on `host`.
+    public func evaluate(tool: BridgeTool, host: RemoteHost) -> PolicyDecision {
         switch host.mcpTier {
         case .off:
             return .reject(Self.notShared(host))
@@ -39,8 +39,7 @@ public struct PolicyEngine: Sendable {
             }
             return .allow
         case .readExec:
-            guard tool.access == .exec else { return .allow }
-            return .requireApproval(alwaysAsk: CommandInspector.alwaysAskReasons(for: command ?? ""))
+            return .allow
         }
     }
 

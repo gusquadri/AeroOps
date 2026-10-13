@@ -8,7 +8,7 @@ import MCP
 /// Serves the MCP tool methods.
 ///
 /// Error mapping: an unknown tool is a JSON-RPC error
-/// (`-32602`); everything else that goes wrong (bad arguments, Off host, denial, timeout, ssh,
+/// (`-32602`); everything else that goes wrong (bad arguments, Off or Read host, timeout, ssh,
 /// app not running) is a normal result with `isError: true`, so the model can read the reason.
 /// A cancelled call throws `CancellationError`, and the SDK sends no response.
 struct ToolForwarder: Sendable {
@@ -49,7 +49,7 @@ struct ToolForwarder: Sendable {
         case .failure(let error): return Self.failure("AeroOps is not reachable: \(error.description)")
         }
 
-        // Progress lines from the app (e.g. "Waiting for approval in AeroOps") become
+        // Progress lines from the app (e.g. "Running on staging") become
         // notifications/progress when the client asked for them, in order, before the result.
         let token = params._meta?.progressToken
         let (updates, sink) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(32))

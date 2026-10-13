@@ -6,15 +6,15 @@ import Foundation
 //   CLI -> app  request   {"id":7,"tool":"get_logs","arguments":{…},"client":{"name":"claude-code","version":"2.1.296"},"toolUseId":"toolu_…"}
 //   CLI -> app  cancel    {"id":7,"cancel":true}
 //   app -> CLI  reply     {"id":7,"ok":true,"content":[{"type":"text","text":"…"}],"structuredContent":{…}}
-//                         {"id":7,"ok":false,"error":{"code":"denied","message":"…"}}
-//   app -> CLI  progress  {"id":7,"progress":{"message":"Waiting for approval"}}
+//                         {"id":7,"ok":false,"error":{"code":"exec_not_allowed","message":"…"}}
+//   app -> CLI  progress  {"id":7,"progress":{"message":"Running on staging"}}
 //
 // Request ids are minted by the CLI, start at 1 and are unique per connection. A reply with
 // id 0 is a connection-level failure (e.g. the peer check refused the CLI): every pending call
 // fails with its message, and the app closes the connection.
 
 /// The MCP client as it described itself in `initialize`. Self-reported: any process can claim
-/// any name, so the approval panel labels it that way.
+/// any name.
 public struct BridgeClientInfo: Codable, Sendable, Hashable {
     public var name: String
     public var version: String
@@ -38,7 +38,7 @@ public struct BridgeRequest: Codable, Sendable, Hashable {
     public var arguments: [String: JSONValue]
     /// The MCP client (self-reported), if the CLI saw `initialize`.
     public var client: BridgeClientInfo?
-    /// Claude Code's `_meta["claudecode/toolUseId"]`, for correlating approvals with the agent's tool call.
+    /// Claude Code's `_meta["claudecode/toolUseId"]`, for correlating a command with the agent's tool call.
     public var toolUseId: String?
 
     public init(id: Int, tool: String, arguments: [String: JSONValue] = [:], client: BridgeClientInfo? = nil, toolUseId: String? = nil) {
@@ -116,10 +116,6 @@ public struct BridgeErrorCode: RawRepresentable, Codable, Sendable, Hashable, Cu
     public static let hostNotShared = BridgeErrorCode(rawValue: "host_not_shared")
     /// `run_command` on a host whose tier is Read.
     public static let execNotAllowed = BridgeErrorCode(rawValue: "exec_not_allowed")
-    /// The user denied the approval.
-    public static let denied = BridgeErrorCode(rawValue: "denied")
-    /// Nobody answered the approval in time; treated as a denial.
-    public static let approvalTimedOut = BridgeErrorCode(rawValue: "approval_timed_out")
     /// The call was cancelled (by the agent or by the user in AeroOps).
     public static let cancelled = BridgeErrorCode(rawValue: "cancelled")
     /// ssh could not reach the host or run the command.
@@ -188,7 +184,7 @@ public struct BridgeReply: Codable, Sendable, Hashable {
     }
 }
 
-/// Progress of a pending call, e.g. while the approval panel is open.
+/// Progress of a pending call, e.g. "Running on staging".
 public struct BridgeProgress: Codable, Sendable, Hashable {
     public var id: Int
     public var progress: Info
@@ -209,7 +205,7 @@ public struct BridgeProgress: Codable, Sendable, Hashable {
     public var message: String { progress.message }
 }
 
-/// Asks the app to stop working on a request: dismiss its approval, kill its ssh.
+/// Asks the app to stop working on a request: kill its ssh.
 public struct BridgeCancel: Codable, Sendable, Hashable {
     public var id: Int
     public var cancel: Bool

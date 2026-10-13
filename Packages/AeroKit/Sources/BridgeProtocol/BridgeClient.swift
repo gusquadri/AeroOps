@@ -74,8 +74,7 @@ public struct BridgeClientConfiguration: Sendable {
 /// - When nothing listens, asks the launcher to start AeroOps once and retries every
 ///   ``BridgeClientConfiguration/retryInterval`` up to ``BridgeClientConfiguration/launchTimeout``.
 /// - Each call gets a fresh id; replies are matched by id, so calls run concurrently.
-/// - Cancelling the calling task sends `{"id":…,"cancel":true}` (the app dismisses the approval
-///   or kills the command) and throws `CancellationError`. A call cancelled before it was sent
+/// - Cancelling the calling task sends `{"id":…,"cancel":true}` (the app kills the command) and throws `CancellationError`. A call cancelled before it was sent
 ///   is never sent.
 public actor BridgeClient {
     private struct Pending {

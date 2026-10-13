@@ -103,9 +103,7 @@ enum DebugLaunchOptions {
             || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested || PerfSelfTest.isRequested
             || FilesSelfTest.isRequested {
             let model = Phase2SelfTest.makeModel()
-            model.agents.useTransientSettings()
             model.onboarding.suppressesAutomaticPresentation = true
-            if Phase7SelfTest.isRequested { Phase7SelfTest.configure(model) }
             return model
         }
         guard let dataDirectory else { return nil }
@@ -114,9 +112,7 @@ enum DebugLaunchOptions {
             applicationSupport: dataDirectory
         )
         let ssh = SSHServices(paths: paths, secretStore: InMemorySecretStore(), defaults: nil)
-        let model = AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
-        model.agents.useTransientSettings()
-        return model
+        return AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
     }
 
     @MainActor
@@ -308,20 +304,8 @@ private struct DebugSnapshotter {
         await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
     }
 
-    /// The approval panel (normal, sudo, seconds left), Activity and Settings › MCP at full height.
+    /// Activity and Settings › MCP at full height.
     private func captureAgents() async {
-        let agents = model.agents
-        let pending = agents.pending
-        if let first = pending.first {
-            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: first.requestedAt.addingTimeInterval(14), approvalOverride: first),
-                                    title: "Approval", name: "\(prefix)-approval")
-            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: first.expiresAt.addingTimeInterval(-7), approvalOverride: first),
-                                    title: "Approval", name: "\(prefix)-approval-low")
-        }
-        if let sudo = pending.first(where: { !$0.offersHostWindow }) {
-            await captureStandalone(ApprovalPanelView(service: agents, fixedNow: sudo.requestedAt.addingTimeInterval(21), approvalOverride: sudo),
-                                    title: "Approval", name: "\(prefix)-approval-sudo")
-        }
         await captureStandalone(ActivityView().frame(width: 1180, height: 2000).background { SkyBackground() },
                                 title: "Activity", name: "\(prefix)-activity-full")
         await captureStandalone(MCPSettingsPane().frame(width: 780, height: 1500), title: "MCP", name: "\(prefix)-mcp-full")

@@ -26,13 +26,13 @@ struct AeroThemeShowcase: View {
                 )
             }
             HStack(alignment: .top, spacing: 18) {
-                GlassSection("Pending approvals", systemImage: "hand.raised.fill") {
+                GlassSection("Agent commands", systemImage: "terminal") {
                     VStack(alignment: .leading, spacing: 12) {
-                        approvalRow("claude-code", command: "docker restart api", host: "web-01")
-                        approvalRow("cursor", command: "kubectl delete pod web-7f9c", host: "db-02")
+                        commandRow("claude-code", command: "docker restart api", host: "web-01", running: true)
+                        commandRow("codex", command: "kubectl rollout status deploy/web", host: "db-02", running: false)
                     }
                 } accessory: {
-                    AeroTag("2 pending", tone: .warning)
+                    AeroTag("1 running")
                 }
                 .frame(maxWidth: .infinity)
                 GlassSection("Components", systemImage: "sparkles") {
@@ -86,20 +86,23 @@ struct AeroThemeShowcase: View {
         }
     }
 
-    private func approvalRow(_ agent: String, command: String, host: String) -> some View {
+    private func commandRow(_ agent: String, command: String, host: String, running: Bool) -> some View {
         HStack(spacing: 10) {
-            StatusOrb(tone: .warning)
+            StatusOrb(tone: running ? .warning : .healthy)
             VStack(alignment: .leading, spacing: 2) {
                 Text(command)
-                    .font(Aero.font(.callout, weight: .semibold))
+                    .font(Aero.monospacedFont(.callout, weight: .semibold))
                     .foregroundStyle(Aero.text.primary)
                 Text("\(agent) on \(host)")
                     .font(Aero.font(.caption))
                     .foregroundStyle(Aero.text.secondary)
             }
             Spacer()
-            Button("Deny", role: .destructive) {}.buttonStyle(.aqua).controlSize(.small)
-            Button("Approve") {}.buttonStyle(.aqua).controlSize(.small)
+            if running {
+                Button("Cancel") {}.buttonStyle(.aquaSecondary).controlSize(.small)
+            } else {
+                AeroTag("exit 0", tone: .healthy)
+            }
         }
     }
 }

@@ -2,7 +2,7 @@
 //
 // It serves the static tool catalog itself and forwards every tool call to the running app over
 // ~/.aeroops/bridge.sock. The app does all the work and all the
-// checks: peer signature, host policy, approvals, audit. stdout carries JSON-RPC only; logs go
+// checks: peer signature and host policy. stdout carries JSON-RPC only; logs go
 // to stderr.
 //
 // Environment:
@@ -109,7 +109,7 @@ enum AeroOpsMCP {
         // Returns when stdin hits EOF (the client closed the pipe). Requests read before that
         // still get their responses for a short while (a piped script reads them); then closing
         // the bridge connection makes the app cancel whatever this session still had in flight,
-        // such as a command waiting for an approval nobody would see the result of.
+        // such as a running command nobody would see the result of.
         await server.waitUntilCompleted()
         let unanswered = await transport.drain(timeout: .seconds(2))
         if case .success(let bridge) = bridge { await bridge.close() }

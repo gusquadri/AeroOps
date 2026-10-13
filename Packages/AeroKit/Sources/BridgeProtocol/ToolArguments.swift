@@ -90,7 +90,7 @@ public struct GetLogsArguments: Sendable, Hashable {
 /// `run_command` arguments.
 public struct RunCommandArguments: Sendable, Hashable {
     public var host: String
-    /// Exactly as the agent sent it; shown verbatim in the approval panel.
+    /// Exactly as the agent sent it; shown verbatim in the Activity tab.
     public var command: String
     public var reason: String
     /// 1...300.
@@ -332,7 +332,7 @@ struct ArgumentReader {
     }
 
     /// `run_command`'s command: non-empty, ≤ 16 KiB, no NUL, controls or invisible characters
-    /// (so the approval panel shows exactly what runs).
+    /// (so the Activity tab shows exactly what runs).
     func command() throws(ToolArgumentError) -> String {
         guard let command = try string("command") else { throw ToolArgumentError("Missing required argument 'command'.") }
         if command.allSatisfy(\.isWhitespace) { throw ToolArgumentError("Argument 'command' must not be empty.") }
@@ -350,7 +350,7 @@ struct ArgumentReader {
     // MARK: Helpers
 
     /// Rejects C0/C1 controls (except tab, and newline when allowed), DEL, and invisible or
-    /// direction-changing characters that could make the approval panel show something other
+    /// direction-changing characters that could make the Activity tab show something other
     /// than what runs.
     static func checkCharacters(_ text: String, key: String, allowNewlines: Bool) throws(ToolArgumentError) {
         for scalar in text.unicodeScalars {
@@ -394,7 +394,7 @@ struct ArgumentReader {
     }
 }
 
-/// Makes untrusted text safe to show in the app's UI (approval panel, activity list): control
+/// Makes untrusted text safe to show in the app's UI (activity list): control
 /// characters become spaces, invisible and direction-changing characters are removed, and the
 /// result is capped.
 public enum DisplayText {

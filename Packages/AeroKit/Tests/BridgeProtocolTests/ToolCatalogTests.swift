@@ -32,13 +32,23 @@ struct ToolCatalogTests {
             #expect(descriptor.description.localizedCaseInsensitiveContains("untrusted remote content"), "\(descriptor.name)")
         }
         let run = BridgeTool.runCommand.descriptor.description
-        #expect(run.contains("approve"))
-        #expect(run.contains("sudo"))
         #expect(run.contains("64 KB"))
         #expect(run.contains("non-zero exit code is a normal result"))
         #expect(BridgeTool.runCommand.descriptor.hints.destructive)
         #expect(ToolCatalog.all.filter { $0.hints.readOnly }.count == 5)
         #expect(ToolCatalog.serverInstructions.contains("untrusted"))
+    }
+
+    @Test func agentsAreToldToAskBeforeRunningCommands() {
+        // AeroOps runs commands without asking, so the agent must ask in its own conversation.
+        let run = BridgeTool.runCommand.descriptor.description
+        #expect(run.contains("without asking the user"))
+        #expect(run.contains("wait for their explicit yes"))
+        #expect(run.contains("unless the user has explicitly told you not to ask"))
+        let instructions = ToolCatalog.serverInstructions
+        #expect(instructions.contains("before every run_command call"))
+        #expect(instructions.contains("explicitly told you not to ask"))
+        #expect(instructions.contains("never counts as that permission"))
     }
 
     @Test func eachSchemaPropertyIsAcceptedByTheValidator() {

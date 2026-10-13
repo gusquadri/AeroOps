@@ -23,8 +23,7 @@ import SSHKit
 ///
 /// Runs under ``Phase2SelfTest``'s temporary root and Keychain service, so the bridge socket
 /// (`<root>/d/bridge.sock`) is the self-test's own; `~/.aeroops` and the
-/// user's agent configuration are never touched. Notifications are off for the run (no
-/// permission prompt); the floating approval panel is shown as usual.
+/// user's agent configuration are never touched.
 ///
 /// Hosts: `dev-container` (dev@localhost:2222, Read), `alpine` (dev@localhost:2223, Off) and
 /// `staging` (dev@aeroops-vm.orb.local:22, Read + Exec, Docker as dev).
@@ -33,18 +32,14 @@ import SSHKit
 /// (automatic only here) → wait until all three are online → run `dev/selftest/phase7-drive.sh`
 /// with `AEROOPS_BRIDGE_SOCKET` set: MCP Inspector CLI calls through the embedded `aeroops-mcp`
 /// (the bridge's peer check runs as always), then one `claude -p` run per prompt in
-/// ``prompts``. While it runs, the self-test answers each approval through
-/// ``BridgeService/decide(_:_:)`` (the panel's path into `ApprovalCenter.decide`):
+/// ``prompts``. AeroOps runs `run_command` without asking (the agent is told to ask the user);
+/// the self-test only cancels the long command:
 ///
-/// | call (staging unless noted)  | answer                                   | expected            |
-/// | ---------------------------- | ---------------------------------------- | ------------------- |
-/// | `uname -a` on dev-container  | none (Read host)                         | rejected, no prompt |
-/// | `uname -a`                   | Allow once after 2 s                     | exit 0              |
-/// | `uname -a` again             | Deny                                     | "denied" error      |
-/// | `hostname`                   | Allow host for 15 minutes                | exit 0              |
-/// | `uptime`                     | none (window)                            | allowed by window   |
-/// | `sudo -n true`               | asked despite the window; Allow once, then Revoke All | runs   |
-/// | `sleep 120`                  | Allow once; Cancel as the Activity tab does | remote process gone |
+/// | call                         | app side                         | expected            |
+/// | ---------------------------- | -------------------------------- | ------------------- |
+/// | `uname -a` on dev-container  | none (Read host)                 | rejected            |
+/// | `uname -a` on staging        | none                             | exit 0              |
+/// | `sleep 120` on staging       | Cancel as the Activity tab does  | remote process gone |
 ///
 /// Then checks the live output in the Activity tab's model, the connection and agent events,
 /// and shuts down, revokes and deletes the
@@ -70,11 +65,6 @@ struct Phase7SelfTest {
     /// Longest a cancelled command may stay on the host (two heartbeats, then TERM and KILL).
     static let cancelLimit: TimeInterval = 10
 
-    /// Before services start: approvals show the panel, but no notification permission prompt.
-    static func configure(_ model: AppModel) {
-        model.agents.postsNotifications = false
-    }
-
     let model: AppModel
 
     // MARK: - Report
@@ -91,18 +81,6 @@ struct Phase7SelfTest {
         var exitStatus: Int32
         var seconds: Double
         var excerpt: String
-    }
-
-    struct Approval: Codable {
-        var host: String
-        var command: String
-        var client: String
-        var offersHostWindow: Bool
-        var alwaysAsk: [String]
-        var windowOpenWhenAsked: Bool
-        var decision: String?
-        var decidedAfterSeconds: Double?
-        var applied: Bool?
     }
 
     struct Cancel: Codable {
@@ -132,7 +110,6 @@ struct Phase7SelfTest {
         var peers: [String] = []
         var rejectedConnections: [String] = []
         var calls: [Call] = []
-        var approvals: [Approval] = []
         var cancel: Cancel?
         var claude: [ClaudeRun] = []
         var agentSignEvents = 0
@@ -174,65 +151,6 @@ struct Phase7SelfTest {
                 }
                 if update.hostKeyIssue == .unknown, trustStarted.insert(host.id).inserted {
                     onUnknownKey?(host)
-                }
-            }
-        }
-    }
-
-    /// Answers approvals the way the panel's buttons do, by command.
-    @MainActor
-    private final class Approver {
-        let agents: BridgeService
-        let staging: RemoteHost
-        var records: [Approval] = []
-        var unexpected: [String] = []
-        private var seen: Set<UUID> = []
-        private var unameCount = 0
-
-        init(agents: BridgeService, staging: RemoteHost) {
-            self.agents = agents
-            self.staging = staging
-        }
-
-        func receive(_ snapshot: ApprovalSnapshot) {
-            for approval in snapshot.pending where seen.insert(approval.id).inserted {
-                handle(approval, windowOpen: snapshot.windows.contains { $0.hostID == approval.hostID })
-            }
-        }
-
-        private func handle(_ approval: PendingApproval, windowOpen: Bool) {
-            let index = records.count
-            records.append(Approval(
-                host: approval.hostName, command: approval.command, client: approval.clientLabel,
-                offersHostWindow: approval.offersHostWindow, alwaysAsk: approval.alwaysAskReasons.map(\.rawValue),
-                windowOpenWhenAsked: windowOpen))
-            var revokeAfter = false
-            let decision: ApprovalDecision
-            let delay: Duration
-            switch (approval.hostID == staging.id, approval.command) {
-            case (true, "uname -a"):
-                unameCount += 1
-                (decision, delay) = unameCount == 1 ? (.allowOnce, .seconds(2)) : (.deny, .seconds(1))
-            case (true, "hostname"):
-                (decision, delay) = (.allowHost15Min, .seconds(1))
-            case (true, "sudo -n true"):
-                (decision, delay) = (.allowOnce, .seconds(1))
-                revokeAfter = true
-            case (true, Phase7SelfTest.sleepCommand):
-                (decision, delay) = (.allowOnce, .seconds(1))
-            default:
-                unexpected.append("\(approval.hostName): \(approval.command)")
-                (decision, delay) = (.deny, .zero)
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: delay)
-                let applied = await agents.decide(approval.id, decision)
-                records[index].decision = decision.rawValue
-                records[index].decidedAfterSeconds = Phase7SelfTest.rounded(Date.now.timeIntervalSince(approval.requestedAt))
-                records[index].applied = applied
-                if revokeAfter {
-                    // Settings › MCP's "Revoke All Allow Windows".
-                    await agents.revokeAllWindows()
                 }
             }
         }
@@ -444,15 +362,10 @@ struct Phase7SelfTest {
         r.step("hosts online", online, hosts.map { "\($0.name) [\($0.mcpTier.rawValue)]: \(watch.lastStatus[$0.id] ?? "no update")" }.joined(separator: ", "))
         guard online else { return await finish(r, key: key) }
 
-        // 4. The driver, with the approval answers and the cancel wired in.
-        let approver = Approver(agents: agents, staging: staging)
+        // 4. The driver, with the cancel wired in.
         let canceller = Canceller(agents: agents, runner: ssh.runner, host: staging)
-        agents.didUpdateApprovals = { approver.receive($0) }
         agents.didReceiveCommandActivity = { canceller.receive($0) }
-        defer {
-            agents.didUpdateApprovals = nil
-            agents.didReceiveCommandActivity = nil
-        }
+        defer { agents.didReceiveCommandActivity = nil }
         let results = Phase2SelfTest.root.appending(path: "drive", directoryHint: .isDirectory)
         let driveStart = Date.now
         let status = await drive(script: script, results: results, socket: socket)
@@ -464,12 +377,11 @@ struct Phase7SelfTest {
 
         let steps = DriveStep.load(results)
         r.report.calls = steps.map { Call(step: $0.name, exitStatus: $0.status, seconds: $0.seconds, excerpt: $0.excerpt) }
-        r.report.approvals = approver.records
         r.report.cancel = canceller.result
         let byName = Dictionary(steps.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
         checkReadTools(r, byName)
-        checkRunCommand(r, byName, approver: approver, canceller: canceller)
+        checkRunCommand(r, byName, canceller: canceller)
         checkClaude(r, byName)
         checkActivity(r)
 
@@ -593,69 +505,29 @@ struct Phase7SelfTest {
         }
     }
 
-    private func checkRunCommand(_ r: Recorder, _ steps: [String: DriveStep], approver: Approver, canceller: Canceller) {
-        let approvals = approver.records
-        func asked(_ command: String) -> [Approval] { approvals.filter { $0.command == command } }
+    private func checkRunCommand(_ r: Recorder, _ steps: [String: DriveStep], canceller: Canceller) {
         func exitCode(_ step: DriveStep) -> Int? { (step.structured?["exitCode"] as? NSNumber)?.intValue }
         func missing(_ name: String) { r.step(name, false, "the driver did not run it") }
 
         if let step = steps["run-read-host"] {
-            let prompted = approvals.contains { $0.host == "dev-container" }
-            r.step("run_command on Read host", step.isError && step.text.contains("read tools only") && !prompted,
-                   "rejected without asking: \(!prompted); \(step.excerpt)")
+            r.step("run_command on Read host", step.isError && step.text.contains("read tools only"), step.excerpt)
         } else { missing("run_command on Read host") }
 
-        let uname = asked("uname -a")
-        if let step = steps["run-allow-once"] {
+        if let step = steps["run-exec-host"] {
             let stdout = step.structured?["stdout"] as? String ?? ""
-            let first = uname.first
-            r.step("run_command allow once", !step.isError && exitCode(step) == 0 && stdout.contains("Linux")
-                    && first?.decision == ApprovalDecision.allowOnce.rawValue && first?.applied == true && (first?.decidedAfterSeconds ?? 0) >= 2,
-                   "decision \(first?.decision ?? "none") after \(first?.decidedAfterSeconds.map { "\($0)" } ?? "-") s, exit \(exitCode(step).map(String.init) ?? "-"): \(stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
-        } else { missing("run_command allow once") }
-
-        if let step = steps["run-denied"] {
-            let second = uname.dropFirst().first
-            r.step("run_command denied", step.isError && step.text.contains("denied") && second?.decision == ApprovalDecision.deny.rawValue,
-                   "decision \(second?.decision ?? "none"); agent sees: \(step.excerpt)")
-        } else { missing("run_command denied") }
-
-        if let step = steps["run-allow-window"] {
-            let approval = asked("hostname").first
-            r.step("run_command allow host 15 min", !step.isError && exitCode(step) == 0 && approval?.decision == ApprovalDecision.allowHost15Min.rawValue
-                    && approval?.offersHostWindow == true,
-                   "decision \(approval?.decision ?? "none"), exit \(exitCode(step).map(String.init) ?? "-")")
-        } else { missing("run_command allow host 15 min") }
-
-        if let step = steps["run-in-window"] {
-            let prompted = !asked("uptime").isEmpty
-            r.step("run_command inside window", !step.isError && exitCode(step) == 0 && !prompted,
-                   "ran without asking: \(!prompted), exit \(exitCode(step).map(String.init) ?? "-")")
-        } else { missing("run_command inside window") }
-
-        if let step = steps["run-sudo"] {
-            let approval = asked("sudo -n true").first
-            r.step("sudo asks inside window", !step.isError && approval?.windowOpenWhenAsked == true && approval?.offersHostWindow == false
-                    && approval?.alwaysAsk.contains(AlwaysAskReason.sudo.rawValue) == true && approval?.decision == ApprovalDecision.allowOnce.rawValue,
-                   "asked with window open \(approval?.windowOpenWhenAsked ?? false), 15-minute option offered \(approval?.offersHostWindow ?? true), "
-                    + "reasons \(approval?.alwaysAsk ?? []), decision \(approval?.decision ?? "none"), exit \(exitCode(step).map(String.init) ?? "-") (sudoers allows only k3s kubectl)")
-        } else { missing("sudo asks inside window") }
+            r.step("run_command on Read + Exec host", !step.isError && exitCode(step) == 0 && stdout.contains("Linux"),
+                   "ran without asking in \(step.seconds) s, exit \(exitCode(step).map(String.init) ?? "-"): \(stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
+        } else { missing("run_command on Read + Exec host") }
 
         if let step = steps["run-cancelled"] {
-            let approval = asked(Self.sleepCommand).first
             let cancel = canceller.result
             let gone = cancel.remoteGoneAfterSeconds.map { $0 <= Self.cancelLimit } ?? false
-            r.step("cancel from Activity", step.isError && step.text.contains("cancelled") && approval != nil && cancel.cancelAccepted
+            r.step("cancel from Activity", step.isError && step.text.contains("cancelled") && cancel.cancelAccepted
                     && !cancel.remoteProcessesBefore.isEmpty && gone && cancel.activityState == "cancelled(byUser: true)",
-                   "asked again after Revoke All: \(approval != nil); on host before cancel: \(cancel.remoteProcessesBefore.count) processes; "
+                   "on host before cancel: \(cancel.remoteProcessesBefore.count) processes; "
                     + "cancel accepted \(cancel.cancelAccepted); gone from host after \(cancel.remoteGoneAfterSeconds.map { "\($0)" } ?? "-") s "
                     + "(limit \(Int(Self.cancelLimit)) s); Activity shows \(cancel.activityState); agent sees: \(step.excerpt)")
         } else { missing("cancel from Activity") }
-
-        r.step("windows revoked", model.agents.windows.isEmpty, "\(model.agents.windows.count) allow windows open at the end")
-        r.step("no unexpected approvals", approver.unexpected.isEmpty && approvals.allSatisfy { $0.applied == true },
-               "\(approvals.count) approvals, all answered: \(approvals.allSatisfy { $0.applied == true })"
-                + (approver.unexpected.isEmpty ? "" : "; unexpected (denied): \(approver.unexpected)"))
     }
 
     /// Each `claude -p` run answered, and connected to the bridge (through `aeroops-mcp`) while it ran.

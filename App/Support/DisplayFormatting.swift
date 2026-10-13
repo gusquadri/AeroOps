@@ -16,7 +16,7 @@ extension MCPTier {
         switch self {
         case .off: "AI agents can't see this host."
         case .read: "Agents can read metrics, containers, pods and logs. Every call is logged."
-        case .readExec: "Agents can also run commands, each one shown to you for approval first."
+        case .readExec: "Agents can also run commands. They are told to ask you in the conversation first; AeroOps itself does not ask."
         }
     }
 }

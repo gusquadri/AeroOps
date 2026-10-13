@@ -1,8 +1,8 @@
 #!/bin/sh
 # Drives the built app's aeroops-mcp for `AeroOps -AeroSelfTest phase7`
 # (App/Support/Phase7SelfTest.swift). The app starts this script once its bridge listens on
-# a temporary socket and the dev hosts are online; the app answers the approval requests
-# itself, through ApprovalCenter.decide, as the panel buttons would.
+# a temporary socket and the dev hosts are online. AeroOps runs run_command without asking;
+# the app cancels the long command itself, as the Activity tab's Cancel button would.
 #
 # Usage: AEROOPS_BRIDGE_SOCKET=<socket> dev/selftest/phase7-drive.sh <aeroops-mcp> <results-dir>
 #
@@ -68,13 +68,9 @@ call metrics-alpine get_host_metrics '{"host":"alpine"}'
 call containers-staging list_containers '{"host":"staging","all":true}'
 call logs-demo-logger get_logs '{"host":"staging","kind":"container","name":"demo-logger","tail":100}'
 
-# 2. run_command. The app approves, denies or cancels each one as Phase7SelfTest describes.
-call run-read-host run_command '{"host":"dev-container","command":"uname -a","reason":"Self-test: exec on a Read host must be rejected without asking."}'
-call run-allow-once run_command '{"host":"staging","command":"uname -a","reason":"Self-test: the app allows this once."}'
-call run-denied run_command '{"host":"staging","command":"uname -a","reason":"Self-test: the app denies this one."}'
-call run-allow-window run_command '{"host":"staging","command":"hostname","reason":"Self-test: the app allows the host for 15 minutes."}'
-call run-in-window run_command '{"host":"staging","command":"uptime","reason":"Self-test: runs inside the allow window without asking."}'
-call run-sudo run_command '{"host":"staging","command":"sudo -n true","reason":"Self-test: sudo asks even inside an allow window."}'
+# 2. run_command, as Phase7SelfTest describes.
+call run-read-host run_command '{"host":"dev-container","command":"uname -a","reason":"Self-test: exec on a Read host must be rejected."}'
+call run-exec-host run_command '{"host":"staging","command":"uname -a","reason":"Self-test: a Read + Exec host runs this right away."}'
 call run-cancelled run_command '{"host":"staging","command":"sleep 120","reason":"Self-test: the app cancels this from the Activity tab.","timeoutSec":150}'
 
 # 3. Claude Code, one run per prompt, read tools only, MCP servers from this file only.

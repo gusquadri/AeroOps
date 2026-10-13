@@ -162,7 +162,7 @@ public enum CommandActivity: Sendable, Hashable {
     case cancelled(id: UUID, byUser: Bool)
 }
 
-/// Runs approved `run_command` calls through a ``RemoteCommandRunner``.
+/// Runs `run_command` calls through a ``RemoteCommandRunner``.
 ///
 /// The command reaches the host as one quoted argument of the `Scripts/remote/run-command.sh`
 /// wrapper, so the remote login shell only ever sees quoted words. The timeout is clamped to

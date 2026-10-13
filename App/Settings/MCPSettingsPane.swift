@@ -4,7 +4,7 @@ import AgentBridge
 import SwiftUI
 
 /// Settings › MCP: the bridge's status, config snippets for MCP clients (copied, never written
-/// to their config files), per-host access and approval options.
+/// to their config files) and per-host access.
 struct MCPSettingsPane: View {
     @Environment(AppModel.self) private var model
 
@@ -15,7 +15,6 @@ struct MCPSettingsPane: View {
                 BridgeStatusSection()
                 ConnectAgentSection()
                 HostAccessSection()
-                ApprovalSettingsSection()
             }
             .padding(20)
         }
@@ -27,7 +26,7 @@ struct MCPSettingsPane: View {
             Text("AI agents (MCP)")
                 .font(Aero.font(.title2, weight: .semibold))
                 .foregroundStyle(Aero.text.primary)
-            Text("Claude Code, Codex and other MCP clients reach your servers through AeroOps. Agents never see your keys; they get only what each host's access level allows, every call is logged, and every command waits for your approval.")
+            Text("Claude Code, Codex and other MCP clients reach your servers through AeroOps. Agents never see your keys; they get only what each host's access level allows, and every call is logged. AeroOps runs commands without asking: agents are told to ask you in the conversation first, unless you tell them not to.")
                 .font(Aero.font(.callout))
                 .foregroundStyle(Aero.text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -306,50 +305,6 @@ extension MCPTier {
         case .off: "eye.slash"
         case .read: "eye"
         case .readExec: "terminal"
-        }
-    }
-}
-
-// MARK: - Approvals
-
-private struct ApprovalSettingsSection: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        @Bindable var agents = model.agents
-        GlassSection("Approvals", systemImage: "hand.raised") {
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle(isOn: $agents.requiresTouchID) {
-                    Text("Require Touch ID to allow a command")
-                        .font(Aero.font(.callout, weight: .medium))
-                        .foregroundStyle(Aero.text.primary)
-                    Text("Allow once and Allow host for 15 minutes ask for Touch ID or your login password first. Deny never asks.")
-                        .font(Aero.font(.caption))
-                        .foregroundStyle(Aero.text.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .toggleStyle(.switch)
-
-                Text("Requests nobody answers are denied after 60 seconds. Commands using sudo, su or code they build or download are asked about every time, even while their host is allowed.")
-                    .font(Aero.font(.caption))
-                    .foregroundStyle(Aero.text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if agents.windows.isEmpty {
-                    Text("No host is allowed without asking right now.")
-                        .font(Aero.font(.callout))
-                        .foregroundStyle(Aero.text.secondary)
-                } else {
-                    AllowWindowList(windows: agents.windows) { hostID in
-                        Task { await agents.revokeWindow(for: hostID) }
-                    }
-                }
-                Button("Revoke All Allow Windows", systemImage: "xmark.shield", role: .destructive) {
-                    Task { await agents.revokeAllWindows() }
-                }
-                .buttonStyle(.aquaSecondary)
-                .disabled(agents.windows.isEmpty)
-            }
         }
     }
 }

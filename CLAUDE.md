@@ -5,7 +5,7 @@
 - All remote access goes through SSHKit: system `/usr/bin/ssh` + `~/.aeroops/ssh_config` + the in-app agent. No other SSH code paths or SSH libraries.
 - Remote scripts are POSIX `sh`, run with `LC_ALL=C`, BusyBox-compatible, and live in `Scripts/remote/`.
 - Every value interpolated into a remote command goes through `ShellQuote.quote`.
-- MCP exec-tier work always goes through `PolicyEngine` and `ApprovalCenter`. Never bypass them, not even in tests; use a test policy.
+- MCP exec-tier work always goes through `PolicyEngine` (per-host tiers). Never bypass it, not even in tests; use hosts at the tier you need. AeroOps does not ask before `run_command`; the MCP instructions tell the agent to ask the user.
 - Swift 6 strict concurrency: UI on `@MainActor`, per-host state in actors.
 - Views use `AeroTheme` tokens only; no hard-coded colours, radii or fonts.
 - Edit `project.yml`, never the `.xcodeproj` (generated and git-ignored).

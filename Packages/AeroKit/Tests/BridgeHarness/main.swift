@@ -2,12 +2,12 @@
 // end without the AeroOps UI (MCP Inspector, `claude -p`). Test-only; never shipped.
 //
 // Every call goes through the real pipeline: peer check, argument validation, PolicyEngine,
-// ApprovalCenter, CommandExecutor. Only the data is fake: three hosts (staging is
-// Read+Exec, prod is Read, vault is Off), canned metrics, containers, pods and logs, and a command
-// runner that never runs anything (it answers "harness: fake output" for approved commands).
+// CommandExecutor. Only the data is fake: three hosts (staging is Read+Exec, prod is Read,
+// vault is Off), canned metrics, containers, pods and logs, and a command runner that never runs
+// anything (it answers "harness: fake output" for run_command).
 //
 //   swift run --package-path Packages/AeroKit BridgeHarness \
-//       --socket /tmp/aero-e2e/bridge.sock --peer-team VUDQQS32NW --approval-timeout 3
+//       --socket /tmp/aero-e2e/bridge.sock --peer-team VUDQQS32NW
 //   AEROOPS_BRIDGE_SOCKET=/tmp/aero-e2e/bridge.sock npx -y @modelcontextprotocol/inspector --cli \
 //       <DerivedData>/aeroops-mcp --method tools/call --tool-name list_hosts
 //
@@ -15,10 +15,6 @@
 //   --socket PATH            socket to serve (default: a new temp dir); printed as "ready PATH"
 //   --peer-team TEAM         accept only peers signed by TEAM as app.aeroops.mcp (the real check)
 //   --allow-unsigned-peers   DEBUG builds only: accept any peer of this user, logged as a fault
-//   --approval-timeout SEC   deny unanswered approvals after SEC seconds (default 60)
-//   --auto-decide DECISION   answer every approval with deny, allowOnce or allowHost15Min after
-//                            --decide-delay seconds (default: nobody answers)
-//   --decide-delay SEC       default 1
 //
 // Stops on SIGINT or SIGTERM and removes the socket. Logs go to stderr.
 
@@ -43,9 +39,6 @@ struct Options {
     var socket: URL?
     var peerTeam: String?
     var allowUnsignedPeers = false
-    var approvalTimeout = 60
-    var autoDecide: ApprovalDecision?
-    var decideDelay = 1.0
 
     init(_ arguments: [String]) {
         var rest = arguments[...]
@@ -58,17 +51,6 @@ struct Options {
             case "--socket": socket = URL(filePath: value(flag))
             case "--peer-team": peerTeam = value(flag)
             case "--allow-unsigned-peers": allowUnsignedPeers = true
-            case "--approval-timeout":
-                guard let seconds = Int(value(flag)), seconds > 0 else { fail("--approval-timeout needs whole seconds") }
-                approvalTimeout = seconds
-            case "--auto-decide":
-                guard let decision = ApprovalDecision(rawValue: value(flag)) else {
-                    fail("--auto-decide takes \(ApprovalDecision.allCases.map(\.rawValue).joined(separator: ", "))")
-                }
-                autoDecide = decision
-            case "--decide-delay":
-                guard let seconds = Double(value(flag)), seconds >= 0 else { fail("--decide-delay needs seconds") }
-                decideDelay = seconds
             default: fail("unknown option \(flag)")
             }
         }
@@ -127,7 +109,7 @@ struct HarnessHandler: BridgeToolHandler {
     }
 }
 
-/// Never runs anything: approved commands get canned output.
+/// Never runs anything: every command gets canned output.
 struct HarnessRunner: RemoteCommandRunner {
     func run(_ remoteCommand: String, on host: RemoteHost, timeout: Duration, outputLimit: Int,
              output: @escaping @Sendable (CommandOutputChunk) -> Void) async throws -> RemoteCommandOutcome {
@@ -165,9 +147,7 @@ let bridge = Bridge(
     socketURL: socketURL,
     handler: HarnessHandler(),
     executor: CommandExecutor(runner: HarnessRunner()),
-    approvals: ApprovalCenter(timeout: .seconds(options.approvalTimeout)),
-    peerValidator: validator,
-    progressInterval: .seconds(1))
+    peerValidator: validator)
 
 do {
     try bridge.start()
@@ -175,25 +155,16 @@ do {
     fail("could not start: \(error)")
 }
 
-// Observers: connections and approvals (and the optional automatic answer).
+// Observers: connections and commands.
 let connectionEvents = bridge.events()
 Task {
     for await event in connectionEvents { note("connection: \(event.kind)") }
 }
-let approvalUpdates = await bridge.approvals.updates()
+let commandActivity = bridge.executor.activity()
 Task {
-    var seen = Set<UUID>()
-    for await snapshot in approvalUpdates {
-        for approval in snapshot.pending where seen.insert(approval.id).inserted {
-            note("approval pending: \(approval.clientLabel) wants to run \(String(reflecting: approval.command)) on \(approval.hostName) (\(approval.reason))")
-            guard let decision = options.autoDecide else { continue }
-            let approvals = bridge.approvals
-            let delay = options.decideDelay
-            Task {
-                try? await Task.sleep(for: .seconds(delay))
-                let applied = await approvals.decide(approval.id, decision)
-                note("approval \(decision.rawValue): \(applied ? "applied" : "already gone")")
-            }
+    for await activity in commandActivity {
+        if case .started(let command) = activity {
+            note("run_command on \(command.hostName): \(String(reflecting: command.command))")
         }
     }
 }
