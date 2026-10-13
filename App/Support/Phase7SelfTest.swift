@@ -684,8 +684,8 @@ struct Phase7SelfTest {
         }
     }
 
-    /// Connections came from the real signed `aeroops-mcp`; agent signatures and live output
-    /// reached the Activity tab's models.
+    /// Connections came from the real signed `aeroops-mcp`, the agent signed, and live output
+    /// reached the Activity tab's model.
     private func checkActivity(_ r: Recorder) {
         let agents = model.agents
         var peers: [BridgePeer] = []
@@ -707,7 +707,7 @@ struct Phase7SelfTest {
         let signs = model.ssh.agentEvents.filter { if case .signed = $0.kind { true } else { false } }.count
         r.report.agentSignEvents = signs
         r.step("agent events", signs > 0 && !agents.connectionEvents.isEmpty,
-               "\(signs) agent signatures and \(agents.connectionEvents.count) bridge connection events for the Activity tab")
+               "\(signs) agent signatures and \(agents.connectionEvents.count) bridge connection events")
 
         let uname = agents.liveCommands.first { $0.command == "uname -a" }
         let output = uname?.segments.filter { $0.stream == .stdout }.map(\.text).joined() ?? ""

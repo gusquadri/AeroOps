@@ -42,7 +42,7 @@ final class BridgeService {
         let since: Date
     }
 
-    /// One bridge connection event for the Activity tab.
+    /// One bridge connection event, kept in memory only (the Phase 7 self-test checks them).
     struct ConnectionRecord: Identifiable, Hashable {
         enum Kind: Hashable {
             case connected(BridgePeer)
@@ -367,10 +367,6 @@ final class BridgeService {
         let peer = BridgePeer(pid: 48213, uid: getuid(), executablePath: "/Applications/AeroOps.app/Contents/MacOS/aeroops-mcp",
                               signingIdentifier: "app.aeroops.mcp", teamIdentifier: "VUDQQS32NW", trust: .codeSignature)
         peers = [ConnectedPeer(id: 7, peer: peer, since: now.addingTimeInterval(-340))]
-        connectionEvents = [
-            ConnectionRecord(id: UUID(), date: now.addingTimeInterval(-900), connectionID: 5, kind: .rejected("not signed by team VUDQQS32NW")),
-            ConnectionRecord(id: UUID(), date: now.addingTimeInterval(-340), connectionID: 7, kind: .connected(peer)),
-        ]
 
         var running = LiveCommand(id: UUID(), hostID: other.id, hostName: other.name,
                                   command: "journalctl -u api --since '10 min ago' --no-pager | tail -n 40",

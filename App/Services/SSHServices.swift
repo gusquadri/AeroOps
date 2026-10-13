@@ -16,7 +16,7 @@ import SSHKit
 /// - Keys: ``KeyStore`` over a ``SecretStore`` (the Keychain in the app). Private keys never touch
 ///   the disk; only `keys.json` metadata and `pub/<id>.pub` files are written.
 /// - Agent: ``SSHAgentServer`` on `agent.sock` with a ``PolicySigningAuthorizer`` (Touch ID per the
-///   key's policy). Peer and signing events are kept in ``agentEvents`` for the Activity tab.
+///   key's policy). Peer and signing events are kept in ``agentEvents`` for Settings › Keys.
 /// - Config: rewritten whenever hosts change (``HostInventoryObserver``), keys change or the
 ///   agent choice changes.
 /// - Host keys: ``HostKeyStore``; ``hostKeyBlocks`` mirrors its blocks for the UI.

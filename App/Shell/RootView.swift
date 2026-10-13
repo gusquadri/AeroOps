@@ -99,12 +99,27 @@ struct TabContent: View {
     let tab: AppTab
 
     var body: some View {
+        content
+            // Dashboard and Activity scroll under the toolbar and need the system's scroll edge
+            // blur there. The other tabs never do, and without a scroll view at the top macOS
+            // paints a pale backdrop behind the toolbar instead of the sky.
+            .toolbarBackgroundVisibility(scrollsUnderToolbar ? .automatic : .hidden, for: .windowToolbar)
+    }
+
+    @ViewBuilder private var content: some View {
         switch tab {
         case .dashboard: DashboardView()
         case .containers: ContainersView()
         case .terminals: TerminalsView()
         case .files: FilesView()
         case .activity: ActivityView()
+        }
+    }
+
+    private var scrollsUnderToolbar: Bool {
+        switch tab {
+        case .dashboard, .activity: true
+        case .containers, .terminals, .files: false
         }
     }
 }

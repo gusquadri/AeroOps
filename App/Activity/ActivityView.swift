@@ -4,9 +4,9 @@ import SwiftUI
 
 /// Activity tab (Phases 7 and 8): what AI agents do through AeroOps' MCP bridge.
 ///
-/// Top to bottom: approvals waiting for the user, open 15-minute allow windows, running and
-/// recent `run_command` calls with live output (Cancel stops one) and connection and signing
-/// events. Text from agents and hosts is shown as plain text only.
+/// Top to bottom: approvals waiting for the user, open 15-minute allow windows, and running and
+/// recent `run_command` calls with live output (Cancel stops one). Text from agents and hosts is
+/// shown as plain text only.
 struct ActivityView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
@@ -29,7 +29,6 @@ struct ActivityView: View {
                 if isEmpty {
                     emptyCard
                 }
-                ConnectionEventsSection()
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)

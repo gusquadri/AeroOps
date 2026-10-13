@@ -29,7 +29,7 @@ The screenshots show the app's built-in demo data and the dev VM described below
   - Read tools: `list_hosts`, `get_host_metrics`, `list_containers`, `list_pods` and `get_logs`.
   - Exec tool: `run_command`.
 - **Approvals.** Every `run_command` waits for you. The panel shows the agent, the host, the exact command and the agent's stated reason. You can choose Deny, Allow once, or Allow host for 15 minutes. A request with no answer after 60 seconds is denied. Touch ID approval is optional. Commands that use `sudo` or `su`, or that run code they build or download, are asked about every time. While a command runs, its output streams live in the Activity tab, and you can cancel it there.
-- **Activity.** The Activity tab shows pending approvals, running and recent agent commands with their output, and the ssh-agent and bridge connections.
+- **Activity.** The Activity tab shows pending approvals and running and recent agent commands with their output.
 - **Import from `~/.ssh/config`.** The importer follows `Include`, `Host` patterns and `Match all` the way OpenSSH does. It imports each host's name, address, port and user. It only reads the config: key files are never opened and nothing under `~/.ssh` is written. Hosts that use `ProxyJump` or `ProxyCommand` are listed with the reason they can't be imported.
 - **Onboarding.** On first run, a sheet walks through five steps: Welcome, Key, Server, AI agents and Done. It covers creating or importing a key, adding or importing a first server, and connecting an agent. Existing users never see it.
 
