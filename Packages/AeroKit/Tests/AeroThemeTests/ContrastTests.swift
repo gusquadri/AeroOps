@@ -8,7 +8,9 @@ import Testing
 /// Colours are resolved from the real tokens and composited in gamma-encoded sRGB, the way the
 /// window server blends translucent layers. Liquid Glass and the decorative bubbles/rays only
 /// lighten the surface further, which raises the contrast of the dark text tokens; the darkest
-/// surface (`sky.top`) is therefore the binding case and is included.
+/// surface (`sky.top`) is therefore the binding case and is included. The hills are darker
+/// than the sky, but text only sits on glass over them, so glass over solid leaf green (their
+/// darkest possible colour) is checked instead of the hills themselves.
 @Suite("Text contrast (WCAG AA)")
 struct ContrastTests {
     /// WCAG AA for normal-size text.
@@ -27,23 +29,45 @@ struct ContrastTests {
             ("white (brightest possible)", white),
             ("glass.solidFill", RGB(Aero.glass.solidFill)),
         ]
-        for (name, sky) in [("sky.top", skyTop), ("sky.bottom", skyBottom)] {
+        // Wells: opaque, so the backdrop does not matter; the top edge carries the inner shade.
+        let solid = RGB(Aero.glass.solidFill)
+        for (tint, color) in Self.tints {
+            let well = RGB(color.opacity(AeroWellFill.tintOpacity), over: solid)
+            list.append(("\(tint) well", well))
+            list.append(("\(tint) well top edge", RGB(Aero.ink.opacity(AeroWellFill.shadeOpacity), over: well)))
+        }
+        for (name, sky) in Self.backdrops {
             let glass = RGB(Aero.glass.fill, over: sky)
             list.append(("glass.fill over \(name)", glass))
             list.append(("glass gloss peak over \(name)",
                          RGB(.white.opacity(GlassTokens.glossPeak), over: glass)))
             // Tags: light base plus a tint wash, for every tint the app uses.
             let tagBase = RGB(AeroTagFill.base, over: sky)
-            for (tint, color) in [("aqua", Aero.aqua), ("leaf", Aero.leaf), ("sun", Aero.sun),
-                                  ("coral", Aero.coral), ("neutral", Aero.neutral)] {
+            for (tint, color) in Self.tints {
                 list.append(("\(tint) tag over \(name)",
                              RGB(color.opacity(AeroTagFill.tintOpacity), over: tagBase)))
+                // Card and section headers: the tint wash at its peak over plain glass.
+                list.append(("\(tint) header wash over glass over \(name)",
+                             RGB(color.opacity(AeroHeaderWash.peak), over: glass)))
             }
             // Gauge centre bubble at its most transparent.
             list.append(("gauge bubble over glass over \(name)", RGB(.white.opacity(0.62), over: glass)))
         }
         return list
     }()
+
+    /// What glass, tags and buttons can sit over: both ends of the sky and the hills.
+    static let backdrops: [(String, RGB)] = [
+        ("sky.top", RGB(Aero.sky.top)),
+        ("sky.bottom", RGB(Aero.sky.bottom)),
+        ("leaf hill", RGB(Aero.leaf)),
+    ]
+
+    /// Every tint the app puts behind text: aqua and the orb tones.
+    static let tints: [(String, Color)] = [
+        ("aqua", Aero.aqua), ("leaf", Aero.leaf), ("sun", Aero.sun),
+        ("coral", Aero.coral), ("neutral", Aero.neutral),
+    ]
 
     @Test("color resolution yields gamma-encoded sRGB")
     func resolutionSanity() {
@@ -87,13 +111,13 @@ struct ContrastTests {
         #expect(RGB.contrast(label, RGB(Aero.aquaDeep)) >= Self.minimum)
     }
 
-    @Test("secondary button label reaches 4.5:1 on its fill over any sky")
+    @Test("secondary button label reaches 4.5:1 on its fill over the sky and the hills")
     func secondaryButtonLabel() {
         let label = RGB(AquaGlassFill.label)
-        for sky in [Aero.sky.top, Aero.sky.bottom] {
-            let fill = RGB(AquaGlassFill.bottom, over: RGB(sky))
+        for (name, backdrop) in Self.backdrops {
+            let fill = RGB(AquaGlassFill.bottom, over: backdrop)
             let ratio = RGB.contrast(label, fill)
-            #expect(ratio >= Self.minimum, "secondary label: \(ratio.formatted2):1")
+            #expect(ratio >= Self.minimum, "secondary label over \(name): \(ratio.formatted2):1")
         }
     }
 

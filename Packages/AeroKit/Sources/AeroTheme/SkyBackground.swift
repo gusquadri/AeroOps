@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// The window background: the sky gradient with a sun bloom, light rays, glossy ribbons, a
-/// leaf-green glow and soft bubbles, all drawn once in a single `Canvas`.
+/// The window background: the sky gradient with a sun bloom, light rays, rolling green hills,
+/// glossy ribbons, soft bokeh, iridescent soap bubbles and lens sparkles, all drawn once in a
+/// single `Canvas`.
 ///
 /// Nothing animates: the canvas redraws only when its size changes, so it costs nothing while
 /// the window is idle. Everything is laid out in fractions of the canvas, so it scales with
-/// the window. With Increase Contrast the decoration is toned down.
+/// the window. With Increase Contrast the decoration is toned down (no rays or sparkles).
+/// Text never sits on the hills directly, only on glass over them (unit-tested contrast).
 /// Fills its container and ignores safe areas; place it behind content with `.background`.
 ///
 /// ```swift
@@ -93,7 +95,15 @@ struct SkyPainter: Sendable {
             }
         }
 
-        // 5. Glossy ribbons sweeping across the lower half.
+        // 5. Rolling hills along the bottom: a pale far hill and a leaf-green near one.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 1.2))
+            for hill in Self.hills {
+                drawHill(hill, in: &layer, size: size)
+            }
+        }
+
+        // 6. Glossy ribbons sweeping across the lower half.
         context.drawLayer { layer in
             layer.addFilter(.blur(radius: 1.2))
             for ribbon in Self.ribbons {
@@ -101,7 +111,7 @@ struct SkyPainter: Sendable {
             }
         }
 
-        // 6. Out-of-focus bokeh discs.
+        // 7. Out-of-focus bokeh discs.
         context.drawLayer { layer in
             layer.addFilter(.blur(radius: min(w, h) * 0.018))
             for disc in Self.bokeh {
@@ -119,10 +129,54 @@ struct SkyPainter: Sendable {
             }
         }
 
-        // 7. Crisp soap bubbles.
+        // 8. Crisp soap bubbles.
         for bubble in Self.bubbles {
             drawBubble(bubble, in: &context, size: size)
         }
+
+        // 9. Lens sparkles: four-point glints near the sun, on bubbles and on the hill crest.
+        if !calm {
+            for sparkle in Self.sparkles {
+                drawSparkle(sparkle, in: &context, size: size)
+            }
+        }
+    }
+
+    // MARK: Hills
+
+    /// A hill is the area under a curve across the canvas, shaded from its crest down, with a
+    /// sunlit sheen on the upper slope and a glossy white rim along the crest.
+    private func drawHill(_ hill: Hill, in context: inout GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * w, y: y * h) }
+        var crest = Path()
+        crest.move(to: p(-0.05, hill.crest[0]))
+        crest.addCurve(to: p(1.05, hill.crest[3]), control1: p(0.32, hill.crest[1]), control2: p(0.66, hill.crest[2]))
+        var body = crest
+        body.addLine(to: p(1.05, 1.05))
+        body.addLine(to: p(-0.05, 1.05))
+        body.closeSubpath()
+
+        let alpha = hill.opacity * decoration
+        let top = CGPoint(x: 0, y: hill.crest.min()! * h)
+        let bottom = CGPoint(x: 0, y: h)
+        context.fill(body, with: .linearGradient(
+            Gradient(colors: [hill.top.opacity(alpha), hill.bottom.opacity(alpha * 0.85)]),
+            startPoint: top, endPoint: bottom
+        ))
+        // Sunlit upper slope.
+        context.fill(body, with: .linearGradient(
+            Gradient(stops: [
+                .init(color: .white.opacity(0.5 * alpha), location: 0),
+                .init(color: .white.opacity(0), location: 0.4),
+            ]),
+            startPoint: top, endPoint: bottom
+        ))
+        // Glossy rim, brightest on the side facing the sun.
+        context.stroke(crest, with: .linearGradient(
+            Gradient(colors: [.white.opacity(min(1, alpha * 1.8)), .white.opacity(alpha * 0.5)]),
+            startPoint: .zero, endPoint: CGPoint(x: w, y: 0)
+        ), lineWidth: 2)
     }
 
     // MARK: Ribbons
@@ -192,6 +246,14 @@ struct SkyPainter: Sendable {
             Gradient(colors: [Aero.aqua.opacity(0), Aero.aqua.opacity(0.14 * k)]),
             startPoint: CGPoint(x: c.x, y: c.y - r), endPoint: CGPoint(x: c.x, y: c.y + r)
         ))
+        // Thin-film iridescence just inside the rim.
+        let film = Gradient(colors: [Aero.aquaLight, Aero.leaf, Aero.sun, Aero.coral.mix(with: .white, by: 0.35), Aero.aqua, Aero.aquaLight]
+            .map { $0.opacity(0.3 * k) })
+        context.stroke(
+            Path(ellipseIn: rect.insetBy(dx: r * 0.07, dy: r * 0.07)),
+            with: .conicGradient(film, center: c, angle: .degrees(-40)),
+            lineWidth: max(1, r * 0.1)
+        )
         context.stroke(circle, with: .color(.white.opacity(0.55 * k)), lineWidth: max(0.75, r * 0.035))
 
         // Specular highlight, tilted, upper left.
@@ -213,6 +275,40 @@ struct SkyPainter: Sendable {
                        style: StrokeStyle(lineWidth: max(1, r * 0.07), lineCap: .round))
     }
 
+    // MARK: Sparkles
+
+    /// A soft glow under a long four-point star, with a smaller star turned 45° over it.
+    private func drawSparkle(_ sparkle: Bubble, in context: inout GraphicsContext, size: CGSize) {
+        let r = sparkle.diameter * min(size.width, size.height) / 2
+        let c = CGPoint(x: sparkle.x * size.width, y: sparkle.y * size.height)
+        let k = sparkle.opacity * decoration
+        let glow = CGRect(x: c.x - r * 0.45, y: c.y - r * 0.45, width: r * 0.9, height: r * 0.9)
+        context.fill(Path(ellipseIn: glow), with: .radialGradient(
+            Gradient(colors: [.white.opacity(0.85 * k), .white.opacity(0)]),
+            center: c, startRadius: 0, endRadius: r * 0.45
+        ))
+        for (scale, turn, alpha) in [(1.0, 0.0, 1.0), (0.5, Double.pi / 4, 0.6)] {
+            let reach = r * scale, waist = reach * 0.11
+            var star = Path()
+            star.move(to: CGPoint(x: 0, y: -reach))
+            star.addLine(to: CGPoint(x: waist, y: -waist))
+            star.addLine(to: CGPoint(x: reach, y: 0))
+            star.addLine(to: CGPoint(x: waist, y: waist))
+            star.addLine(to: CGPoint(x: 0, y: reach))
+            star.addLine(to: CGPoint(x: -waist, y: waist))
+            star.addLine(to: CGPoint(x: -reach, y: 0))
+            star.addLine(to: CGPoint(x: -waist, y: -waist))
+            star.closeSubpath()
+            let placed = star.applying(
+                CGAffineTransform(rotationAngle: turn).concatenating(CGAffineTransform(translationX: c.x, y: c.y))
+            )
+            context.fill(placed, with: .radialGradient(
+                Gradient(colors: [.white.opacity(k * alpha), .white.opacity(0)]),
+                center: c, startRadius: 0, endRadius: reach
+            ))
+        }
+    }
+
     // MARK: Layout (fractions of the canvas)
 
     private struct Ray: Sendable {
@@ -232,6 +328,14 @@ struct SkyPainter: Sendable {
         let x: CGFloat, y: CGFloat, diameter: CGFloat, opacity: Double
     }
 
+    private struct Hill: Sendable {
+        /// Y of the crest at x = -0.05, the two control points and x = 1.05.
+        let crest: [CGFloat]
+        /// Colour at the crest and at the bottom edge.
+        let top: Color, bottom: Color
+        let opacity: Double
+    }
+
     /// Angles in degrees, 0 = right, 90 = down (the sun is above the top-left corner).
     private static let rays: [Ray] = [
         Ray(angle: 16, spread: 4, opacity: 0.26),
@@ -247,6 +351,13 @@ struct SkyPainter: Sendable {
         Ribbon(top: [0.66, 0.46, 0.90, 0.52], bottom: [0.75, 0.60, 1.00, 0.62], tint: .white, opacity: 0.30),
         Ribbon(top: [0.80, 0.60, 0.98, 0.68], bottom: [0.84, 0.67, 1.03, 0.73], tint: .white, opacity: 0.50),
         Ribbon(top: [0.88, 0.72, 1.04, 0.78], bottom: [0.98, 0.88, 1.14, 0.92], tint: Aero.leaf, opacity: 0.34),
+    ]
+
+    private static let hills: [Hill] = [
+        Hill(crest: [0.86, 0.74, 0.90, 0.80], top: Aero.leaf.mix(with: Aero.aqua, by: 0.45),
+             bottom: Aero.aquaLight, opacity: 0.30),
+        Hill(crest: [0.93, 0.83, 0.86, 0.97], top: Aero.leaf.mix(with: .white, by: 0.15),
+             bottom: Aero.leaf, opacity: 0.46),
     ]
 
     private static let bokeh: [Bubble] = [
@@ -266,6 +377,15 @@ struct SkyPainter: Sendable {
         Bubble(x: 0.40, y: 0.12, diameter: 0.045, opacity: 0.75),
         Bubble(x: 0.62, y: 0.80, diameter: 0.07, opacity: 0.85),
         Bubble(x: 0.95, y: 0.88, diameter: 0.05, opacity: 0.85),
+    ]
+
+    /// Sparkles reuse ``Bubble``: `diameter` is the star's span.
+    private static let sparkles: [Bubble] = [
+        Bubble(x: 0.27, y: 0.07, diameter: 0.07, opacity: 0.9),
+        Bubble(x: 0.47, y: 0.21, diameter: 0.04, opacity: 0.7),
+        Bubble(x: 0.766, y: 0.215, diameter: 0.06, opacity: 1),
+        Bubble(x: 0.085, y: 0.775, diameter: 0.045, opacity: 0.85),
+        Bubble(x: 0.71, y: 0.855, diameter: 0.04, opacity: 0.75),
     ]
 }
 

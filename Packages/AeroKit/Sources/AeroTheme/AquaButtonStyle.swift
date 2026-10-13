@@ -152,19 +152,8 @@ private struct AquaButtonBody: View {
     private func surface(pressed: Bool) -> some View {
         switch prominence {
         case .primary:
-            ZStack {
-                Capsule().fill(fill.gradient)
-                // Caustic: light pooling at the bottom centre.
-                if !accessibility.increaseContrast {
-                    Capsule().fill(EllipticalGradient(
-                        colors: [fill.glow.opacity(0.8), fill.glow.opacity(0)],
-                        center: UnitPoint(x: 0.5, y: 1.1),
-                        startRadiusFraction: 0, endRadiusFraction: 0.5
-                    ))
-                }
-                GlossHighlight(opacity: pressed ? 0.45 : 0.9)
-            }
-            .brightness(pressed ? -0.1 : 0)
+            GelSurface(fill: fill, glossOpacity: pressed ? 0.45 : 0.9, caustic: !accessibility.increaseContrast)
+                .brightness(pressed ? -0.1 : 0)
         case .secondary:
             ZStack {
                 if accessibility.reduceTransparency {
@@ -188,19 +177,7 @@ private struct AquaButtonBody: View {
         let strong = accessibility.increaseContrast
         switch prominence {
         case .primary:
-            ZStack {
-                Capsule().strokeBorder(fill.rim.opacity(strong ? 1 : 0.75), lineWidth: strong ? 1.5 : 1)
-                // Inner light edge, brightest at the top.
-                Capsule()
-                    .inset(by: 1)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.white.opacity(0.55), .white.opacity(0.05), .white.opacity(0.25)],
-                            startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 0.75
-                    )
-            }
+            GelRim(fill: fill, strong: strong)
         case .secondary:
             Capsule().strokeBorder(
                 strong
@@ -233,6 +210,80 @@ private struct AquaButtonBody: View {
                 font = Aero.font(.body, weight: .semibold)
                 horizontal = 16; vertical = 6; minHeight = 28
             }
+        }
+    }
+}
+
+/// The filled surface of a primary Aqua button as a view: a glossy deep-aqua gel capsule with
+/// its caustic glow, highlight, rim and control shadow. For selection highlights that should
+/// read as a lit button, such as the selected segment of a tab switcher. Labels on it use
+/// `Aero.text.onAccent`, as on a primary button.
+///
+/// ```swift
+/// Label("Dashboard", systemImage: "square.grid.2x2")
+///     .foregroundStyle(Aero.text.onAccent)
+///     .padding(.horizontal, 12)
+///     .background { AquaGel() }
+/// ```
+public struct AquaGel: View {
+    private var accessibility = AeroAccessibility()
+
+    /// Creates the gel capsule.
+    public init() {}
+
+    /// The capsule.
+    public var body: some View {
+        ZStack {
+            GelSurface(fill: .primary, glossOpacity: 0.9, caustic: !accessibility.increaseContrast)
+            GelRim(fill: .primary, strong: accessibility.increaseContrast)
+        }
+        .compositingGroup()
+        .aeroShadow(Aero.shadow.control)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Base gradient, caustic and gloss of a filled Aqua capsule.
+private struct GelSurface: View {
+    let fill: AquaFill
+    let glossOpacity: Double
+    let caustic: Bool
+
+    var body: some View {
+        ZStack {
+            Capsule().fill(fill.gradient)
+            // Caustic: light pooling at the bottom centre.
+            if caustic {
+                Capsule().fill(EllipticalGradient(
+                    colors: [fill.glow.opacity(0.8), fill.glow.opacity(0)],
+                    center: UnitPoint(x: 0.5, y: 1.1),
+                    startRadiusFraction: 0, endRadiusFraction: 0.5
+                ))
+            }
+            GlossHighlight(opacity: glossOpacity)
+        }
+    }
+}
+
+/// Dark outer rim and light inner edge of a filled Aqua capsule.
+private struct GelRim: View {
+    let fill: AquaFill
+    let strong: Bool
+
+    var body: some View {
+        ZStack {
+            Capsule().strokeBorder(fill.rim.opacity(strong ? 1 : 0.75), lineWidth: strong ? 1.5 : 1)
+            // Inner light edge, brightest at the top.
+            Capsule()
+                .inset(by: 1)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.55), .white.opacity(0.05), .white.opacity(0.25)],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
         }
     }
 }

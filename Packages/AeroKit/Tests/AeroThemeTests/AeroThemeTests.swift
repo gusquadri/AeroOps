@@ -135,6 +135,9 @@ struct AeroThemeTests {
         _ = GlassSection("Hosts") { Text("x") }.body
         _ = GlassSection("Hosts", systemImage: "server.rack") { Text("x") } accessory: { AeroTag("3") }.body
         _ = Text("x").aeroGlass(in: Capsule())
+        _ = AquaGel().body
+        _ = AeroHeaderWash(tint: Aero.leaf).body
+        _ = AeroWell(tint: Aero.coral) { Text("Blocked") }.body
     }
 
     @Test("sky painter draws at degenerate and large sizes without trapping")

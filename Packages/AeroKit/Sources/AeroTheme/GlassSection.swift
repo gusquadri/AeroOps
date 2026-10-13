@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// A titled glass card: a header row (optional SF Symbol, title, trailing accessory) over a
-/// glossy divider, then the content. For Settings panes, the Activity screen (pending
-/// approvals, agent commands) and host detail.
+/// A titled glass card: a header row (optional SF Symbol, title, trailing accessory) on an aqua
+/// title-bar wash (``AeroHeaderWash``) over a glossy divider, then the content. For Settings
+/// panes, the Activity screen (agent commands) and host detail.
 ///
 /// ```swift
-/// GlassSection("Pending approvals", systemImage: "hand.raised") {
-///     ForEach(requests) { ApprovalRow(request: $0) }
+/// GlassSection("Agent commands", systemImage: "terminal") {
+///     ForEach(commands) { CommandRow(command: $0) }
 /// } accessory: {
-///     AeroTag("\(requests.count)")
+///     AeroTag("\(commands.count)")
 /// }
 /// ```
 public struct GlassSection<Content: View, Accessory: View>: View {
@@ -52,6 +52,7 @@ public struct GlassSection<Content: View, Accessory: View>: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
+                .background { AeroHeaderWash() }
 
                 // Etched divider: an ink line over a white line.
                 VStack(spacing: 0) {
@@ -80,19 +81,18 @@ extension GlassSection where Accessory == EmptyView {
 
 #Preview("GlassSection") {
     VStack(spacing: 20) {
-        GlassSection("Pending approvals", systemImage: "hand.raised.fill") {
+        GlassSection("Agent commands", systemImage: "terminal") {
             HStack {
                 StatusOrb(tone: .warning)
-                Text("claude-code wants to run `docker restart api`")
+                Text("claude-code is running `docker restart api`")
                     .font(Aero.font(.callout))
                 Spacer()
-                Button("Deny", role: .destructive) {}.buttonStyle(.aqua).controlSize(.small)
-                Button("Approve") {}.buttonStyle(.aqua).controlSize(.small)
+                Button("Cancel") {}.buttonStyle(.aquaSecondary).controlSize(.small)
             }
         } accessory: {
-            AeroTag("1 pending", tone: .warning)
+            AeroTag("1 running")
         }
-        GlassSection("Agent commands") {
+        GlassSection("Recent commands") {
             Text("No activity yet")
                 .font(Aero.font(.callout))
                 .foregroundStyle(Aero.text.secondary)

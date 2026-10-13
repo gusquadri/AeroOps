@@ -131,88 +131,35 @@ struct HostKeyTrustSheet: View {
 
 // MARK: - Changed key
 
-/// The red "host key changed" banner. Shown in the host editor (``Style/full``), on dashboard
-/// cards (``Style/compact``) and, as a tag, in the sidebar. The host stays blocked until the
-/// user explicitly trusts the new key.
+/// The red "host key changed" banner, with the old and new fingerprints and Trust New Key.
+/// Shown in the host editor and host detail; dashboard cards show a short notice with Review…
+/// instead, and the sidebar a tag. The host stays blocked until the user explicitly trusts the
+/// new key.
 struct HostKeyChangedBanner: View {
-    enum Style {
-        /// Old and new fingerprints with Trust New Key.
-        case full
-        /// One line with a Review button (dashboard cards).
-        case compact
-    }
-
     @Environment(AppModel.self) private var model
 
     let host: RemoteHost
     let block: HostKeyBlock
-    var style: Style = .full
-    /// Compact style: opens the host editor.
-    var onReview: () -> Void = {}
 
     @State private var isConfirming = false
     @State private var isWorking = false
     @State private var error: String?
 
     var body: some View {
-        Group {
-            switch style {
-            case .full: full
-            case .compact: compact
-            }
-        }
-        .background {
-            // Opaque base so the tint reads the same over cards, forms and the sky.
-            let shape = RoundedRectangle(cornerRadius: Aero.radius.inner, style: .continuous)
-            shape.fill(Aero.glass.solidFill)
-            shape.fill(Aero.coral.opacity(0.14))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Aero.radius.inner, style: .continuous)
-                .strokeBorder(Aero.coral, lineWidth: 1.5)
+        AeroWell(tint: Aero.coral) {
+            full
         }
     }
 
     private var title: some View {
         Label {
-            Text(style == .full ? "Host key changed: \(host.name) is blocked" : "Host key changed · blocked")
-                .font(Aero.font(style == .full ? .headline : .callout, weight: .semibold))
+            Text("Host key changed: \(host.name) is blocked")
+                .font(Aero.font(.headline, weight: .semibold))
                 .foregroundStyle(Aero.text.primary)
         } icon: {
             Image(systemName: "exclamationmark.octagon.fill")
                 .foregroundStyle(Aero.coral)
         }
-    }
-
-    private var compact: some View {
-        HStack(spacing: 8) {
-            // Narrow dashboard cards get a shorter title instead of a truncated one.
-            ViewThatFits(in: .horizontal) {
-                compactTitle("Host key changed · blocked")
-                compactTitle("Key changed · blocked")
-                compactTitle("Key changed")
-            }
-            Spacer(minLength: 8)
-            Button("Review…", action: onReview)
-                .buttonStyle(.aquaSecondary)
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .help(block.helpText)
-    }
-
-    private func compactTitle(_ text: String) -> some View {
-        Label {
-            Text(text)
-                .font(Aero.font(.callout, weight: .semibold))
-                .foregroundStyle(Aero.text.primary)
-                .lineLimit(1)
-        } icon: {
-            Image(systemName: "exclamationmark.octagon.fill")
-                .foregroundStyle(Aero.coral)
-        }
-        .fixedSize()
     }
 
     private var full: some View {
@@ -315,12 +262,9 @@ private enum HostKeyPreviewData {
 }
 
 #Preview("Changed-key banner") {
-    VStack(spacing: 16) {
-        HostKeyChangedBanner(host: HostKeyPreviewData.host, block: HostKeyPreviewData.block)
-        HostKeyChangedBanner(host: HostKeyPreviewData.host, block: HostKeyPreviewData.block, style: .compact)
-    }
-    .padding(20)
-    .frame(width: 540)
-    .background { Aero.sky.gradient }
-    .environment(AppModel.preview())
+    HostKeyChangedBanner(host: HostKeyPreviewData.host, block: HostKeyPreviewData.block)
+        .padding(20)
+        .frame(width: 540)
+        .background { Aero.sky.gradient }
+        .environment(AppModel.preview())
 }

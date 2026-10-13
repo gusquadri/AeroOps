@@ -665,12 +665,16 @@ struct Phase5SelfTest {
         await snapshotBothAppearances(name, r) { window }
     }
 
+    /// The sheet's own window captures as the whole main window shrunk into the sheet's frame,
+    /// so this captures the main window and crops it to the sheet.
     private func snapshotSheet(_ name: String, _ r: Recorder) async {
         guard Self.snapshotDirectory != nil else { return }
-        await snapshotBothAppearances(name, r) { mainWindow?.attachedSheet ?? mainWindow }
+        await snapshotBothAppearances(name, r, crop: { mainWindow?.attachedSheet?.frame }) { mainWindow }
     }
 
-    private func snapshotBothAppearances(_ name: String, _ r: Recorder, window: () -> NSWindow?) async {
+    private func snapshotBothAppearances(
+        _ name: String, _ r: Recorder, crop: () -> NSRect? = { nil }, window: () -> NSWindow?
+    ) async {
         guard let directory = Self.snapshotDirectory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         NSApp.activate()
@@ -679,7 +683,7 @@ struct Phase5SelfTest {
             NSApp.appearance = NSAppearance(named: appearance)
             await pause(0.8)
             let file = "phase5-\(name)-\(suffix).png"
-            if let window = window(), await SelfTestCapture.capture(window, to: directory.appending(path: file)) {
+            if let window = window(), await SelfTestCapture.capture(window, to: directory.appending(path: file), cropTo: crop()) {
                 r.report.snapshots.append(file)
             }
         }
@@ -772,9 +776,10 @@ final class MainThreadHeartbeat {
 /// Recording permission needed), else the view tree drawn into a bitmap.
 @MainActor
 enum SelfTestCapture {
-    /// Returns whether the PNG was written.
+    /// Returns whether the PNG was written. `crop` is a part of the window in screen
+    /// coordinates, such as an attached sheet's frame.
     @discardableResult
-    static func capture(_ window: NSWindow, to url: URL) async -> Bool {
+    static func capture(_ window: NSWindow, to url: URL, cropTo crop: NSRect? = nil) async -> Bool {
         do {
             let content = try await SCShareableContent.currentProcess
             guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
@@ -787,10 +792,23 @@ enum SelfTestCapture {
             config.height = Int(filter.contentRect.height * scale)
             config.showsCursor = false
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            return write(image, to: url)
+            return write(cropped(image, of: window, to: crop), to: url)
         } catch {
             return fallback(window, to: url)
         }
+    }
+
+    private static func cropped(_ image: CGImage, of window: NSWindow, to crop: NSRect?) -> CGImage {
+        guard let crop, window.frame.width > 0 else { return image }
+        let frame = window.frame
+        let scale = CGFloat(image.width) / frame.width
+        let rect = CGRect(
+            x: (crop.minX - frame.minX) * scale,
+            y: (frame.maxY - crop.maxY) * scale,
+            width: crop.width * scale,
+            height: crop.height * scale
+        ).integral
+        return image.cropping(to: rect) ?? image
     }
 
     private static func fallback(_ window: NSWindow, to url: URL) -> Bool {

@@ -23,7 +23,7 @@ struct HostDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 if let keyBlock {
-                    HostKeyChangedBanner(host: host, block: keyBlock, style: .full)
+                    HostKeyChangedBanner(host: host, block: keyBlock)
                 }
                 statusSection(metrics)
                 Group {

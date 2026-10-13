@@ -76,13 +76,13 @@ struct TabSwitcher: View {
             Label(tab.title, systemImage: tab.systemImage)
                 .labelStyle(.titleAndIcon)
                 .font(Aero.font(.body, weight: .medium))
-                .foregroundStyle(isSelected ? Aero.aquaDeep : Aero.text.primary)
+                .foregroundStyle(isSelected ? Aero.text.onAccent : Aero.text.primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
                 .background {
+                    // The selected tab is a lit aqua gel pill that slides between tabs.
                     if isSelected {
-                        Capsule()
-                            .fill(Aero.aqua.opacity(0.18))
+                        AquaGel()
                             .matchedGeometryEffect(id: "selection", in: highlight)
                     }
                 }
