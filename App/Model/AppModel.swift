@@ -88,7 +88,7 @@ final class AppModel {
         self.ssh = ssh
         self.connectionTester = connectionTester ?? SSHConnectionTester(services: ssh)
         monitoring = MonitorService(ssh: ssh)
-        terminals = TerminalService(ssh: ssh) { hostStore.host(id: $0) }
+        terminals = TerminalService(ssh: ssh, hostOrder: { hostStore.hosts.map(\.id) }) { hostStore.host(id: $0) }
         agents = BridgeService(ssh: ssh)
         hostsDidChange()
         addInventoryObserver(ssh)

@@ -10,7 +10,7 @@ import TerminalKit
 struct HostSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var deletionCandidate: RemoteHost?
-    /// Hosts whose terminals are listed. A host opens when it gets a new terminal.
+    /// Hosts whose terminals are listed. A host opens when a terminal to it starts opening.
     @State private var expanded: Set<RemoteHost.ID> = []
 
     var body: some View {
@@ -54,9 +54,11 @@ struct HostSidebar: View {
         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 340)
     }
 
+    /// Hosts with an open terminal or one still checking the host key.
     private var hostsWithTerminals: Set<RemoteHost.ID> {
         let terminals = model.terminals
         return Set(terminals.sessions.compactMap { terminals.tab(for: $0.id)?.hostID })
+            .union(terminals.pendingOpens.keys)
     }
 
     private func isExpanded(_ id: RemoteHost.ID) -> Binding<Bool> {
@@ -110,13 +112,15 @@ private enum SidebarItem: Hashable {
     case terminal(TerminalSession.ID)
 }
 
-/// A host's terminal tabs and its New Terminal row.
+/// A host's terminal tabs and its New Terminal row, which shows progress while an open checks
+/// the host key.
 private struct HostTerminalRows: View {
     @Environment(AppModel.self) private var model
     let host: RemoteHost
 
     var body: some View {
         let terminals = model.terminals
+        let isOpening = terminals.isOpening(host.id)
         ForEach(terminals.sessions(on: host.id)) { session in
             SidebarTerminalRow(session: session, tab: terminals.tab(for: session.id))
                 .tag(SidebarItem.terminal(session.id))
@@ -125,13 +129,22 @@ private struct HostTerminalRows: View {
             model.selection = host.id
             model.openSSH(host.id)
         } label: {
-            Label("New Terminal", systemImage: "plus")
-                .font(Aero.font(.callout))
-                .foregroundStyle(Aero.text.secondary)
+            Label {
+                Text("New Terminal")
+            } icon: {
+                if isOpening {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "plus")
+                }
+            }
+            .font(Aero.font(.callout))
+            .foregroundStyle(Aero.text.secondary)
         }
         .buttonStyle(.plain)
         .disabled(!model.canOpenSSH(host.id))
-        .help(model.terminals.unavailableReason(host) ?? "Open an SSH terminal to \(host.name)")
+        .help(isOpening ? "Checking the host key…" : terminals.unavailableReason(host) ?? "Open an SSH terminal to \(host.name)")
     }
 }
 
@@ -168,6 +181,11 @@ private struct SidebarTerminalRow: View {
                 terminals.reconnect(session.id)
             }
             .disabled(!terminals.canReconnect(session.id))
+            Divider()
+            Button("Move Up", systemImage: "arrow.up") { terminals.move(session.id, by: -1) }
+                .disabled(!terminals.canMove(session.id, by: -1))
+            Button("Move Down", systemImage: "arrow.down") { terminals.move(session.id, by: 1) }
+                .disabled(!terminals.canMove(session.id, by: 1))
             Divider()
             Button("Close Tab", systemImage: "xmark") {
                 model.selectedTab = .terminals

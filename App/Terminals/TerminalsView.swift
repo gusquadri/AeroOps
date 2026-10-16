@@ -5,31 +5,24 @@ import TerminalKit
 
 /// Terminals tab: one libghostty ssh session per tab (Phase 4).
 ///
-/// The tab strip sits above the selected session's surface. Only the selected session is on
-/// screen; the others keep running and keep their scrollback. Tabs not shown for a while give
-/// up their surface to save memory and get it back when shown. First contact with a host shows
-/// the host-key trust sheet here, closing a running tab asks first, and unsafe pastes ask in a
-/// sheet.
+/// The sidebar lists the tabs under their hosts; the selected session's surface fills the tab.
+/// Only the selected session is on screen; the others keep running and keep their scrollback.
+/// Tabs not shown for a while give up their surface to save memory and get it back when shown.
+/// First contact with a host shows the host-key trust sheet here, closing a
+/// running tab asks first, and unsafe pastes ask in a sheet.
 struct TerminalsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let terminals = model.terminals
         Group {
-            if terminals.sessions.isEmpty {
-                TerminalsEmptyState()
+            if let session = terminals.selectedSession {
+                TerminalPane(session: session)
+                    .id(session.id)
+                    .padding(.top, 12)
+                    .padding([.horizontal, .bottom], 16)
             } else {
-                VStack(spacing: 0) {
-                    TerminalTabStrip()
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 10)
-                    if let session = terminals.selectedSession {
-                        TerminalPane(session: session)
-                            .id(session.id)
-                            .padding([.horizontal, .bottom], 16)
-                    }
-                }
+                TerminalsEmptyState()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,7 +51,7 @@ private struct TerminalsEmptyState: View {
                     .disabled(!model.canOpenSSH(host.id))
                     .help(model.terminals.unavailableReason(host) ?? "Open a terminal tab (⌘T)")
             } else {
-                OpenSSHMenu(title: "Open SSH…")
+                OpenSSHMenu()
             }
         }
     }
@@ -67,8 +60,6 @@ private struct TerminalsEmptyState: View {
 /// A menu of every host; hosts that can't be opened are disabled.
 private struct OpenSSHMenu: View {
     @Environment(AppModel.self) private var model
-    let title: String
-    var compact = false
 
     var body: some View {
         Menu {
@@ -77,139 +68,14 @@ private struct OpenSSHMenu: View {
                     .disabled(!model.canOpenSSH(host.id))
             }
         } label: {
-            if compact {
-                Image(systemName: "plus")
-                    .font(Aero.font(.callout, weight: .semibold))
-                    .foregroundStyle(Aero.aquaDeep)
-                    .accessibilityLabel(title)
-            } else {
-                Label(title, systemImage: "terminal")
-            }
+            Label("Open SSH…", systemImage: "terminal")
         }
-        .menuIndicator(compact ? .hidden : .visible)
         .fixedSize()
-        .help(compact ? "New tab (⌘T opens the selected host)" : "Choose a host")
+        .help("Choose a host")
     }
 }
 
-// MARK: - Tab strip
-
-/// The tabs in an aqua-glass pill: status orb, title (" (2)" for duplicates) and a close button.
-/// Drag a tab onto another to reorder.
-struct TerminalTabStrip: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let terminals = model.terminals
-        let selectedID = terminals.selectedSession?.id
-        HStack(spacing: 8) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 4) {
-                        ForEach(terminals.sessions) { session in
-                            TerminalTabItem(
-                                session: session,
-                                tab: terminals.tab(for: session.id),
-                                isSelected: session.id == selectedID
-                            )
-                            .id(session.id)
-                        }
-                    }
-                    .padding(4)
-                }
-                .scrollIndicators(.never)
-                .fixedSize(horizontal: false, vertical: true)
-                // Keep the shown tab in view when it changes (⌃Tab, ⌘⌥9, a new tab). Next turn,
-                // so a tab added in the same update has been laid out.
-                .onChange(of: selectedID, initial: true) { _, id in
-                    guard let id else { return }
-                    Task { withAnimation(.snappy) { proxy.scrollTo(id) } }
-                }
-            }
-
-            if terminals.pendingOpens > 0 {
-                ProgressView()
-                    .controlSize(.small)
-                    .help("Checking the host key…")
-            }
-            OpenSSHMenu(title: "New Tab", compact: true)
-                .padding(.trailing, 10)
-        }
-        .aeroGlass(in: Capsule(), shadow: Aero.shadow.control)
-    }
-}
-
-private struct TerminalTabItem: View {
-    @Environment(AppModel.self) private var model
-    let session: TerminalSession
-    let tab: TerminalService.Tab?
-    let isSelected: Bool
-
-    @State private var isHovered = false
-    @State private var isDropTarget = false
-
-    private var terminals: TerminalService { model.terminals }
-    private var status: TerminalService.Status { TerminalService.status(of: session.state) }
-    private var title: String { tab?.title ?? session.title }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            StatusOrb(tone: status.tone.orbTone, size: 9)
-            Text(title)
-                .font(Aero.font(.callout, weight: isSelected ? .semibold : .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Button {
-                terminals.requestClose(session.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(Aero.font(size: 9, weight: .bold))
-                    .frame(width: 16, height: 16)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .opacity(isSelected || isHovered ? 1 : 0.35)
-            .help("Close tab (⌘W)")
-            .accessibilityLabel("Close \(title)")
-        }
-        .foregroundStyle(isSelected ? Aero.text.onAccent : Aero.text.primary)
-        .padding(.leading, 10)
-        .padding(.trailing, 6)
-        .padding(.vertical, 5)
-        .frame(minWidth: 110, maxWidth: 240, alignment: .leading)
-        .background {
-            Capsule()
-                .fill(isSelected ? Aero.aquaDeep : (isHovered || isDropTarget ? Aero.glass.fill : .clear))
-        }
-        .overlay {
-            if isDropTarget {
-                Capsule().strokeBorder(Aero.aqua, lineWidth: 1.5)
-            }
-        }
-        .contentShape(Capsule())
-        .onTapGesture { terminals.selectedID = session.id }
-        .onHover { isHovered = $0 }
-        .draggable(session.id.uuidString)
-        .dropDestination(for: String.self) { items, _ in
-            guard let dragged = items.first.flatMap(UUID.init(uuidString:)) else { return false }
-            withAnimation(.snappy) { terminals.move(dragged, to: session.id) }
-            return true
-        } isTargeted: { isDropTarget = $0 }
-        .contextMenu {
-            Button("Reconnect", systemImage: "arrow.clockwise") { terminals.reconnect(session.id) }
-                .disabled(!terminals.canReconnect(session.id))
-            Divider()
-            Button("Move Left", systemImage: "arrow.left") { terminals.move(session.id, by: -1) }
-            Button("Move Right", systemImage: "arrow.right") { terminals.move(session.id, by: 1) }
-            Divider()
-            Button("Close Tab", systemImage: "xmark") { terminals.requestClose(session.id) }
-        }
-        .help("\(session.title) · \(status.text)")
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(title), \(status.text)")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-    }
-}
+// MARK: - Status
 
 extension TerminalService.Status.Tone {
     var orbTone: OrbTone {

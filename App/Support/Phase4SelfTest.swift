@@ -18,7 +18,7 @@ import UniformTypeIdentifiers
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest phase4 \
 ///   -AeroSelfTestOutput /tmp/aeroops-phase4.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh \     # dev/remove-key.sh next to it revokes the key
-///   [-AeroSelfTestSnapshots build/phase4]              # window PNGs (tab strip, vi, top, banners, sheets)
+///   [-AeroSelfTestSnapshots build/phase4]              # window PNGs (tabs, vi, top, banners, sheets)
 ///   [-AeroSelfTestKeepRoot YES]
 /// ```
 ///
@@ -225,7 +225,8 @@ final class Phase4SelfTest {
         await checkUnreachable(down)
 
         report.tabTitles = terminals.sessions.map { terminals.tab(for: $0.id)?.title ?? $0.title }
-        let expected = ["dev-ssh", "dev-alpine", "dev-vm", "dev-ssh (2)", "dev-alpine (2)", "dev-vm · exit test"]
+        // Grouped by host in the host list's order, each host's tabs in the order they opened.
+        let expected = ["dev-ssh", "dev-ssh (2)", "dev-alpine", "dev-alpine (2)", "dev-vm", "dev-vm · exit test"]
         step("tab titles", report.tabTitles == expected, report.tabTitles.joined(separator: " | "))
 
         await show(shells[2])

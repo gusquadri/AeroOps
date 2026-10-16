@@ -63,14 +63,23 @@ final class TerminalService {
     var closeConfirmation: TerminalSession.ID?
     /// Why the last open could not start (e.g. the host-key scan found a changed key).
     var openError: String?
-    /// Opens still checking the host key; the tab strip shows progress while non-zero.
-    private(set) var pendingOpens = 0
+    /// Opens still checking the host key, per host; the sidebar shows progress for them.
+    private(set) var pendingOpens: [RemoteHost.ID: Int] = [:]
 
     @ObservationIgnored private let ssh: SSHServices
+    @ObservationIgnored private let hostOrder: @MainActor () -> [RemoteHost.ID]
     @ObservationIgnored private let hostLookup: @MainActor (RemoteHost.ID) -> RemoteHost?
 
-    init(ssh: SSHServices, hostLookup: @escaping @MainActor (RemoteHost.ID) -> RemoteHost?) {
+    /// - Parameters:
+    ///   - hostOrder: The host IDs in the sidebar's order.
+    ///   - hostLookup: The host with an ID, if it still exists.
+    init(
+        ssh: SSHServices,
+        hostOrder: @escaping @MainActor () -> [RemoteHost.ID],
+        hostLookup: @escaping @MainActor (RemoteHost.ID) -> RemoteHost?
+    ) {
         self.ssh = ssh
+        self.hostOrder = hostOrder
         self.hostLookup = hostLookup
         // A key press in an ended tab ("Press any key to close the terminal") closes it like
         // ⌘W, keeping the tab info and the selection in step.
@@ -81,10 +90,29 @@ final class TerminalService {
 
     // MARK: - Queries
 
-    var sessions: [TerminalSession] { manager.sessions }
+    /// The open sessions in the sidebar's order: grouped by host in the host list's order, each
+    /// host's in ``manager`` order. ⌃Tab, ⌘⌥1…9 and the selection after a close follow it.
+    var sessions: [TerminalSession] {
+        var rank: [RemoteHost.ID: Int] = [:]
+        for (index, id) in hostOrder().enumerated() where rank[id] == nil {
+            rank[id] = index
+        }
+        // Tabs of a host no longer listed go last.
+        func hostRank(_ session: TerminalSession) -> Int {
+            tabs[session.id].flatMap { rank[$0.hostID] } ?? .max
+        }
+        return manager.sessions.enumerated()
+            .sorted { (hostRank($0.element), $0.offset) < (hostRank($1.element), $1.offset) }
+            .map(\.element)
+    }
 
     var selectedSession: TerminalSession? {
-        selectedID.flatMap(manager.session(id:)) ?? manager.sessions.first
+        selectedID.flatMap(manager.session(id:)) ?? sessions.first
+    }
+
+    /// Whether an open to `hostID` is still checking the host key.
+    func isOpening(_ hostID: RemoteHost.ID) -> Bool {
+        pendingOpens[hostID, default: 0] > 0
     }
 
     func tab(for id: TerminalSession.ID) -> Tab? {
@@ -156,8 +184,11 @@ final class TerminalService {
     func openChecked(_ host: RemoteHost, kind: Kind, replacing: TerminalSession.ID? = nil) async -> TerminalSession? {
         guard canOpen(host), trustRequest?.host.id != host.id else { return nil }
         openError = nil
-        pendingOpens += 1
-        defer { pendingOpens -= 1 }
+        pendingOpens[host.id, default: 0] += 1
+        defer {
+            let remaining = pendingOpens[host.id, default: 1] - 1
+            pendingOpens[host.id] = remaining > 0 ? remaining : nil
+        }
         switch await checkHostKey(host) {
         case .known:
             return launch(host, kind: kind, replacing: replacing)
@@ -314,7 +345,7 @@ final class TerminalService {
 
     /// The tab to select after `id` closes: the next one, else the previous one.
     private func neighbour(of id: TerminalSession.ID) -> TerminalSession.ID? {
-        let sessions = manager.sessions
+        let sessions = self.sessions
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return selectedID }
         if index + 1 < sessions.count { return sessions[index + 1].id }
         if index > 0 { return sessions[index - 1].id }
@@ -346,7 +377,7 @@ final class TerminalService {
 
     /// Selects the next (`offset` 1) or previous (-1) tab, wrapping around.
     func cycle(by offset: Int) {
-        let sessions = manager.sessions
+        let sessions = self.sessions
         guard !sessions.isEmpty else { return }
         let current = selectedSession.flatMap { session in sessions.firstIndex { $0.id == session.id } } ?? 0
         let next = ((current + offset) % sessions.count + sessions.count) % sessions.count
@@ -356,27 +387,32 @@ final class TerminalService {
     /// Selects the tab at `index` (0-based); the last tab for an index past the end, like ⌘9 in
     /// browsers.
     func select(index: Int) {
-        let sessions = manager.sessions
+        let sessions = self.sessions
         guard !sessions.isEmpty else { return }
         selectedID = sessions[min(index, sessions.count - 1)].id
     }
 
-    /// Moves the tab `id` to the position of `target` (drag and drop).
-    func move(_ id: TerminalSession.ID, to target: TerminalSession.ID) {
+    /// Whether the tab can move up (-1) or down (1) among its host's tabs.
+    func canMove(_ id: TerminalSession.ID, by offset: Int) -> Bool {
+        moveTarget(of: id, by: offset) != nil
+    }
+
+    /// Moves the tab one place up (-1) or down (1) among its host's tabs.
+    func move(_ id: TerminalSession.ID, by offset: Int) {
         let sessions = manager.sessions
-        guard id != target,
+        guard let target = moveTarget(of: id, by: offset),
               let from = sessions.firstIndex(where: { $0.id == id }),
               let to = sessions.firstIndex(where: { $0.id == target }) else { return }
         manager.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
     }
 
-    /// Moves the tab one place left (-1) or right (1).
-    func move(_ id: TerminalSession.ID, by offset: Int) {
-        let sessions = manager.sessions
-        guard let from = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let to = from + offset
-        guard sessions.indices.contains(to) else { return }
-        manager.move(fromOffsets: IndexSet(integer: from), toOffset: offset > 0 ? to + 1 : to)
+    /// The tab on the same host that `id` swaps places with.
+    private func moveTarget(of id: TerminalSession.ID, by offset: Int) -> TerminalSession.ID? {
+        guard let hostID = tabs[id]?.hostID else { return nil }
+        let siblings = sessions(on: hostID)
+        guard let index = siblings.firstIndex(where: { $0.id == id }),
+              siblings.indices.contains(index + offset) else { return nil }
+        return siblings[index + offset].id
     }
 
     // MARK: - Display
