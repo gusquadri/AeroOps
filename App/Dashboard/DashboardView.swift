@@ -93,13 +93,16 @@ struct DashboardView: View {
             isScanningKey: model.monitoring.scanningHostIDs.contains(host.id),
             keyScanError: model.monitoring.scanErrors[host.id]
         )
-        .onTapGesture(count: 2) {
-            select(host.id, fromCard: true)
-            showsDetail = true
-        }
-        .onTapGesture {
-            select(host.id, fromCard: true)
-        }
+        // Closures make cards unequal to SwiftUI, so without this every card would redraw
+        // whenever the Dashboard does, e.g. for each new selection.
+        .equatable()
+        // Two gestures that recognise together: the first click selects at once instead of
+        // waiting out the double-click interval, and the second also opens the inspector.
+        .gesture(
+            TapGesture(count: 1)
+                .onEnded { select(host.id, fromCard: true) }
+                .simultaneously(with: TapGesture(count: 2).onEnded { showsDetail = true })
+        )
     }
 
     private func select(_ id: RemoteHost.ID, fromCard: Bool) {
@@ -152,7 +155,7 @@ private struct DashboardSummary: View {
 /// or offline hosts keep their last numbers, dimmed, with "updated Xs ago" by the tags. A held
 /// host key puts the button that resolves it there: Review… for a changed key, Review Key… for
 /// a first key that is not trusted yet.
-struct HostCard: View {
+struct HostCard: View, Equatable {
     let host: RemoteHost
     let state: HostDisplayState
     var isSelected = false
@@ -172,6 +175,14 @@ struct HostCard: View {
 
     /// Opacity of numbers that are no longer current.
     static let staleOpacity = 0.45
+
+    /// Equal when everything but the actions is: those are new closures each time, and do the
+    /// same thing for the same host. `state` is compared by identity; the card observes it.
+    nonisolated static func == (lhs: HostCard, rhs: HostCard) -> Bool {
+        lhs.host == rhs.host && lhs.state === rhs.state && lhs.isSelected == rhs.isSelected
+            && lhs.canOpenSSH == rhs.canOpenSSH && lhs.keyBlock == rhs.keyBlock
+            && lhs.isScanningKey == rhs.isScanningKey && lhs.keyScanError == rhs.keyScanError
+    }
     /// The name column's width before the buttons shrink to small, then uptime goes.
     private static let nameIdealWidth: CGFloat = 110
 
@@ -223,10 +234,8 @@ struct HostCard: View {
                     .accessibilityHidden(true)
                 // Narrower cards get small buttons, then drop uptime (the inspector shows it), so
                 // the name keeps room down to the grid's 300 pt minimum.
-                ViewThatFits(in: .horizontal) {
-                    titleRow(buttonSize: .regular, showsUptime: true)
-                    titleRow(buttonSize: .small, showsUptime: true)
-                    titleRow(buttonSize: .small, showsUptime: false)
+                HorizontalFit(Self.titleLayouts) { layout in
+                    titleRow(layout)
                 }
             }
             ZStack(alignment: .leading) {
@@ -237,15 +246,16 @@ struct HostCard: View {
                     .hidden()
                     .accessibilityHidden(true)
                 HStack(spacing: 8) {
-                    if !host.tags.isEmpty {
+                    if host.tags.isEmpty {
+                        Spacer(minLength: 8)
+                    } else {
                         // Fewer tags (and "+N") where the accessory needs the room.
-                        ViewThatFits(in: .horizontal) {
-                            ForEach([4, 3, 2, 1], id: \.self) { limit in
-                                TagRow(tags: host.tags, limit: limit)
-                            }
+                        HorizontalFit([4, 3, 2, 1]) { limit in
+                            TagRow(tags: host.tags, limit: limit)
                         }
+                        // At least 16 pt before the accessory.
+                        .padding(.trailing, 8)
                     }
-                    Spacer(minLength: 8)
                     accessory
                 }
             }
@@ -257,8 +267,20 @@ struct HostCard: View {
         .background { AeroHeaderWash(tint: orbTone.color) }
     }
 
+    /// The title row's layouts, widest first.
+    private static let titleLayouts = [
+        TitleLayout(buttonSize: .regular, showsUptime: true),
+        TitleLayout(buttonSize: .small, showsUptime: true),
+        TitleLayout(buttonSize: .small, showsUptime: false),
+    ]
+
+    private struct TitleLayout: Hashable {
+        let buttonSize: ControlSize
+        let showsUptime: Bool
+    }
+
     /// Name and address, then uptime and the Files and Open SSH buttons.
-    private func titleRow(buttonSize: ControlSize, showsUptime: Bool) -> some View {
+    private func titleRow(_ layout: TitleLayout) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(host.name)
@@ -272,14 +294,14 @@ struct HostCard: View {
                     .truncationMode(.middle)
             }
             .frame(minWidth: 0, idealWidth: Self.nameIdealWidth, maxWidth: .infinity, alignment: .leading)
-            if showsUptime {
+            if layout.showsUptime {
                 uptime
             }
             HStack(spacing: 8) {
                 filesButton
                 openSSHButton
             }
-            .controlSize(buttonSize)
+            .controlSize(layout.buttonSize)
         }
     }
 

@@ -8,12 +8,19 @@ import SwiftUI
 ///   faint moonbeams, a field of stars, aurora ribbons, glowing violet cloud banks, moonlit
 ///   bubbles and four-point star sparkles.
 ///
-/// Nothing animates: the canvas redraws only when its size or the appearance changes, so it
-/// costs nothing while the window is idle. Everything is laid out in fractions of the canvas,
+/// Nothing animates: the sky is painted again only when its size or the appearance changes, so
+/// it costs nothing while the window is idle. Everything is laid out in fractions of the canvas,
 /// so it scales with the window. With Increase Contrast the decoration is toned down (no rays
 /// or sparkles). Text never sits on the hills or clouds directly, only on glass over them
 /// (unit-tested contrast).
 /// Fills its container and ignores safe areas; place it behind content with `.background`.
+///
+/// The window shows a bitmap of the sky rather than the `Canvas` itself: Core Animation redraws
+/// a canvas, full-window blurs and all, on every frame of the sidebar or the inspector sliding,
+/// even when its size does not change, and a bitmap only has to be composited. While the size
+/// is changing (a live window resize), the last bitmap is stretched to fit, and the sky is
+/// painted again, off the main thread, once the size holds. Until the first bitmap is ready,
+/// and for a moment after the appearance changes, the canvas is drawn directly.
 ///
 /// ```swift
 /// RootView().background { SkyBackground() }
@@ -21,6 +28,14 @@ import SwiftUI
 public struct SkyBackground: View {
     private var accessibility = AeroAccessibility()
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    /// The background's size, under the safe areas.
+    @State private var size = CGSize.zero
+    /// The last bitmap of the sky.
+    @State private var painting: SkyPainting?
+
+    /// How long the size has to hold before the sky is painted again.
+    static let settleDelay = Duration.milliseconds(150)
 
     /// Creates the background.
     public init() {}
@@ -28,17 +43,83 @@ public struct SkyBackground: View {
     /// The background.
     public var body: some View {
         let painter = SkyPainter(variant: AeroVariant(colorScheme), calm: accessibility.increaseContrast)
-        Canvas(opaque: true) { context, size in
-            painter.paint(in: &context, size: size)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        let request = SkyPainting.Request(painter: painter, size: size, scale: displayScale)
+        Color.clear
+            .overlay {
+                if let painting, painting.request.painter == painter {
+                    Image(decorative: painting.image, scale: painting.request.scale)
+                        .resizable()
+                } else {
+                    Canvas(opaque: true) { context, size in
+                        painter.paint(in: &context, size: size)
+                    }
+                }
+            }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            .task(id: request) {
+                guard painting?.request != request, request.size.width > 0, request.size.height > 0 else { return }
+                try? await Task.sleep(for: Self.settleDelay)
+                guard !Task.isCancelled, let image = await request.paint(), !Task.isCancelled else { return }
+                painting = SkyPainting(request: request, image: image)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
+/// A bitmap of the sky.
+private struct SkyPainting {
+    /// What the bitmap shows.
+    struct Request: Equatable {
+        let painter: SkyPainter
+        /// In points.
+        let size: CGSize
+        /// Pixels per point.
+        let scale: CGFloat
+
+        /// Paints the sky into a bitmap.
+        ///
+        /// `ImageRenderer` only records the drawing and leaves rasterizing it to whoever first
+        /// draws the image, which would be Core Animation, on the main thread. The recording is
+        /// drawn into a bitmap of its own in the background instead.
+        @MainActor
+        func paint() async -> CGImage? {
+            let painter = painter, size = size
+            let renderer = ImageRenderer(
+                content: Canvas(opaque: true) { context, _ in
+                    painter.paint(in: &context, size: size)
+                }
+                .frame(width: size.width, height: size.height)
+                // The palette follows the appearance, which a renderer does not inherit.
+                .environment(\.colorScheme, painter.variant == .night ? .dark : .light)
+            )
+            renderer.scale = scale
+            renderer.isOpaque = true
+            guard let recording = renderer.cgImage else { return nil }
+            return await Task.detached(priority: .userInitiated) {
+                Self.rasterize(recording)
+            }.value
+        }
+
+        private nonisolated static func rasterize(_ image: CGImage) -> CGImage? {
+            guard let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(
+                      data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                  )
+            else { return nil }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return context.makeImage()
+        }
+    }
+
+    let request: Request
+    let image: CGImage
+}
+
 /// Draws the sky. Pure function of the canvas size and variant, so the drawing is deterministic.
-struct SkyPainter: Sendable {
+struct SkyPainter: Sendable, Equatable {
     /// Day or night sky.
     var variant = AeroVariant.day
     /// Tone the decoration down (Increase Contrast).

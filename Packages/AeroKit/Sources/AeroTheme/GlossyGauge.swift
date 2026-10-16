@@ -81,6 +81,10 @@ public struct GlossyGauge: View {
                 .foregroundStyle(strong ? Aero.text.primary : Aero.text.secondary)
                 .lineLimit(1)
         }
+        // SwiftUI pushes a new position down to every shape inside a view. As a group, a gauge
+        // that moves (its card resizing while the sidebar slides) takes one new position
+        // instead of one for each of its dozens of shapes.
+        .geometryGroup()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityValue(Self.formatted(value))
