@@ -85,7 +85,7 @@ struct TabSwitcher: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
                 .background {
-                    // The selected tab is a lit aqua gel pill that slides between tabs.
+                    // The selected tab is a lit gel pill (aqua by day, violet by night) that slides between tabs.
                     if isSelected {
                         AquaGel()
                             .matchedGeometryEffect(id: "selection", in: highlight)

@@ -3,8 +3,8 @@ import SwiftUI
 /// The Aero button: a glossy capsule with a vertical gradient, an inner highlight over the top
 /// half and a caustic glow at the bottom; darker while pressed, desaturated when disabled.
 ///
-/// - `.primary` (default, `.buttonStyle(.aqua)`): deep aqua with a white label. A button with
-///   `role: .destructive` turns coral.
+/// - `.primary` (default, `.buttonStyle(.aqua)`): deep aqua with a white label (violet by
+///   night). A button with `role: .destructive` turns coral.
 /// - `.secondary` (`.buttonStyle(.aquaSecondary)`): white glass with a deep aqua label (by
 ///   night, indigo glass with a light aqua label), for the less important action next to a
 ///   primary one (Logs, Cancel, Copy).
@@ -23,7 +23,7 @@ import SwiftUI
 public struct AquaButtonStyle: ButtonStyle {
     /// How much a button stands out.
     public enum Prominence: Sendable, Hashable, CaseIterable {
-        /// Filled deep aqua (coral for destructive roles), white label.
+        /// Filled deep aqua (violet by night; coral for destructive roles), white label.
         case primary
         /// White glass, deep aqua label (indigo glass, light aqua label by night).
         case secondary
@@ -52,7 +52,9 @@ extension ButtonStyle where Self == AquaButtonStyle {
 
 // MARK: - Palette
 
-/// Colours of one filled button variant. Internal; the contrast tests read them.
+/// Colours of one filled button variant. Internal; the contrast tests read them. The primary gel
+/// is aqua by day and violet by night, matching the night sky; the
+/// destructive gel is the same coral on either sky.
 struct AquaFill: Sendable {
     /// Top of the base gradient, under the gloss.
     let top: Color
@@ -66,11 +68,11 @@ struct AquaFill: Sendable {
     let rim: Color
 
     static let primary = AquaFill(
-        top: Color(hex: 0x3AAEEE),
-        band: Color(hex: 0x0B6FB5),
-        bottom: Color(hex: 0x1C8FD8),
-        glow: Aero.aquaLight,
-        rim: Color(hex: 0x06508A)
+        top: Color(day: 0x3AAEEE, night: 0xA98CFF),
+        band: Color(day: 0x0B6FB5, night: 0x5E3BD6),
+        bottom: Color(day: 0x1C8FD8, night: 0x7A58EE),
+        glow: Color(day: 0x7DD8FF, night: 0xC4AEFF),
+        rim: Color(day: 0x06508A, night: 0x2B1872)
     )
 
     static let destructive = AquaFill(
@@ -216,8 +218,8 @@ private struct AquaButtonBody: View {
     }
 }
 
-/// The filled surface of a primary Aqua button as a view: a glossy deep-aqua gel capsule with
-/// its caustic glow, highlight, rim and control shadow. For selection highlights that should
+/// The filled surface of a primary Aqua button as a view: a glossy gel capsule (deep aqua by
+/// day, violet by night) with its caustic glow, highlight, rim and control shadow. For selection highlights that should
 /// read as a lit button, such as the selected segment of a tab switcher. Labels on it use
 /// `Aero.text.onAccent`, as on a primary button.
 ///
