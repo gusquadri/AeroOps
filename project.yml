@@ -60,6 +60,7 @@ targets:
       base:
         PRODUCT_NAME: AeroOps
         PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.AeroOps
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: AeroOps
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
