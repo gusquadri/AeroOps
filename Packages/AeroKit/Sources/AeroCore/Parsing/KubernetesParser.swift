@@ -318,6 +318,46 @@ private struct MetadataJSON: Decodable {
     }
 }
 
+/// A pod's `metadata.ownerReferences` and its `pod-template-hash` label, for ``PodOwner``.
+private struct PodOwnershipJSON: Decodable {
+    struct Reference: Decodable {
+        var kind, name: String?
+        var controller: Bool?
+
+        enum CodingKeys: String, CodingKey { case kind, name, controller }
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            kind = c.nonEmptyString(.kind)
+            name = c.nonEmptyString(.name)
+            controller = c.lenient(Bool.self, .controller)
+        }
+    }
+
+    var references: [Reference]
+    var podTemplateHash: String?
+
+    enum CodingKeys: String, CodingKey { case ownerReferences, labels }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        references = c.lenient(LossyArray<Reference>.self, .ownerReferences)?.elements ?? []
+        podTemplateHash = c.lenient([String: String].self, .labels)?["pod-template-hash"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The controller reference; a Deployment's ReplicaSet (`<deployment>-<pod-template-hash>`)
+    /// becomes the Deployment.
+    var owner: PodOwner? {
+        guard let reference = references.first(where: { $0.controller == true }),
+              let kind = reference.kind, let name = reference.name
+        else { return nil }
+        if kind == "ReplicaSet", let hash = podTemplateHash, name.hasSuffix("-\(hash)"), name.count > hash.count + 1 {
+            return PodOwner(kind: "Deployment", name: String(name.dropLast(hash.count + 1)))
+        }
+        return PodOwner(kind: kind, name: name)
+    }
+}
+
 /// The fields of a Pod that ``PodInfo`` keeps.
 private struct PodJSON: Decodable {
     struct Spec: Decodable {
@@ -363,6 +403,7 @@ private struct PodJSON: Decodable {
     }
 
     var metadata: MetadataJSON?
+    var ownership: PodOwnershipJSON?
     var spec: Spec?
     var status: Status?
 
@@ -371,6 +412,7 @@ private struct PodJSON: Decodable {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         metadata = c.lenient(MetadataJSON.self, .metadata)
+        ownership = c.lenient(PodOwnershipJSON.self, .metadata)
         spec = c.lenient(Spec.self, .spec)
         status = c.lenient(Status.self, .status)
     }
@@ -395,7 +437,8 @@ private struct PodJSON: Decodable {
             nodeName: spec?.nodeName,
             createdAt: metadata?.creationTimestamp.flatMap { Timestamps.parseRFC3339($0) },
             cpuLimitMillicores: KubernetesParser.millicores(spec?.limit(\.cpu)),
-            memLimitBytes: spec?.limit(\.memory).flatMap(KubernetesParser.roundedUp)
+            memLimitBytes: spec?.limit(\.memory).flatMap(KubernetesParser.roundedUp),
+            owner: ownership?.owner
         )
     }
 }

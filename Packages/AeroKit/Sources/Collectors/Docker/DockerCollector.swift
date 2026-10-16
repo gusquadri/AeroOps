@@ -20,6 +20,10 @@ public struct DockerCollector: Sendable {
     static let listOutputLimit = 16 << 20
     static let logsOutputLimit = 8 << 20
     static let inspectOutputLimit = 4 << 20
+    static let actionOutputLimit = 64 << 10
+    /// Limit for a stop, restart or remove: `docker stop` waits for the container's stop
+    /// timeout (10 s by default, often more in Compose files) before it kills it.
+    public static let actionTimeout = Duration.seconds(120)
 
     public init(runner: any RemoteCommandRunning, timeout: Duration = .seconds(30)) {
         self.runner = runner
@@ -84,6 +88,18 @@ public struct DockerCollector: Sendable {
             throw DockerError.failed(message: "docker inspect returned no readable container for \(container).")
         }
         return DockerInspection(summary: summary, json: result.stdout)
+    }
+
+    /// Stops, restarts or removes one container (by name or ID).
+    ///
+    /// - Throws: ``CollectorInputError`` for an unsafe name, `SSHError`, or
+    ///   ``AeroCore/DockerError`` (`.failed` with docker's message for an unknown container).
+    public func perform(_ action: DockerContainerAction, on container: String, host: RemoteHost) async throws {
+        let command = try DockerCommands.action(action, container: container, sudo: host.dockerSudo)
+        let result = try await runner.run(
+            command, on: host, stdin: nil, timeout: max(timeout, Self.actionTimeout), outputLimit: Self.actionOutputLimit
+        )
+        try Self.check(result)
     }
 
     /// Throws `SSHError` for transport failures, ``AeroCore/DockerError`` for a non-zero exit.

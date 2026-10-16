@@ -88,6 +88,29 @@ public struct KubectlCommands: Sendable, Hashable {
         return command("get events -n \(namespace) --field-selector \(selector) -o json")
     }
 
+    /// `delete pod -n '<ns>' '<pod>' --wait=false`: returns once the API server accepted the
+    /// deletion, without waiting for the containers to stop.
+    public func deletePod(_ pod: String, namespace: String) throws(CollectorInputError) -> String {
+        let ns = try quoted(namespace, field: "namespace")
+        let name = try quoted(pod, field: "pod")
+        return command("delete pod -n \(ns) \(name) --wait=false")
+    }
+
+    /// `scale -n '<ns>' '<kind>/<name>' --replicas=<n>`, e.g. `'deployment/web'`.
+    ///
+    /// - Throws: ``CollectorInputError/unsupported(_:)`` when the owner can't be scaled
+    ///   (``AeroCore/PodOwner/isScalable``), or for a negative replica count.
+    public func scale(_ owner: PodOwner, namespace: String, replicas: Int) throws(CollectorInputError) -> String {
+        guard owner.isScalable else {
+            throw .unsupported("A \(owner.kind) can't be scaled. Only Deployments, StatefulSets, ReplicaSets and ReplicationControllers can.")
+        }
+        guard replicas >= 0 else { throw .unsupported("The replica count must be 0 or more, not \(replicas).") }
+        let ns = try quoted(namespace, field: "namespace")
+        try NameCheck.require(owner.name, field: "name")
+        let target = ShellQuote.quote("\(owner.kind.lowercased())/\(owner.name)")
+        return command("scale -n \(ns) \(target) --replicas=\(replicas)")
+    }
+
     /// Splits ``pods(namespace:)`` output into the pods JSON and the metrics JSON (empty when
     /// the metrics call failed or the marker is missing).
     static func splitPodsOutput(_ output: Data) -> (pods: Data, metrics: Data) {

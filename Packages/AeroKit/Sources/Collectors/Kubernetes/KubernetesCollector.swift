@@ -20,6 +20,7 @@ public struct KubernetesCollector: Sendable {
     static let logsOutputLimit = 8 << 20
     static let describeOutputLimit = 2 << 20
     static let eventsOutputLimit = 16 << 20
+    static let actionOutputLimit = 64 << 10
 
     public init(runner: any RemoteCommandRunning, timeout: Duration = .seconds(30)) {
         self.runner = runner
@@ -96,6 +97,19 @@ public struct KubernetesCollector: Sendable {
         let result = try await run(command, on: host, outputLimit: Self.eventsOutputLimit)
         guard !result.stdoutTruncated else { throw KubectlError.invalidOutput }
         return try KubernetesParser.parseEvents(result.stdout)
+    }
+
+    /// Deletes a pod without waiting for it to stop. Its controller, if any, creates a
+    /// replacement (``AeroCore/PodOwner/recreatesPods``).
+    public func deletePod(_ pod: String, namespace: String, on host: RemoteHost) async throws {
+        let command = try KubectlCommands(host: host).deletePod(pod, namespace: namespace)
+        _ = try await run(command, on: host, outputLimit: Self.actionOutputLimit)
+    }
+
+    /// Sets the replica count of a pod's owner (``KubectlCommands/scale(_:namespace:replicas:)``).
+    public func scale(_ owner: PodOwner, namespace: String, replicas: Int, on host: RemoteHost) async throws {
+        let command = try KubectlCommands(host: host).scale(owner, namespace: namespace, replicas: replicas)
+        _ = try await run(command, on: host, outputLimit: Self.actionOutputLimit)
     }
 
     /// Runs `command`; throws `SSHError` for transport failures, ``AeroCore/KubectlError`` for a

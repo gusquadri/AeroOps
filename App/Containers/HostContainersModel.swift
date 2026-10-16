@@ -99,6 +99,13 @@ final class HostContainersModel {
     /// Describe and events for ``selectedPodID``, shown in the inspector.
     private(set) var podDetail: PodDetailModel?
 
+    /// A Delete (or a pod's Stop) waiting for the user's OK.
+    var confirmation: WorkloadActionRequest?
+    /// The last Stop, Restart or Delete that failed.
+    var actionFailure: WorkloadActionFailure?
+    /// Rows with a Stop, Restart or Delete running: container IDs and `namespace/pod` IDs.
+    private(set) var busyRows: Set<String> = []
+
     // MARK: Statistics (self-test)
 
     private(set) var refreshCount = 0
@@ -197,20 +204,26 @@ final class HostContainersModel {
 
     /// Refreshes once. Waits for a refresh that is already running instead of overlapping it;
     /// `reprobe` (the Refresh button) probes capabilities again and retries stopped sections.
-    func refresh(reprobe: Bool = false) async {
+    /// `fresh` loads again after a running refresh, so a change just made shows.
+    func refresh(reprobe: Bool = false, fresh: Bool = false) async {
         if let running = inFlight {
             await running.value
-            guard reprobe else { return }
+            guard reprobe || fresh else { return }
         }
         while let running = inFlight { await running.value }
-        let task = Task { await self.performRefresh(reprobe: reprobe) }
+        // The task clears `inFlight` itself, before it finishes. Awaiting a finished task does not
+        // suspend, so if a caller cleared it after its await, the loop above could spin on the
+        // main actor forever while the caller that would clear it waits for its turn.
+        let task = Task {
+            await self.performRefresh(reprobe: reprobe)
+            self.inFlight = nil
+        }
         inFlight = task
         await withTaskCancellationHandler {
             await task.value
         } onCancel: {
             task.cancel()
         }
-        if inFlight == task { inFlight = nil }
     }
 
     private func performRefresh(reprobe: Bool) async {
@@ -390,6 +403,67 @@ final class HostContainersModel {
         detail.load()
     }
 
+    // MARK: - Stop, restart, delete
+
+    func isBusy(_ rowID: String) -> Bool {
+        busyRows.contains(rowID)
+    }
+
+    /// Runs a container's Stop or Restart, or asks before a Delete.
+    func request(_ action: WorkloadAction, on container: ContainerInfo) {
+        submit(WorkloadActionRequest(action: action, target: .container(container)))
+    }
+
+    /// Runs a pod's Restart, or asks before a Stop or Delete.
+    func request(_ action: WorkloadAction, on pod: PodInfo) {
+        submit(WorkloadActionRequest(action: action, target: .pod(pod)))
+    }
+
+    private func submit(_ request: WorkloadActionRequest) {
+        if request.needsConfirmation {
+            confirmation = request
+        } else {
+            perform(request)
+        }
+    }
+
+    /// Runs the action now, then refreshes; a failure becomes ``actionFailure``.
+    func perform(_ request: WorkloadActionRequest) {
+        guard let host, !busyRows.contains(request.rowID) else { return }
+        busyRows.insert(request.rowID)
+        let docker = service.docker
+        let kubernetes = service.kubernetes
+        Task {
+            do {
+                try await Self.run(request, on: host, docker: docker, kubernetes: kubernetes)
+            } catch {
+                if let issue = WorkloadIssue.from(error, capabilities: capabilities, host: host) {
+                    actionFailure = WorkloadActionFailure(title: request.failureTitle, issue: issue)
+                }
+            }
+            await refresh(fresh: true)
+            busyRows.remove(request.rowID)
+        }
+    }
+
+    private nonisolated static func run(
+        _ request: WorkloadActionRequest, on host: RemoteHost, docker: DockerCollector, kubernetes: KubernetesCollector
+    ) async throws {
+        switch (request.action, request.target) {
+        case (.stop, .container(let container)):
+            try await docker.perform(.stop, on: container.id, host: host)
+        case (.restart, .container(let container)):
+            try await docker.perform(.restart, on: container.id, host: host)
+        case (.delete, .container(let container)):
+            try await docker.perform(.remove, on: container.id, host: host)
+        case (.stop, .pod(let pod)):
+            guard let owner = pod.owner else { throw CollectorInputError.unsupported("This pod has no controller to scale.") }
+            try await kubernetes.scale(owner, namespace: pod.namespace, replicas: 0, on: host)
+        case (.restart, .pod(let pod)), (.delete, .pod(let pod)):
+            try await kubernetes.deletePod(pod.name, namespace: pod.namespace, on: host)
+        }
+    }
+
     // MARK: - Terminal
 
     var canOpenTerminal: Bool {
@@ -426,6 +500,7 @@ final class HostContainersModel {
     func stopPresentations() {
         logs = nil
         inspection = nil
+        confirmation = nil
         podDetail?.cancel()
         podDetail = nil
         inspectorPresented = false

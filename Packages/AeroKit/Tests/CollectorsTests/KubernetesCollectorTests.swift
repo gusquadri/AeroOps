@@ -113,6 +113,23 @@ struct KubernetesCommandTests {
             == "LC_ALL=C kubectl get events -n 'demo' --field-selector 'involvedObject.name=pending-1' -o json")
     }
 
+    @Test("Delete a pod without waiting; scale its owner")
+    func actions() throws {
+        let k3s = try KubectlCommands(prefix: "sudo -n k3s kubectl")
+        #expect(try k3s.deletePod("web-7b56d94874-b8t9q", namespace: "demo")
+            == "LC_ALL=C sudo -n k3s kubectl delete pod -n 'demo' 'web-7b56d94874-b8t9q' --wait=false")
+        #expect(try k3s.scale(PodOwner(kind: "Deployment", name: "web"), namespace: "demo", replicas: 0)
+            == "LC_ALL=C sudo -n k3s kubectl scale -n 'demo' 'deployment/web' --replicas=0")
+        #expect(try k3s.scale(PodOwner(kind: "StatefulSet", name: "db"), namespace: "demo", replicas: 3)
+            == "LC_ALL=C sudo -n k3s kubectl scale -n 'demo' 'statefulset/db' --replicas=3")
+        #expect(throws: CollectorInputError.self) {
+            try k3s.scale(PodOwner(kind: "DaemonSet", name: "agent"), namespace: "demo", replicas: 0)
+        }
+        #expect(throws: CollectorInputError.self) {
+            try k3s.scale(PodOwner(kind: "Deployment", name: "web"), namespace: "demo", replicas: -1)
+        }
+    }
+
     @Test("Hostile names are rejected in every position", arguments: dockerHostileNames)
     func hostileNames(name: String) throws {
         let kubectl = try KubectlCommands(prefix: nil)
@@ -129,6 +146,14 @@ struct KubernetesCommandTests {
         #expect(throws: CollectorInputError.self) { try kubectl.describe(pod: name, namespace: "demo") }
         #expect(throws: CollectorInputError.self) { try kubectl.events(pod: name, namespace: "demo") }
         #expect(throws: CollectorInputError.self) { try kubectl.events(pod: "web", namespace: name) }
+        #expect(throws: CollectorInputError.self) { try kubectl.deletePod(name, namespace: "demo") }
+        #expect(throws: CollectorInputError.self) { try kubectl.deletePod("web", namespace: name) }
+        #expect(throws: CollectorInputError.unsafeName(field: "name", value: name)) {
+            try kubectl.scale(PodOwner(kind: "Deployment", name: name), namespace: "demo", replicas: 0)
+        }
+        #expect(throws: CollectorInputError.self) {
+            try kubectl.scale(PodOwner(kind: "Deployment", name: "web"), namespace: name, replicas: 0)
+        }
     }
 }
 
@@ -217,6 +242,25 @@ struct KubernetesCollectorTests {
         #expect(runner.commands == [
             "LC_ALL=C sudo -n k3s kubectl logs -n 'demo' 'crasher-89b4b56b4-djl5b' --previous --tail=50 --timestamps",
         ])
+    }
+
+    @Test("Pod actions run the right command; RBAC refusals are classified")
+    func podActions() async throws {
+        let runner = ProbeScriptedRunner(result: ProbeTestData.ok("pod \"web-1\" deleted\n"))
+        let collector = KubernetesCollector(runner: runner)
+        try await collector.deletePod("web-1", namespace: "demo", on: k3sHost)
+        try await collector.scale(PodOwner(kind: "Deployment", name: "web"), namespace: "demo", replicas: 0, on: k3sHost)
+        #expect(runner.commands == [
+            "LC_ALL=C sudo -n k3s kubectl delete pod -n 'demo' 'web-1' --wait=false",
+            "LC_ALL=C sudo -n k3s kubectl scale -n 'demo' 'deployment/web' --replicas=0",
+        ])
+
+        let forbidden = ProbeScriptedRunner(result: ProbeTestData.failure(
+            stderr: "Error from server (Forbidden): pods \"web-1\" is forbidden: User \"dev\" cannot delete resource \"pods\"\n"
+        ))
+        await #expect(throws: KubectlError.self) {
+            try await KubernetesCollector(runner: forbidden).deletePod("web-1", namespace: "demo", on: k3sHost)
+        }
     }
 
     @Test("Events for the Pending pod")

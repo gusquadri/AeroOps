@@ -60,6 +60,13 @@ public enum DockerCommands {
         return "\(RemoteShell.localePrefix) \(head(sudo: sudo)) inspect --type container \(ShellQuote.quote(container))"
     }
 
+    /// `LC_ALL=C <docker> stop '<container>'`, `restart` or `rm -f` (a running container is
+    /// killed first, its anonymous volumes are kept).
+    public static func action(_ action: DockerContainerAction, container: String, sudo: Bool) throws(CollectorInputError) -> String {
+        try NameCheck.require(container, field: "container")
+        return "\(RemoteShell.localePrefix) \(head(sudo: sudo)) \(action.arguments) \(ShellQuote.quote(container))"
+    }
+
     /// The plain follow command for "Open in terminal":
     /// `<docker> logs -f --tail 100 --timestamps '<container>'` (no locale override, no
     /// watchdog: the terminal tab owns the process and Ctrl-C stops it).
@@ -81,5 +88,21 @@ public enum DockerCommands {
         let failed = rest.contains { $0.trimmingCharacters(in: .whitespaces) == statsFailedMarker }
         let stats = rest.filter { $0.trimmingCharacters(in: .whitespaces) != statsFailedMarker }.joined(separator: "\n")
         return (ps, stats, failed)
+    }
+}
+
+/// A lifecycle command for one container (``DockerCommands/action(_:container:sudo:)``).
+public enum DockerContainerAction: String, Sendable, Hashable, CaseIterable {
+    case stop
+    case restart
+    /// `docker rm -f`: removes the container, killing it first if it runs.
+    case remove
+
+    var arguments: String {
+        switch self {
+        case .stop: "stop"
+        case .restart: "restart"
+        case .remove: "rm -f"
+        }
     }
 }

@@ -93,7 +93,7 @@ struct PodsSection: View {
 /// "Ready" header, the "Restarts" header and a four-digit crash-loop badge, "120d", the
 /// CrashLoopBackOff, ImagePullBackOff and ContainerCreating chips (longer reasons such as
 /// CreateContainerConfigError get the wide Status column), "1234m", "123.4 MB", and two or
-/// three row buttons.
+/// three row buttons and the Stop, Restart or Delete menu.
 private enum PodColumn: String, CaseIterable {
     case namespace, name, ready, status, statusWide, restarts, cpu, memory, age, node, actions, actionsCompact
 
@@ -109,8 +109,8 @@ private enum PodColumn: String, CaseIterable {
     static let cpuWidth: CGFloat = 50
     static let memoryWidth: CGFloat = 62
     static let ageWidth: CGFloat = 34
-    static let actionsWidth: CGFloat = 66
-    static let actionsCompactWidth: CGFloat = 40
+    static let actionsWidth: CGFloat = 92
+    static let actionsCompactWidth: CGFloat = 66
     /// Statuses up to this length fit the regular Status column.
     static let regularStatusLength = "ContainerCreating".count
 
@@ -302,6 +302,8 @@ private struct PodTable: View {
                 Button("Open Logs in Terminal", systemImage: "terminal") { containers.openLogsInTerminal(pod) }
                     .disabled(!containers.canOpenTerminal)
                 Divider()
+                PodActionItems(pod: pod, containers: containers)
+                Divider()
                 Button("Copy Name", systemImage: "doc.on.doc") { copy(pod.name) }
             }
         } primaryAction: { ids in
@@ -344,6 +346,9 @@ private struct PodTable: View {
                 RowActionButton(title: "Events and describe", systemImage: "sidebar.trailing") {
                     containers.showDetail(pod)
                 }
+            }
+            WorkloadActionsMenu(busy: containers.isBusy(pod.id)) {
+                PodActionItems(pod: pod, containers: containers)
             }
         }
     }

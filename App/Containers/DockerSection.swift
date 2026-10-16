@@ -49,7 +49,8 @@ struct DockerSection: View {
 }
 
 /// The containers table's columns. Fixed widths fit the content and the header: the
-/// Restarting chip, "100.0%", "123.4 MB" and three row buttons.
+/// Restarting chip, "100.0%", "123.4 MB" and the Logs and Inspect buttons and the Stop, Restart
+/// or Delete menu.
 private enum ContainerColumn: String, CaseIterable {
     case name, image, state, status, cpu, memory, ports, actions
 
@@ -187,11 +188,8 @@ private struct DockerTable: View {
                     RowActionButton(title: "Inspect", systemImage: "info.circle") {
                         containers.inspect(container)
                     }
-                    RowActionButton(
-                        title: "Open logs in terminal", systemImage: "terminal",
-                        disabled: !containers.canOpenTerminal
-                    ) {
-                        containers.openLogsInTerminal(container)
+                    WorkloadActionsMenu(busy: containers.isBusy(container.id)) {
+                        ContainerActionItems(container: container, containers: containers)
                     }
                 }
             }
@@ -204,6 +202,8 @@ private struct DockerTable: View {
                 Button("Inspect", systemImage: "info.circle") { containers.inspect(container) }
                 Button("Open Logs in Terminal", systemImage: "terminal") { containers.openLogsInTerminal(container) }
                     .disabled(!containers.canOpenTerminal)
+                Divider()
+                ContainerActionItems(container: container, containers: containers)
                 Divider()
                 Button("Copy Name", systemImage: "doc.on.doc") { copy(container.name) }
                 Button("Copy ID", systemImage: "number") { copy(container.id) }

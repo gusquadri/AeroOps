@@ -29,6 +29,8 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
     public var cpuLimitMillicores: Int?
     /// The pod's memory limit, in bytes, chosen as ``cpuLimitMillicores``.
     public var memLimitBytes: Int64?
+    /// The workload that manages the pod; `nil` for a bare pod.
+    public var owner: PodOwner?
 
     /// Identity is `namespace/name`.
     public var id: String { "\(namespace)/\(name)" }
@@ -50,7 +52,8 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
         cpuMillicores: Int? = nil,
         memUsedBytes: Int64? = nil,
         cpuLimitMillicores: Int? = nil,
-        memLimitBytes: Int64? = nil
+        memLimitBytes: Int64? = nil,
+        owner: PodOwner? = nil
     ) {
         self.namespace = namespace
         self.name = name
@@ -62,7 +65,35 @@ public struct PodInfo: Identifiable, Codable, Sendable, Hashable {
         self.memUsedBytes = memUsedBytes
         self.cpuLimitMillicores = cpuLimitMillicores
         self.memLimitBytes = memLimitBytes
+        self.owner = owner
     }
+}
+
+/// The workload that manages a pod: the controller among `metadata.ownerReferences`, with a
+/// Deployment's ReplicaSet resolved to the Deployment (its name minus the `pod-template-hash`).
+public struct PodOwner: Codable, Sendable, Hashable {
+    /// `kind` as Kubernetes spells it: `Deployment`, `StatefulSet`, `ReplicaSet`, `DaemonSet`,
+    /// `Job`, `Node` (a static pod), …
+    public var kind: String
+    /// The owner's name, in the pod's namespace.
+    public var name: String
+
+    /// Creates an owner.
+    public init(kind: String, name: String) {
+        self.kind = kind
+        self.name = name
+    }
+
+    /// Kinds that `kubectl scale` works on.
+    public static let scalableKinds: Set<String> = ["Deployment", "StatefulSet", "ReplicaSet", "ReplicationController"]
+    /// Kinds that always replace a deleted pod. A Job may not (it stops once enough pods
+    /// succeeded), and a static pod's Node only recreates the mirror object, not the containers.
+    public static let recreatingKinds = scalableKinds.union(["DaemonSet"])
+
+    /// Whether `kubectl scale` works on it.
+    public var isScalable: Bool { Self.scalableKinds.contains(kind) }
+    /// Whether it replaces a deleted pod with a new one.
+    public var recreatesPods: Bool { Self.recreatingKinds.contains(kind) }
 }
 
 /// One entry of a pod's `status.containerStatuses[]`.

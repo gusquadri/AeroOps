@@ -57,6 +57,18 @@ struct DockerCommandTests {
         }
     }
 
+    @Test("Stop, restart and remove: quoted name, sudo, rm -f")
+    func actionCommands() throws {
+        #expect(try DockerCommands.action(.stop, container: "demo-web", sudo: false) == "LC_ALL=C docker stop 'demo-web'")
+        #expect(try DockerCommands.action(.restart, container: "demo-web", sudo: true) == "LC_ALL=C sudo -n docker restart 'demo-web'")
+        #expect(try DockerCommands.action(.remove, container: "0123abcd", sudo: false) == "LC_ALL=C docker rm -f '0123abcd'")
+        for action in DockerContainerAction.allCases {
+            #expect(throws: CollectorInputError.unsafeName(field: "container", value: "x;id")) {
+                try DockerCommands.action(action, container: "x;id", sudo: false)
+            }
+        }
+    }
+
     @Test("since must be positive")
     func badSince() {
         #expect(throws: CollectorInputError.invalidSince(0)) {
@@ -234,7 +246,26 @@ struct DockerCollectorTests {
         await #expect(throws: CollectorInputError.self) { try await docker.logs(of: name, on: host) }
         await #expect(throws: CollectorInputError.self) { try await docker.followLogs(of: name, on: host) }
         await #expect(throws: CollectorInputError.self) { try await docker.inspect(name, on: host) }
+        await #expect(throws: CollectorInputError.self) { try await docker.perform(.remove, on: name, host: host) }
         #expect(runner.calls.isEmpty)
+    }
+
+    @Test("Actions run once with the long timeout; docker's error is classified")
+    func actions() async throws {
+        let runner = ProbeScriptedRunner(result: ProbeTestData.ok("demo-web\n"))
+        try await DockerCollector(runner: runner).perform(.stop, on: "demo-web", host: ProbeTestData.host())
+        #expect(runner.commands == ["LC_ALL=C docker stop 'demo-web'"])
+        #expect(runner.calls.first?.timeout == DockerCollector.actionTimeout)
+
+        let missing = ProbeScriptedRunner(result: ProbeTestData.failure(stderr: "Error response from daemon: No such container: nope\n"))
+        let error = await #expect(throws: DockerError.self) {
+            try await DockerCollector(runner: missing).perform(.restart, on: "nope", host: ProbeTestData.host())
+        }
+        guard case .failed(let message)? = error else {
+            Issue.record("expected .failed, got \(String(describing: error))")
+            return
+        }
+        #expect(message.contains("No such container"))
     }
 
     @Test("Inspect returns the summary and the raw JSON")

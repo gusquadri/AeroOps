@@ -90,6 +90,25 @@ struct HostContainersView: View {
         .sheet(item: $containers.inspection) { inspection in
             InspectSheet(inspection: inspection)
         }
+        .confirmationDialog(
+            containers.confirmation?.confirmationTitle ?? "",
+            isPresented: isPresent($containers.confirmation),
+            presenting: containers.confirmation
+        ) { request in
+            Button(request.confirmButtonTitle, role: .destructive) { containers.perform(request) }
+            Button("Cancel", role: .cancel) {}
+        } message: { request in
+            Text(request.confirmationMessage)
+        }
+        .alert(
+            containers.actionFailure?.title ?? "",
+            isPresented: isPresent($containers.actionFailure),
+            presenting: containers.actionFailure
+        ) { _ in
+            Button("OK") {}
+        } message: { failure in
+            Text(failure.message)
+        }
         .inspector(isPresented: $containers.inspectorPresented) {
             PodInspectorView(containers: containers)
                 .inspectorColumnWidth(min: 300, ideal: Self.inspectorWidth, max: 560)

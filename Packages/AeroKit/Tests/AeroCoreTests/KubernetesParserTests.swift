@@ -162,6 +162,58 @@ struct KubernetesParserTests {
         #expect(pods[2].phase == .unknown)
     }
 
+    // MARK: - Owners
+
+    @Test("pods-all: Deployment pods resolve their ReplicaSet to the Deployment; the Job pod keeps its Job")
+    func podOwners() throws {
+        let pods = try fixturePods()
+        #expect(pods.map(\.owner) == [
+            PodOwner(kind: "Deployment", name: "bad-image"),
+            PodOwner(kind: "Deployment", name: "crasher"),
+            PodOwner(kind: "Job", name: "hello"),
+            PodOwner(kind: "Deployment", name: "pending"),
+            PodOwner(kind: "Deployment", name: "web"),
+            PodOwner(kind: "Deployment", name: "coredns"),
+            PodOwner(kind: "Deployment", name: "local-path-provisioner"),
+        ])
+        #expect(pods[1].owner?.isScalable == true)
+        #expect(pods[1].owner?.recreatesPods == true)
+        #expect(pods[2].owner?.isScalable == false)
+        #expect(pods[2].owner?.recreatesPods == false)
+    }
+
+    @Test("owners: only the controller counts; a bare ReplicaSet, StatefulSet and DaemonSet stay as they are")
+    func ownerVariants() throws {
+        let json = #"""
+        {"items":[
+          {"metadata":{"name":"bare","namespace":"a"}},
+          {"metadata":{"name":"not-controller","namespace":"a",
+                       "ownerReferences":[{"kind":"ConfigMap","name":"x"},{"kind":"ReplicaSet","name":"y","controller":false}]}},
+          {"metadata":{"name":"rs-1","namespace":"a","ownerReferences":[{"kind":"ReplicaSet","name":"rs","controller":true}]}},
+          {"metadata":{"name":"other-hash","namespace":"a","labels":{"pod-template-hash":"abc"},
+                       "ownerReferences":[{"kind":"ReplicaSet","name":"rs-def","controller":true}]}},
+          {"metadata":{"name":"db-0","namespace":"a","ownerReferences":[{"kind":"StatefulSet","name":"db","controller":true}]}},
+          {"metadata":{"name":"agent-x1","namespace":"a","ownerReferences":[{"kind":"DaemonSet","name":"agent","controller":true}]}},
+          {"metadata":{"name":"etcd-node1","namespace":"a","ownerReferences":[{"kind":"Node","name":"node1","controller":true}]}},
+          {"metadata":{"name":"odd","namespace":"a","labels":"none","ownerReferences":"none"}}
+        ]}
+        """#
+        let pods = try KubernetesParser.parsePods(json)
+        #expect(pods.map(\.owner) == [
+            nil,
+            nil,
+            PodOwner(kind: "ReplicaSet", name: "rs"),
+            PodOwner(kind: "ReplicaSet", name: "rs-def"),
+            PodOwner(kind: "StatefulSet", name: "db"),
+            PodOwner(kind: "DaemonSet", name: "agent"),
+            PodOwner(kind: "Node", name: "node1"),
+            nil,
+        ])
+        #expect(pods[5].owner?.recreatesPods == true)
+        #expect(pods[5].owner?.isScalable == false)
+        #expect(pods[6].owner?.recreatesPods == false)
+    }
+
     // MARK: - Resources and metrics
 
     @Test("pods-all: memory limits summed over containers, no CPU limits")
