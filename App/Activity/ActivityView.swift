@@ -112,6 +112,7 @@ extension BridgeService {
     }
 }
 
+#if DEBUG
 #Preview("Activity") {
     let model = AppModel.preview()
     ActivityView()
@@ -120,3 +121,4 @@ extension BridgeService {
         .frame(width: 1000, height: 800)
         .task { model.agents.applySampleState(hosts: model.hosts) }
 }
+#endif
