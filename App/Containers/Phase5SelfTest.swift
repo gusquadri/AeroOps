@@ -263,7 +263,7 @@ struct Phase5SelfTest {
         containers.section = .docker
         containers.showStopped = true
         await pause(1.0)
-        await snapshotMain("docker-table", r)
+        await snapshotMain("docker-table", r, between: containers)
     }
 
     private func checkInspect(_ containers: HostContainersModel, _ r: Recorder) async {
@@ -416,7 +416,7 @@ struct Phase5SelfTest {
             )
         }
         await pause(1.0)
-        await snapshotMain("pod-table", r)
+        await snapshotMain("pod-table", r, between: containers)
 
         // One click: the crashed instance's logs.
         if let crasher {
@@ -468,10 +468,10 @@ struct Phase5SelfTest {
                     + (containers.podDetail?.eventsIssue.map { "; issue: \($0.title)" } ?? "")
             )
             await pause(1.0)
-            await snapshotMain("pod-events", r)
+            await snapshotMain("pod-events", r, between: containers)
             containers.inspectorTab = .describe
             await pause(0.8)
-            await snapshotMain("pod-describe", r)
+            await snapshotMain("pod-describe", r, between: containers)
             containers.inspectorTab = .events
             containers.inspectorPresented = false
             progress("inspector closed")
@@ -522,7 +522,7 @@ struct Phase5SelfTest {
         )
         containers.section = .docker
         await pause(1.0)
-        await snapshotMain("permission-hint", r)
+        await snapshotMain("permission-hint", r, between: containers)
         model.selection = nil
     }
 
@@ -660,8 +660,13 @@ struct Phase5SelfTest {
         NSApp.windows.first { $0.isVisible && $0.canBecomeMain && !$0.isSheet }
     }
 
-    private func snapshotMain(_ name: String, _ r: Recorder) async {
+    /// Waits for `containers` to finish a poll first, so the header reads "Updated …" rather
+    /// than "Updating…" with Refresh dimmed (the README's Kubernetes screenshot comes from here).
+    private func snapshotMain(_ name: String, _ r: Recorder, between containers: HostContainersModel? = nil) async {
         guard Self.snapshotDirectory != nil, let window = mainWindow else { return }
+        if let containers {
+            await waitUntil(seconds: 20) { !containers.isRefreshing }
+        }
         await snapshotBothAppearances(name, r) { window }
     }
 
