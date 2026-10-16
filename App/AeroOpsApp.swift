@@ -59,6 +59,7 @@ struct AeroOpsApp: App {
                 .debugSnapshotHarness()
             #endif
                 .environment(model)
+                .environment(\.updateService, updates)
         }
         .defaultSize(width: 1180, height: 760)
         .commands {

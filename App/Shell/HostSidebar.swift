@@ -4,9 +4,9 @@ import SSHKit
 import SwiftUI
 import TerminalKit
 
-/// The main window's sidebar: every host with its status orb, name and tags, an Add Host
-/// button, and a context menu per host. Under each host, its open terminal tabs (click one to
-/// show it in Terminals) and a New Terminal row.
+/// The main window's sidebar: every host with its status orb, name and tags, Add Host and
+/// update buttons, and a context menu per host. Under each host, its open terminal tabs (click one to
+/// show it in Terminals; the Terminals tab has no tab strip of its own) and a New Terminal row.
 struct HostSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var deletionCandidate: RemoteHost?
@@ -41,10 +41,13 @@ struct HostSidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            AddHostButton()
-                .frame(maxWidth: .infinity)
-                .padding(12)
-                .help("Add a server to monitor (⌘N)")
+            HStack(spacing: 8) {
+                AddHostButton()
+                    .help("Add a server to monitor (⌘N)")
+                SidebarUpdateButton()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(12)
         }
         .onAppear { expanded.formUnion(hostsWithTerminals) }
         .onChange(of: hostsWithTerminals) { old, new in
@@ -103,6 +106,55 @@ struct HostSidebar: View {
                 }
             }
         )
+    }
+}
+
+/// Next to Add Host: checks for a new AeroOps release; Sparkle's window shows the result. A dot
+/// marks a release a check found that is not installed or skipped yet, and the arrows turn
+/// while a check started here runs. Builds without an update feed (every development build)
+/// show it disabled; see ``UpdateService``.
+private struct SidebarUpdateButton: View {
+    @Environment(\.updateService) private var updates
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let isChecking = updates?.isChecking ?? false
+        let availableVersion = updates?.availableVersion
+        Button {
+            updates?.checkForUpdates()
+        } label: {
+            Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+                .labelStyle(.iconOnly)
+                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isChecking && !reduceMotion)
+        }
+        .buttonStyle(.aquaSecondary)
+        .overlay(alignment: .topTrailing) {
+            if availableVersion != nil {
+                StatusOrb(tone: .healthy, size: 9)
+                    .offset(x: 2, y: -2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .disabled(updates?.canCheckForUpdates != true)
+        .help(help)
+        .accessibilityValue(availableVersion.map { "Version \($0) available" } ?? (isChecking ? "Checking" : ""))
+    }
+
+    private var help: String {
+        if let updates, updates.status == .running {
+            if let version = updates.availableVersion {
+                return "AeroOps \(version) is available"
+            }
+            return updates.isChecking ? "Checking for updates…" : "Check for updates"
+        }
+        switch updates?.status ?? .notConfigured {
+        case .failed(let message):
+            return "The updater could not start: \(message)"
+        case .idle:
+            return "The updater is starting"
+        case .notConfigured, .running:
+            return "This build has no update feed, so it never checks for updates"
+        }
     }
 }
 

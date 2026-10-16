@@ -5,7 +5,8 @@ import Sparkle
 import SwiftUI
 
 /// Sparkle 2 software updates. Owned by
-/// ``AeroOpsApp``; the app menu's Check for Updates… and Settings › Updates read it.
+/// ``AeroOpsApp``; the app menu's Check for Updates…, the sidebar's update button and
+/// Settings › Updates read it.
 ///
 /// The updater starts only when the bundle's Info.plist has both `SUFeedURL` and
 /// `SUPublicEDKey`. They come from the `AEROOPS_FEED_URL` and `AEROOPS_SPARKLE_PUBLIC_KEY` build
@@ -59,8 +60,15 @@ final class UpdateService {
     private(set) var allowsAutomaticDownloads = false
     /// `SPUUpdater.lastUpdateCheckDate`.
     private(set) var lastCheckDate: Date?
+    /// The version a check found, until the user skips it or a later check finds nothing newer.
+    /// The sidebar's update button shows a dot for it.
+    private(set) var availableVersion: String?
+    /// A check started with ``checkForUpdates()`` is running. Background checks do not set it.
+    private(set) var isChecking = false
 
     @ObservationIgnored private var controller: SPUStandardUpdaterController?
+    /// Sparkle holds its delegate weakly.
+    @ObservationIgnored private var delegate: UpdaterDelegate?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private let logger = Logger(subsystem: "app.aeroops", category: "updates")
 
@@ -75,7 +83,8 @@ final class UpdateService {
     /// Starts Sparkle when this build is configured; otherwise does nothing.
     func start() {
         guard status == .idle, let configuration else { return }
-        let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
+        let delegate = UpdaterDelegate(service: self)
+        let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: delegate, userDriverDelegate: nil)
         do {
             try controller.updater.start()
         } catch {
@@ -84,14 +93,19 @@ final class UpdateService {
             return
         }
         self.controller = controller
+        self.delegate = delegate
         status = .running
         logger.info("Sparkle started with feed \(configuration.feedURL, privacy: .public)")
         observe(controller.updater)
     }
 
-    /// Check for Updates…: Sparkle's own window shows progress and the result.
+    /// Check for Updates…: Sparkle's own window shows progress and the result. During a session
+    /// (an update already on screen) it only brings Sparkle's window forward.
     func checkForUpdates() {
         guard let controller, canCheckForUpdates else { return }
+        if !controller.updater.sessionInProgress {
+            isChecking = true
+        }
         controller.updater.checkForUpdates()
     }
 
@@ -120,6 +134,19 @@ final class UpdateService {
         refresh()
     }
 
+    fileprivate func didFindUpdate(version: String?) {
+        availableVersion = version
+        isChecking = false
+    }
+
+    fileprivate func didSkipUpdate() {
+        availableVersion = nil
+    }
+
+    fileprivate func didFinishUpdateCycle() {
+        isChecking = false
+    }
+
     private func refresh() {
         guard let updater = controller?.updater else { return }
         canCheckForUpdates = updater.canCheckForUpdates
@@ -127,6 +154,37 @@ final class UpdateService {
         automaticallyDownloads = updater.automaticallyDownloadsUpdates
         allowsAutomaticDownloads = updater.allowsAutomaticUpdates
         lastCheckDate = updater.lastUpdateCheckDate
+    }
+}
+
+/// Tells ``UpdateService`` what Sparkle's checks found.
+@MainActor
+private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    weak var service: UpdateService?
+
+    init(service: UpdateService) {
+        self.service = service
+    }
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        service?.didFindUpdate(version: item.displayVersionString)
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        service?.didFindUpdate(version: nil)
+    }
+
+    func updater(
+        _ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState
+    ) {
+        if choice == .skip {
+            service?.didSkipUpdate()
+        }
+    }
+
+    /// Also ends checks that failed, which report neither of the above.
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        service?.didFinishUpdateCycle()
     }
 }
 
