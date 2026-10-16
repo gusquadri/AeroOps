@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A recessed, tinted panel inside a card, for a status line or a notice: an opaque light base
-/// (so it reads the same over glass, forms and the sky), a wash of `tint`, a soft inner shade
+/// A recessed, tinted panel inside a card, for a status line or a notice: an opaque base, light
+/// by day and deep indigo by night (so it reads the same over glass, forms and the sky), a wash of `tint`, a soft inner shade
 /// along the top edge as if the well were pressed into the glass, and a `tint` hairline, at
 /// `radius.inner`. Text on it keeps 4.5:1 for every orb tone and aqua (unit-tested).
 ///

@@ -54,10 +54,10 @@ public struct GlassSection<Content: View, Accessory: View>: View {
                 .padding(.vertical, 11)
                 .background { AeroHeaderWash() }
 
-                // Etched divider: an ink line over a white line.
+                // Etched divider: an ink line over a line of sheen.
                 VStack(spacing: 0) {
                     Rectangle().fill(Aero.ink.opacity(accessibility.increaseContrast ? 0.35 : 0.12))
-                    Rectangle().fill(.white.opacity(0.7))
+                    Rectangle().fill(Aero.sheen.opacity(0.7))
                 }
                 .frame(height: 2)
                 .padding(.horizontal, 10)

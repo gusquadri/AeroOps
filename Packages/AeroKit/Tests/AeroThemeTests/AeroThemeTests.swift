@@ -5,21 +5,77 @@ import Testing
 @Suite("AeroTheme")
 @MainActor
 struct AeroThemeTests {
-    @Test("tokens match the plan's starting values")
+    @Test("tokens match the plan's starting values by day")
     func tokens() {
         #expect(Aero.radius.card == 18)
         #expect(Aero.shadow.card.y == 6)
         #expect(Aero.shadow.card.blur == 18)
-        #expect(Aero.aqua == Color(hex: 0x1BA6E8))
-        #expect(Aero.leaf == Color(hex: 0x6CCB4F))
-        #expect(Aero.sun == Color(hex: 0xFFC83D))
-        #expect(Aero.coral == Color(hex: 0xF2605A))
-        #expect(Aero.sky.top == Color(hex: 0x5BC8F5))
-        #expect(Aero.sky.bottom == Color(hex: 0xE9F8FF))
-        #expect(Aero.glass.fill == .white.opacity(0.55))
-        #expect(Aero.glass.rimTop == .white.opacity(0.8))
-        #expect(Aero.glass.rimBottom == .white.opacity(0.2))
-        #expect(Aero.shadow.card.color == Color(hex: 0x0A4A7A).opacity(0.18))
+        let day = EnvironmentValues.aero(.day)
+        // Within rounding: the tokens are NSColors, so they pass through AppKit's colour space.
+        func same(_ token: Color, _ expected: Color) -> Bool {
+            let (a, b) = (token.resolve(in: day), expected.resolve(in: day))
+            return [a.red - b.red, a.green - b.green, a.blue - b.blue, a.opacity - b.opacity]
+                .allSatisfy { abs($0) < 0.001 }
+        }
+        #expect(same(Aero.aqua, Color(hex: 0x1BA6E8)))
+        #expect(same(Aero.leaf, Color(hex: 0x6CCB4F)))
+        #expect(same(Aero.sun, Color(hex: 0xFFC83D)))
+        #expect(same(Aero.coral, Color(hex: 0xF2605A)))
+        #expect(same(Aero.sky.top, Color(hex: 0x5BC8F5)))
+        #expect(same(Aero.sky.bottom, Color(hex: 0xE9F8FF)))
+        #expect(same(Aero.glass.fill, .white.opacity(0.55)))
+        #expect(same(Aero.glass.rimTop, .white.opacity(0.8)))
+        #expect(same(Aero.glass.rimBottom, .white.opacity(0.2)))
+        #expect(same(Aero.shadow.card.color, Color(hex: 0x0A4A7A).opacity(0.18)))
+    }
+
+    @Test("every colour token changes by night, except the white label colour")
+    func nightTokens() {
+        let day = EnvironmentValues.aero(.day), night = EnvironmentValues.aero(.night)
+        let tokens: [(String, Color)] = [
+            ("sky.top", Aero.sky.top), ("sky.bottom", Aero.sky.bottom), ("aqua", Aero.aqua),
+            ("aquaDeep", Aero.aquaDeep), ("leaf", Aero.leaf), ("sun", Aero.sun), ("coral", Aero.coral),
+            ("neutral", Aero.neutral), ("text.primary", Aero.text.primary),
+            ("text.secondary", Aero.text.secondary), ("glass.fill", Aero.glass.fill),
+            ("glass.rimTop", Aero.glass.rimTop), ("glass.rimBottom", Aero.glass.rimBottom),
+            ("glass.solidFill", Aero.glass.solidFill), ("glass.rimStrong", Aero.glass.rimStrong),
+            ("shadow.card", Aero.shadow.card.color), ("shadow.control", Aero.shadow.control.color),
+        ]
+        for (name, token) in tokens {
+            #expect(token.resolve(in: day) != token.resolve(in: night), "\(name) is the same by night")
+        }
+        #expect(Aero.text.onAccent.resolve(in: day) == Aero.text.onAccent.resolve(in: night))
+        #expect(Aero.text.onBright.resolve(in: day) == Aero.text.onBright.resolve(in: night))
+        // Night text is light on a dark sky.
+        #expect(RGB(Aero.text.primary, .night).luminance > RGB(Aero.sky.top, .night).luminance)
+        #expect(RGB(Aero.sky.top, .night).luminance < 0.02)
+    }
+
+    @Test("variants follow the colour scheme and the AppKit appearance")
+    func variants() throws {
+        #expect(AeroVariant(ColorScheme.light) == .day)
+        #expect(AeroVariant(ColorScheme.dark) == .night)
+        #expect(AeroVariant(try #require(NSAppearance(named: .aqua))) == .day)
+        #expect(AeroVariant(try #require(NSAppearance(named: .darkAqua))) == .night)
+        #expect(AeroVariant(try #require(NSAppearance(named: .vibrantDark))) == .night)
+        #expect(AeroVariant(try #require(NSAppearance(named: .accessibilityHighContrastDarkAqua))) == .night)
+        #expect(AeroVariant(try #require(NSAppearance(named: .accessibilityHighContrastAqua))) == .day)
+        #expect(AeroVariant.night.title == "Nightly Frutiger Aero")
+        #expect(AeroVariant.day.title == "Frutiger Aero")
+    }
+
+    @Test("AppKit resolves the tokens against the view's appearance")
+    func appKitResolution() throws {
+        let color = NSColor(Aero.text.primary)
+        func srgb(_ name: NSAppearance.Name) throws -> NSColor {
+            var resolved: NSColor?
+            try #require(NSAppearance(named: name)).performAsCurrentDrawingAppearance {
+                resolved = color.usingColorSpace(.sRGB)
+            }
+            return try #require(resolved)
+        }
+        #expect(try srgb(.aqua).redComponent < 0.1)
+        #expect(try srgb(.darkAqua).redComponent > 0.9)
     }
 
     @Test("fonts: rounded for text, SF Mono at the same text style sizes for code-like text")
@@ -128,6 +184,7 @@ struct AeroThemeTests {
         _ = GlossyGauge(value: 0.97, label: "CPU", diameter: 80).body
         _ = StatusOrb(tone: .warning).body
         _ = SkyBackground().body
+        _ = AeroThemeShowcase(variant: .night).body
         _ = Button("Go") {}.buttonStyle(.aqua)
         _ = Button("Go") {}.buttonStyle(.aquaSecondary)
         _ = AeroTag("prod").body
@@ -140,10 +197,13 @@ struct AeroThemeTests {
         _ = AeroWell(tint: Aero.coral) { Text("Blocked") }.body
     }
 
-    @Test("sky painter draws at degenerate and large sizes without trapping")
-    func skyPainterSizes() {
-        for size in [CGSize.zero, CGSize(width: 1, height: 1), CGSize(width: 3000, height: 200)] {
-            let renderer = ImageRenderer(content: SkyBackground().frame(width: size.width, height: size.height))
+    @Test("sky painter draws at degenerate and large sizes without trapping", arguments: AeroVariant.allCases)
+    func skyPainterSizes(variant: AeroVariant) {
+        let sizes = [CGSize.zero, CGSize(width: 1, height: 1), CGSize(width: 3000, height: 200), CGSize(width: 200, height: 3000)]
+        for size in sizes {
+            let renderer = ImageRenderer(content: SkyBackground()
+                .frame(width: size.width, height: size.height)
+                .environment(\.colorScheme, variant == .night ? .dark : .light))
             _ = renderer.cgImage
         }
     }

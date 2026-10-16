@@ -104,8 +104,14 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     private let textColor = NSColor(Aero.text.primary)
     private let timestampColor = NSColor(Aero.text.secondary)
     private let infoColor = NSColor(Aero.aquaDeep)
-    private let matchColor = NSColor(Aero.sun).withAlphaComponent(0.45)
-    private let currentMatchColor = NSColor(Aero.sun)
+    private let matchColor = NSColor(name: nil) { appearance in
+        NSColor(Aero.sun).withAlphaComponent(AeroVariant(appearance) == .night ? 0.2 : 0.45)
+    }
+    /// Full sun by day. By night the text is light, so the current match is a stronger tint
+    /// that light text still reads on.
+    private let currentMatchColor = NSColor(name: nil) { appearance in
+        AeroVariant(appearance) == .night ? NSColor(Aero.sun).withAlphaComponent(0.42) : NSColor(Aero.sun)
+    }
 
     override init() {
         // Monospaced, so log text aligns in columns.

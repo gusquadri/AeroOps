@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// A glass card: Liquid Glass (`.glassEffect`) under a 55% white fill, a white gloss over the
-/// top 45%, a rim highlight and a soft shadow, at `radius.card`.
+/// A glass card: Liquid Glass (`.glassEffect`) under the `glass.fill` tint (55% white by day,
+/// smoked indigo by night), a gloss over the top 45%, a rim highlight and a soft shadow, at
+/// `radius.card`.
 ///
-/// Content defaults to `Aero.text.primary` and the light colour scheme (the theme is light-only
-/// until "Aero Night"). With Reduce Transparency the card is a solid fill; with Increase
-/// Contrast the rim becomes a navy hairline.
+/// Content defaults to `Aero.text.primary`. With Reduce Transparency the card is a solid fill;
+/// with Increase Contrast the rim becomes a navy (by night lavender) hairline.
 ///
 /// ```swift
 /// AeroCard {
@@ -33,7 +33,7 @@ public struct AeroCard<Content: View>: View {
 
 extension View {
     /// Puts Aero glass behind this view in `shape`: the same surface as ``AeroCard`` (Liquid
-    /// Glass, 55% white fill, top gloss, rim, `shadow`), for custom shapes such as sheets,
+    /// Glass, `glass.fill`, top gloss, rim, `shadow`), for custom shapes such as sheets,
     /// popovers or a toolbar pill. Honours Reduce Transparency and Increase Contrast.
     ///
     /// ```swift
@@ -85,8 +85,8 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                 shape.strokeBorder(Aero.glass.rimStrong, lineWidth: 1.5)
             } else {
                 ZStack {
-                    // A faint ink hairline defines the edge on the pale lower sky;
-                    // the white rim sits just inside it.
+                    // A faint ink hairline defines the edge on the pale lower sky (and on the
+                    // lit clouds by night); the rim sits just inside it.
                     shape.strokeBorder(Aero.ink.opacity(0.10), lineWidth: 0.5)
                     // The rim's gradient is a view masked by the stroke, not a gradient stroke:
                     // a gradient-stroked shape is a card-sized layer that SwiftUI redraws on the
@@ -99,7 +99,6 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                 .allowsHitTesting(false)
             }
         }
-        .environment(\.colorScheme, .light)
     }
 }
 

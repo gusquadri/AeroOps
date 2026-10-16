@@ -1,13 +1,18 @@
 import SwiftUI
 
-/// The window background: the sky gradient with a sun bloom, light rays, rolling green hills,
-/// glossy ribbons, soft bokeh, iridescent soap bubbles and lens sparkles, all drawn once in a
-/// single `Canvas`.
+/// The window background, all drawn once in a single `Canvas`:
 ///
-/// Nothing animates: the canvas redraws only when its size changes, so it costs nothing while
-/// the window is idle. Everything is laid out in fractions of the canvas, so it scales with
-/// the window. With Increase Contrast the decoration is toned down (no rays or sparkles).
-/// Text never sits on the hills directly, only on glass over them (unit-tested contrast).
+/// - By day (Frutiger Aero): the sky gradient with a sun bloom, light rays, rolling green hills,
+///   glossy ribbons, soft bokeh, iridescent soap bubbles and lens sparkles.
+/// - By night (Nightly Frutiger Aero, dark mode): a midnight-to-violet sky with a moon bloom,
+///   faint moonbeams, a field of stars, aurora ribbons, glowing violet cloud banks, moonlit
+///   bubbles and four-point star sparkles.
+///
+/// Nothing animates: the canvas redraws only when its size or the appearance changes, so it
+/// costs nothing while the window is idle. Everything is laid out in fractions of the canvas,
+/// so it scales with the window. With Increase Contrast the decoration is toned down (no rays
+/// or sparkles). Text never sits on the hills or clouds directly, only on glass over them
+/// (unit-tested contrast).
 /// Fills its container and ignores safe areas; place it behind content with `.background`.
 ///
 /// ```swift
@@ -15,13 +20,14 @@ import SwiftUI
 /// ```
 public struct SkyBackground: View {
     private var accessibility = AeroAccessibility()
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Creates the background.
     public init() {}
 
     /// The background.
     public var body: some View {
-        let painter = SkyPainter(calm: accessibility.increaseContrast)
+        let painter = SkyPainter(variant: AeroVariant(colorScheme), calm: accessibility.increaseContrast)
         Canvas(opaque: true) { context, size in
             painter.paint(in: &context, size: size)
         }
@@ -31,8 +37,10 @@ public struct SkyBackground: View {
     }
 }
 
-/// Draws the sky. Pure function of the canvas size, so the drawing is deterministic.
+/// Draws the sky. Pure function of the canvas size and variant, so the drawing is deterministic.
 struct SkyPainter: Sendable {
+    /// Day or night sky.
+    var variant = AeroVariant.day
     /// Tone the decoration down (Increase Contrast).
     var calm = false
 
@@ -40,6 +48,13 @@ struct SkyPainter: Sendable {
 
     func paint(in context: inout GraphicsContext, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        switch variant {
+        case .day: paintDay(in: &context, size: size)
+        case .night: paintNight(in: &context, size: size)
+        }
+    }
+
+    private func paintDay(in context: inout GraphicsContext, size: CGSize) {
         let w = size.width, h = size.height
         let bounds = Path(CGRect(origin: .zero, size: size))
         let sun = CGPoint(x: w * 0.14, y: -h * 0.08)
@@ -76,23 +91,7 @@ struct SkyPainter: Sendable {
 
         // 4. Light rays fanning out from the sun.
         if !calm {
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: min(w, h) * 0.014))
-                let length = hypot(w, h) * 1.2
-                for ray in Self.rays {
-                    let a0 = Angle.degrees(ray.angle - ray.spread / 2).radians
-                    let a1 = Angle.degrees(ray.angle + ray.spread / 2).radians
-                    var wedge = Path()
-                    wedge.move(to: sun)
-                    wedge.addLine(to: CGPoint(x: sun.x + cos(a0) * length, y: sun.y + sin(a0) * length))
-                    wedge.addLine(to: CGPoint(x: sun.x + cos(a1) * length, y: sun.y + sin(a1) * length))
-                    wedge.closeSubpath()
-                    layer.fill(wedge, with: .radialGradient(
-                        Gradient(colors: [.white.opacity(ray.opacity), .white.opacity(0)]),
-                        center: sun, startRadius: 0, endRadius: length * 0.8
-                    ))
-                }
-            }
+            drawRays(from: sun, light: .white, strength: 1, in: &context, size: size)
         }
 
         // 5. Rolling hills along the bottom: a pale far hill and a leaf-green near one.
@@ -107,7 +106,7 @@ struct SkyPainter: Sendable {
         context.drawLayer { layer in
             layer.addFilter(.blur(radius: 1.2))
             for ribbon in Self.ribbons {
-                drawRibbon(ribbon, in: &layer, size: size)
+                drawRibbon(ribbon, edge: .white, in: &layer, size: size)
             }
         }
 
@@ -131,17 +130,219 @@ struct SkyPainter: Sendable {
 
         // 8. Crisp soap bubbles.
         for bubble in Self.bubbles {
-            drawBubble(bubble, in: &context, size: size)
+            drawBubble(bubble, light: .white, in: &context, size: size)
         }
 
         // 9. Lens sparkles: four-point glints near the sun, on bubbles and on the hill crest.
         if !calm {
             for sparkle in Self.sparkles {
-                drawSparkle(sparkle, in: &context, size: size)
+                drawSparkle(sparkle, light: .white, in: &context, size: size)
             }
         }
     }
 
+    // MARK: Night
+
+    /// Nightly Frutiger Aero: the day's composition after dark, after the T3 Code nightly icon.
+    /// The sun becomes a moon bloom, the hills violet cloud banks with lit crests, the white
+    /// ribbons an aqua and violet aurora, and the sparkles four-point stars over a star field.
+    private func paintNight(in context: inout GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        let bounds = Path(CGRect(origin: .zero, size: size))
+        let moon = CGPoint(x: w * 0.14, y: -h * 0.08)
+
+        // 1. Night sky: midnight at the top, indigo, violet towards the bottom right.
+        context.fill(bounds, with: .linearGradient(
+            Gradient(stops: [
+                .init(color: Aero.sky.top, location: 0),
+                .init(color: Aero.sky.top.mix(with: Aero.sky.bottom, by: 0.45), location: 0.5),
+                .init(color: Aero.sky.bottom, location: 0.95),
+            ]),
+            startPoint: CGPoint(x: w * 0.1, y: 0), endPoint: CGPoint(x: w * 0.4, y: h)
+        ))
+
+        // 2. Horizon glows: violet bottom right, a hint of aurora aqua bottom left.
+        context.fill(bounds, with: .radialGradient(
+            Gradient(colors: [NightSky.violet.opacity(0.42 * decoration), NightSky.violet.opacity(0)]),
+            center: CGPoint(x: w * 0.92, y: h * 1.02), startRadius: 0, endRadius: max(w, h) * 0.6
+        ))
+        context.fill(bounds, with: .radialGradient(
+            Gradient(colors: [Aero.aqua.opacity(0.14 * decoration), Aero.aqua.opacity(0)]),
+            center: CGPoint(x: w * 0.02, y: h * 1.06), startRadius: 0, endRadius: max(w, h) * 0.45
+        ))
+
+        // 3. Moon bloom, where the sun is by day.
+        context.fill(bounds, with: .radialGradient(
+            Gradient(stops: [
+                .init(color: NightSky.moonlight.opacity(NightSky.moonPeak), location: 0),
+                .init(color: NightSky.moonlight.opacity(0.12), location: 0.3),
+                .init(color: NightSky.moonlight.opacity(0), location: 1),
+            ]),
+            center: moon, startRadius: 0, endRadius: max(w, h) * 0.55
+        ))
+
+        // 4. Faint moonbeams.
+        if !calm {
+            drawRays(from: moon, light: NightSky.moonlight, strength: 0.32, in: &context, size: size)
+        }
+
+        // 5. Star field: crisp points, the brightest with a soft halo.
+        for star in Self.stars {
+            let c = CGPoint(x: star.x * w, y: star.y * h)
+            let k = star.opacity * (calm ? 0.7 : 1)
+            if star.radius > 1.2 {
+                let halo = star.radius * 4
+                context.fill(
+                    Path(ellipseIn: CGRect(x: c.x - halo, y: c.y - halo, width: halo * 2, height: halo * 2)),
+                    with: .radialGradient(
+                        Gradient(colors: [NightSky.starlight.opacity(0.35 * k), NightSky.starlight.opacity(0)]),
+                        center: c, startRadius: 0, endRadius: halo
+                    )
+                )
+            }
+            let r = star.radius
+            context.fill(
+                Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                with: .color(NightSky.starlight.opacity(k))
+            )
+        }
+
+        // 6. Aurora ribbons sweeping behind the clouds.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 2))
+            for ribbon in Self.auroras {
+                drawRibbon(ribbon, edge: NightSky.moonlight, in: &layer, size: size)
+            }
+        }
+
+        // 7. Out-of-focus bokeh, moonlit and violet.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: min(w, h) * 0.018))
+            for (index, disc) in Self.bokeh.enumerated() {
+                let tint = index.isMultiple(of: 2) ? NightSky.moonlight : NightSky.violet
+                let r = disc.diameter * min(w, h) / 2
+                let center = CGPoint(x: disc.x * w, y: disc.y * h)
+                let rect = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
+                let k = disc.opacity * 0.6 * decoration
+                layer.fill(Path(ellipseIn: rect), with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: tint.opacity(k * 0.4), location: 0),
+                        .init(color: tint.opacity(k), location: 0.92),
+                        .init(color: tint.opacity(0), location: 1),
+                    ]),
+                    center: center, startRadius: 0, endRadius: r
+                ))
+            }
+        }
+
+        // 8. Cloud banks along the bottom: a dim far bank, a lit near one.
+        for bank in Self.clouds {
+            drawClouds(bank, in: &context, size: size)
+        }
+
+        // 9. Moonlit soap bubbles.
+        for bubble in Self.bubbles {
+            drawBubble(bubble, light: NightSky.moonlight, strength: 0.75, in: &context, size: size)
+        }
+
+        // 10. Four-point stars, as on the icon.
+        if !calm {
+            for sparkle in Self.starSparkles {
+                drawSparkle(sparkle, light: NightSky.starlight, in: &context, size: size)
+            }
+        }
+    }
+
+    // MARK: Rays
+
+    /// Wedges of `light` fanning out from `origin` (the sun, or the moon at `strength` < 1).
+    private func drawRays(
+        from origin: CGPoint, light: Color, strength: Double, in context: inout GraphicsContext, size: CGSize
+    ) {
+        let w = size.width, h = size.height
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: min(w, h) * 0.014))
+            let length = hypot(w, h) * 1.2
+            for ray in Self.rays {
+                let a0 = Angle.degrees(ray.angle - ray.spread / 2).radians
+                let a1 = Angle.degrees(ray.angle + ray.spread / 2).radians
+                var wedge = Path()
+                wedge.move(to: origin)
+                wedge.addLine(to: CGPoint(x: origin.x + cos(a0) * length, y: origin.y + sin(a0) * length))
+                wedge.addLine(to: CGPoint(x: origin.x + cos(a1) * length, y: origin.y + sin(a1) * length))
+                wedge.closeSubpath()
+                layer.fill(wedge, with: .radialGradient(
+                    Gradient(colors: [light.opacity(ray.opacity * strength), light.opacity(0)]),
+                    center: origin, startRadius: 0, endRadius: length * 0.8
+                ))
+            }
+        }
+    }
+
+    // MARK: Clouds
+
+    /// A cloud bank is a row of overlapping puffs over a floor, swelling towards its peak. It
+    /// glows into the sky around it, has a lit crest (brightest on the moon's side) and a body
+    /// shaded from its top down, with a soft sheen just under the crest.
+    private func drawClouds(_ bank: CloudBank, in context: inout GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        let unit = min(w, h)
+        let pattern: [CGFloat] = [1.0, 1.35, 0.9, 1.2, 1.5, 0.95, 1.25, 0.85]
+        var puffs = Path()
+        var floor = Path()
+        var x = -bank.radius * unit
+        var index = bank.phase
+        var highest = h
+        floor.move(to: CGPoint(x: x, y: h + 1))
+        while x < w + bank.radius * unit * 2 {
+            let r = bank.radius * unit * pattern[index % pattern.count]
+            let t = x / w
+            let swell = bank.swell * exp(-pow((t - bank.peak) / bank.spread, 2))
+            let center = CGPoint(x: x, y: (bank.floor - swell) * h + r * 0.3)
+            puffs.addEllipse(in: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
+            floor.addLine(to: center)
+            highest = min(highest, center.y - r)
+            x += r * 1.15
+            index += 1
+        }
+        floor.addLine(to: CGPoint(x: x, y: h + 1))
+        floor.closeSubpath()
+        // Overlapping puffs share a direction, so they fill as one; the floor under their centres
+        // is a separate path, so join the two explicitly.
+        let shape = floor.union(puffs)
+        let alpha = bank.opacity * (calm ? 0.8 : 1)
+        let rim = max(2, unit * 0.006)
+
+        // Glow into the sky above the crest.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: unit * 0.03))
+            layer.fill(shape, with: .color(NightSky.violet.opacity(0.35 * alpha * decoration)))
+        }
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 1))
+            layer.clip(to: shape)
+            // Lit crest, brightest on the moon's side.
+            layer.fill(shape, with: .linearGradient(
+                Gradient(colors: [bank.crest.opacity(alpha), bank.crest.mix(with: bank.top, by: 0.55).opacity(alpha)]),
+                startPoint: .zero, endPoint: CGPoint(x: w, y: 0)
+            ))
+            // Body under the crest, shaded from its top down.
+            let body = shape.offsetBy(dx: 0, dy: rim)
+            let top = CGPoint(x: 0, y: highest), bottom = CGPoint(x: 0, y: h)
+            layer.fill(body, with: .linearGradient(
+                Gradient(colors: [bank.top.opacity(alpha), bank.bottom.opacity(alpha)]),
+                startPoint: top, endPoint: bottom
+            ))
+            // Sheen just under the crest.
+            layer.fill(body, with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: NightSky.moonlight.opacity(0.22 * alpha), location: 0),
+                    .init(color: NightSky.moonlight.opacity(0), location: 0.3),
+                ]),
+                startPoint: top, endPoint: bottom
+            ))
+        }
+    }
     // MARK: Hills
 
     /// A hill is the area under a curve across the canvas, shaded from its crest down, with a
@@ -183,7 +384,7 @@ struct SkyPainter: Sendable {
 
     /// A ribbon is a stack of curves from its top edge to its bottom edge, brightest at the
     /// leading (top) edge and fading towards the trailing one, and faded out at both ends.
-    private func drawRibbon(_ ribbon: Ribbon, in context: inout GraphicsContext, size: CGSize) {
+    private func drawRibbon(_ ribbon: Ribbon, edge: Color, in context: inout GraphicsContext, size: CGSize) {
         let w = size.width, h = size.height
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * w, y: y * h) }
         func curve(at t: CGFloat) -> Path {
@@ -218,26 +419,29 @@ struct SkyPainter: Sendable {
             )
         }
         // Bright leading edge.
-        context.stroke(curve(at: 0), with: shading(.white, min(1, alpha * 2.6)), lineWidth: 1.5)
+        context.stroke(curve(at: 0), with: shading(edge, min(1, alpha * 2.6)), lineWidth: 1.5)
     }
 
     // MARK: Bubbles
 
-    private func drawBubble(_ bubble: Bubble, in context: inout GraphicsContext, size: CGSize) {
+    /// A soap bubble lit by `light` (the sun by day, the moon by night), at `strength`.
+    private func drawBubble(
+        _ bubble: Bubble, light: Color, strength: Double = 1, in context: inout GraphicsContext, size: CGSize
+    ) {
         let s = min(size.width, size.height)
         let r = bubble.diameter * s / 2
         let c = CGPoint(x: bubble.x * size.width, y: bubble.y * size.height)
         let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
         let circle = Path(ellipseIn: rect)
-        let k = bubble.opacity * decoration
+        let k = bubble.opacity * decoration * strength
 
         // Thin-film body: clear centre, brighter towards the rim.
         context.fill(circle, with: .radialGradient(
             Gradient(stops: [
-                .init(color: .white.opacity(0), location: 0),
-                .init(color: .white.opacity(0.06 * k), location: 0.6),
-                .init(color: .white.opacity(0.28 * k), location: 0.88),
-                .init(color: .white.opacity(0.6 * k), location: 1),
+                .init(color: light.opacity(0), location: 0),
+                .init(color: light.opacity(0.06 * k), location: 0.6),
+                .init(color: light.opacity(0.28 * k), location: 0.88),
+                .init(color: light.opacity(0.6 * k), location: 1),
             ]),
             center: c, startRadius: 0, endRadius: r
         ))
@@ -254,7 +458,7 @@ struct SkyPainter: Sendable {
             with: .conicGradient(film, center: c, angle: .degrees(-40)),
             lineWidth: max(1, r * 0.1)
         )
-        context.stroke(circle, with: .color(.white.opacity(0.55 * k)), lineWidth: max(0.75, r * 0.035))
+        context.stroke(circle, with: .color(light.opacity(0.55 * k)), lineWidth: max(0.75, r * 0.035))
 
         // Specular highlight, tilted, upper left.
         let spec = CGRect(x: -r * 0.32, y: -r * 0.17, width: r * 0.64, height: r * 0.34)
@@ -263,7 +467,7 @@ struct SkyPainter: Sendable {
                 .concatenating(CGAffineTransform(translationX: c.x - r * 0.4, y: c.y - r * 0.46))
         )
         context.fill(specPath, with: .linearGradient(
-            Gradient(colors: [.white.opacity(0.95 * k), .white.opacity(0.15 * k)]),
+            Gradient(colors: [light.opacity(0.95 * k), light.opacity(0.15 * k)]),
             startPoint: CGPoint(x: c.x - r * 0.7, y: c.y - r * 0.8),
             endPoint: CGPoint(x: c.x - r * 0.1, y: c.y - r * 0.2)
         ))
@@ -271,20 +475,20 @@ struct SkyPainter: Sendable {
         // Crescent reflection, lower right.
         var crescent = Path()
         crescent.addArc(center: c, radius: r * 0.8, startAngle: .degrees(10), endAngle: .degrees(75), clockwise: false)
-        context.stroke(crescent, with: .color(.white.opacity(0.5 * k)),
+        context.stroke(crescent, with: .color(light.opacity(0.5 * k)),
                        style: StrokeStyle(lineWidth: max(1, r * 0.07), lineCap: .round))
     }
 
     // MARK: Sparkles
 
-    /// A soft glow under a long four-point star, with a smaller star turned 45° over it.
-    private func drawSparkle(_ sparkle: Bubble, in context: inout GraphicsContext, size: CGSize) {
+    /// A soft glow under a long four-point star of `light`, with a smaller star turned 45° over it.
+    private func drawSparkle(_ sparkle: Bubble, light: Color, in context: inout GraphicsContext, size: CGSize) {
         let r = sparkle.diameter * min(size.width, size.height) / 2
         let c = CGPoint(x: sparkle.x * size.width, y: sparkle.y * size.height)
         let k = sparkle.opacity * decoration
         let glow = CGRect(x: c.x - r * 0.45, y: c.y - r * 0.45, width: r * 0.9, height: r * 0.9)
         context.fill(Path(ellipseIn: glow), with: .radialGradient(
-            Gradient(colors: [.white.opacity(0.85 * k), .white.opacity(0)]),
+            Gradient(colors: [light.opacity(0.85 * k), light.opacity(0)]),
             center: c, startRadius: 0, endRadius: r * 0.45
         ))
         for (scale, turn, alpha) in [(1.0, 0.0, 1.0), (0.5, Double.pi / 4, 0.6)] {
@@ -303,7 +507,7 @@ struct SkyPainter: Sendable {
                 CGAffineTransform(rotationAngle: turn).concatenating(CGAffineTransform(translationX: c.x, y: c.y))
             )
             context.fill(placed, with: .radialGradient(
-                Gradient(colors: [.white.opacity(k * alpha), .white.opacity(0)]),
+                Gradient(colors: [light.opacity(k * alpha), light.opacity(0)]),
                 center: c, startRadius: 0, endRadius: reach
             ))
         }
@@ -326,6 +530,26 @@ struct SkyPainter: Sendable {
 
     private struct Bubble: Sendable {
         let x: CGFloat, y: CGFloat, diameter: CGFloat, opacity: Double
+    }
+
+    private struct Star: Sendable {
+        /// Position in fractions of the canvas, radius in points (stars stay crisp at any size).
+        let x: CGFloat, y: CGFloat, radius: CGFloat, opacity: Double
+    }
+
+    private struct CloudBank: Sendable {
+        /// Y of the bank's floor, in fractions of the height.
+        let floor: CGFloat
+        /// Typical puff radius, in fractions of the canvas's shorter side.
+        let radius: CGFloat
+        /// Where the bank rises highest (fraction of the width), how far (fraction of the
+        /// height) and over how wide a stretch.
+        let peak: CGFloat, swell: CGFloat, spread: CGFloat
+        /// Offset into the puff size pattern, so banks do not repeat each other.
+        let phase: Int
+        /// Crest, top-of-body and bottom colours.
+        let crest: Color, top: Color, bottom: Color
+        let opacity: Double
     }
 
     private struct Hill: Sendable {
@@ -379,6 +603,53 @@ struct SkyPainter: Sendable {
         Bubble(x: 0.95, y: 0.88, diameter: 0.05, opacity: 0.85),
     ]
 
+    /// Night: aurora ribbons, aqua above violet, on the day ribbons' sweep.
+    private static let auroras: [Ribbon] = [
+        Ribbon(top: [0.60, 0.40, 0.84, 0.46], bottom: [0.70, 0.55, 0.95, 0.57], tint: Aero.aqua, opacity: 0.20),
+        Ribbon(top: [0.70, 0.52, 0.92, 0.58], bottom: [0.76, 0.60, 0.98, 0.66], tint: NightSky.violet, opacity: 0.34),
+        Ribbon(top: [0.78, 0.64, 0.98, 0.70], bottom: [0.84, 0.72, 1.04, 0.76], tint: Aero.aquaLight, opacity: 0.16),
+    ]
+
+    /// Night: a dim far bank swelling on the right (as on the icon) and a lit near bank on the left.
+    private static let clouds: [CloudBank] = [
+        CloudBank(floor: 0.90, radius: 0.075, peak: 0.80, swell: 0.12, spread: 0.32, phase: 3,
+                  crest: NightSky.cloudCrest.mix(with: NightSky.cloudTop, by: 0.4),
+                  top: NightSky.cloudTop.mix(with: Aero.sky.bottom, by: 0.35), bottom: Aero.sky.bottom,
+                  opacity: 0.8),
+        CloudBank(floor: 0.97, radius: 0.07, peak: 0.12, swell: 0.12, spread: 0.30, phase: 0,
+                  crest: NightSky.cloudCrest, top: NightSky.cloudTop, bottom: NightSky.cloudBottom,
+                  opacity: 1),
+    ]
+
+    /// Night: a deterministic star field, thinning towards the horizon.
+    private static let stars: [Star] = {
+        var state: UInt64 = 0x5EED_AE20_0F_C0DE
+        func next() -> Double {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Double(state >> 11) / Double(1 << 53)
+        }
+        return (0..<110).map { _ in
+            Star(
+                x: next(),
+                y: pow(next(), 1.5) * 0.85,
+                radius: 0.5 + pow(next(), 4) * 1.3,
+                opacity: 0.35 + next() * 0.6
+            )
+        }
+    }()
+
+    /// Night: four-point stars, the large ones spread like the icon's.
+    private static let starSparkles: [Bubble] = [
+        Bubble(x: 0.07, y: 0.14, diameter: 0.045, opacity: 0.8),
+        Bubble(x: 0.33, y: 0.24, diameter: 0.03, opacity: 0.7),
+        Bubble(x: 0.56, y: 0.08, diameter: 0.06, opacity: 0.95),
+        Bubble(x: 0.86, y: 0.17, diameter: 0.04, opacity: 0.85),
+        Bubble(x: 0.69, y: 0.37, diameter: 0.028, opacity: 0.7),
+        Bubble(x: 0.95, y: 0.47, diameter: 0.03, opacity: 0.75),
+        Bubble(x: 0.766, y: 0.215, diameter: 0.05, opacity: 0.9),
+        Bubble(x: 0.22, y: 0.58, diameter: 0.025, opacity: 0.6),
+    ]
+
     /// Sparkles reuse ``Bubble``: `diameter` is the star's span.
     private static let sparkles: [Bubble] = [
         Bubble(x: 0.27, y: 0.07, diameter: 0.07, opacity: 0.9),
@@ -389,11 +660,34 @@ struct SkyPainter: Sendable {
     ]
 }
 
+/// Colours of the night sky that are not tokens: the light sources and the clouds.
+enum NightSky {
+    /// The moon's bloom, beams, ribbon edges and bubble rims: a pale lavender white.
+    static let moonlight = Color(hex: 0xE4E0FF)
+    /// Stars.
+    static let starlight = Color(hex: 0xF6F4FF)
+    /// Horizon glow, aurora and the haze around the clouds.
+    static let violet = Color(hex: 0x8A5CF0)
+    /// Cloud crests (the brightest large surface of the night sky; text only sits on glass over it).
+    static let cloudCrest = Color(hex: 0xA295F2)
+    /// Top and bottom of the near cloud bank's body.
+    static let cloudTop = Color(hex: 0x6C5DD3)
+    static let cloudBottom = Color(hex: 0x3A2A86)
+    /// Opacity of the moon bloom at its centre, above the top-left corner.
+    static let moonPeak = 0.42
+}
+
 // MARK: - Previews
 
 #Preview("SkyBackground") {
     SkyBackground()
         .frame(width: 900, height: 600)
+}
+
+#Preview("SkyBackground: night") {
+    SkyBackground()
+        .frame(width: 900, height: 600)
+        .environment(\.colorScheme, .dark)
 }
 
 #Preview("SkyBackground: Increase Contrast") {

@@ -223,9 +223,9 @@ struct OnboardingStepIndicator: View {
                 Circle().fill(Aero.leaf)
                 Image(systemName: "checkmark")
                     .font(Aero.font(size: 9, weight: .bold))
-                    .foregroundStyle(Aero.text.primary)
+                    .foregroundStyle(Aero.text.onBright)
             } else if step == current {
-                Circle().fill(Aero.aquaDeep)
+                AquaGel()
                 Text(verbatim: "\(step.rawValue + 1)")
                     .font(Aero.font(size: 10, weight: .bold))
                     .foregroundStyle(Aero.text.onAccent)

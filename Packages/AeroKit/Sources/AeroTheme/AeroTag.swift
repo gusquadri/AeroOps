@@ -5,7 +5,8 @@ import SwiftUI
 /// - `AeroTag("prod")`: a tag tinted with `tint` (default aqua), optionally with an SF Symbol.
 /// - `AeroTag("CrashLoopBackOff", tone: .error)`: a status chip led by a ``StatusOrb``.
 ///
-/// The text is always `Aero.text.primary` on a light fill, so it keeps 4.5:1 whatever the tint.
+/// The text is always `Aero.text.primary` on the glass base (light by day, deep indigo by night),
+/// so it keeps 4.5:1 whatever the tint.
 ///
 /// ```swift
 /// ForEach(host.tags, id: \.self) { AeroTag($0) }
@@ -65,7 +66,6 @@ public struct AeroTag: View {
                 lineWidth: strong ? 1 : 0.75
             )
         }
-        .environment(\.colorScheme, .light)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text)
     }
@@ -73,8 +73,8 @@ public struct AeroTag: View {
 
 /// Tag fill values, shared with the contrast tests.
 enum AeroTagFill {
-    /// The light base under the tint.
-    static let base = Color.white.opacity(0.78)
+    /// The base under the tint: white by day, deep indigo by night.
+    static let base = Aero.base.opacity(0.8)
     /// Opacity of the tint wash over the base.
     static let tintOpacity = 0.22
 }

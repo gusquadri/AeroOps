@@ -22,9 +22,8 @@ struct SettingsView: View {
                 SettingsPlaceholderPane(
                     systemImage: "paintpalette",
                     title: "Appearance",
-                    message: "AeroOps uses the Frutiger Aero theme. Reduce Transparency in System Settings › Accessibility switches cards to solid fills.",
+                    message: "AeroOps follows the macOS appearance: Frutiger Aero in light mode, Nightly Frutiger Aero in dark mode. Reduce Transparency in System Settings › Accessibility switches cards to solid fills.",
                     plans: [
-                        "“Aero Night” dark variant",
                         "Dashboard density and pinned disk per host",
                     ]
                 )

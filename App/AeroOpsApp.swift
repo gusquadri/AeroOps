@@ -76,12 +76,11 @@ struct AeroOpsApp: App {
 }
 
 extension View {
-    /// App-wide look: SF Pro Rounded, aqua accents, and the light scheme the Aero palette is
-    /// designed for (the dark "Aero Night" variant comes later).
+    /// App-wide look: SF Pro Rounded and aqua accents. The colour scheme follows macOS:
+    /// Frutiger Aero in light mode, Nightly Frutiger Aero in dark mode.
     func aeroAppearance() -> some View {
         self
             .fontDesign(.rounded)
             .tint(Aero.aqua)
-            .preferredColorScheme(.light)
     }
 }

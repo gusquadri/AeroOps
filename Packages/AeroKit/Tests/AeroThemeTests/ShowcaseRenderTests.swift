@@ -3,12 +3,12 @@ import SwiftUI
 import Testing
 @testable import AeroTheme
 
-/// Renders ``AeroThemeShowcase`` with `ImageRenderer` to `build/theme-showcase.png` (and an
-/// all-accessibility-settings variant) at the repo root, for visual review. `build/` is
-/// git-ignored.
+/// Renders ``AeroThemeShowcase`` with `ImageRenderer` to `build/theme-showcase.png`,
+/// `build/theme-showcase-night.png` (Nightly Frutiger Aero) and an all-accessibility-settings
+/// render of each, at the repo root, for visual review. `build/` is git-ignored.
 ///
 /// `ImageRenderer` drops every view inside a `.glassEffect` (even `.identity`), so the render
-/// turns Liquid Glass off (`aeroLiquidGlass = false`): cards show their 55% white fill, gloss
+/// turns Liquid Glass off (`aeroLiquidGlass = false`): cards show their `glass.fill`, gloss
 /// and rim directly over the sky, without the glass's backdrop blur and refraction.
 @Suite("Showcase render")
 @MainActor
@@ -26,6 +26,23 @@ struct ShowcaseRenderTests {
     func accessibilityShowcase() throws {
         let view = AeroThemeShowcase().environment(\.aeroAccessibilityOverride, .all)
         let image = try render(view, to: "theme-showcase-accessibility.png")
+        #expect(image.width == Int(AeroThemeShowcase.size.width * 2))
+    }
+
+    @Test("renders Nightly Frutiger Aero to build/theme-showcase-night.png")
+    func nightShowcase() throws {
+        let image = try render(AeroThemeShowcase(variant: .night), to: "theme-showcase-night.png")
+        #expect(image.width == Int(AeroThemeShowcase.size.width * 2))
+        // The top-left corner is night sky: dark, and blue dominates red.
+        let corner = try #require(pixel(of: image, x: 4, y: 4))
+        #expect(corner.b > corner.r)
+        #expect(Int(corner.r) + Int(corner.g) + Int(corner.b) < 3 * 110)
+    }
+
+    @Test("renders the night accessibility variant to build/theme-showcase-night-accessibility.png")
+    func nightAccessibilityShowcase() throws {
+        let view = AeroThemeShowcase(variant: .night).environment(\.aeroAccessibilityOverride, .all)
+        let image = try render(view, to: "theme-showcase-night-accessibility.png")
         #expect(image.width == Int(AeroThemeShowcase.size.width * 2))
     }
 

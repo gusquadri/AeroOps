@@ -5,8 +5,9 @@ import SwiftUI
 ///
 /// - `.primary` (default, `.buttonStyle(.aqua)`): deep aqua with a white label. A button with
 ///   `role: .destructive` turns coral.
-/// - `.secondary` (`.buttonStyle(.aquaSecondary)`): white glass with a deep aqua label, for
-///   the less important action next to a primary one (Logs, Cancel, Copy).
+/// - `.secondary` (`.buttonStyle(.aquaSecondary)`): white glass with a deep aqua label (by
+///   night, indigo glass with a light aqua label), for the less important action next to a
+///   primary one (Logs, Cancel, Copy).
 ///
 /// Honours `controlSize` (`.small`, `.regular`, `.large`), Increase Contrast (stronger rim) and
 /// Reduce Motion (no press animation). It is a `ButtonStyle` rather than a custom view, so it
@@ -24,7 +25,7 @@ public struct AquaButtonStyle: ButtonStyle {
     public enum Prominence: Sendable, Hashable, CaseIterable {
         /// Filled deep aqua (coral for destructive roles), white label.
         case primary
-        /// White glass, deep aqua label.
+        /// White glass, deep aqua label (indigo glass, light aqua label by night).
         case secondary
     }
 
@@ -66,7 +67,7 @@ struct AquaFill: Sendable {
 
     static let primary = AquaFill(
         top: Color(hex: 0x3AAEEE),
-        band: Aero.aquaDeep,
+        band: Color(hex: 0x0B6FB5),
         bottom: Color(hex: 0x1C8FD8),
         glow: Aero.aquaLight,
         rim: Color(hex: 0x06508A)
@@ -94,11 +95,12 @@ struct AquaFill: Sendable {
     }
 }
 
-/// Secondary (white glass) button colours.
+/// Secondary (glass) button colours.
 enum AquaGlassFill {
-    /// Fill at the top and bottom of the capsule; the label sits on roughly white 90%.
-    static let top = Color.white.opacity(0.96)
-    static let bottom = Color.white.opacity(0.84)
+    /// Fill at the top and bottom of the capsule; by day the label sits on roughly white 90%,
+    /// by night on indigo glass a shade lighter than the cards.
+    static let top = Color(day: .white.opacity(0.96), night: Color(hex: 0x2B2E6B, opacity: 0.94))
+    static let bottom = Color(day: .white.opacity(0.84), night: Color(hex: 0x1E2155, opacity: 0.9))
     /// Label colour.
     static let label = Aero.aquaDeep
 }
@@ -167,7 +169,7 @@ private struct AquaButtonBody: View {
                 if pressed {
                     Capsule().fill(Aero.aqua.opacity(0.18))
                 }
-                GlossHighlight(opacity: 0.8)
+                GlossHighlight(opacity: 0.8, light: Aero.sheen)
             }
         }
     }
@@ -288,17 +290,18 @@ private struct GelRim: View {
     }
 }
 
-/// The inner gloss of Aqua controls: a white capsule over the top half, inset from the edges,
-/// fading downwards.
+/// The inner gloss of Aqua controls: a capsule of `light` (white on gels, `Aero.sheen` on glass)
+/// over the top half, inset from the edges, fading downwards.
 struct GlossHighlight: View {
     var opacity: Double = 0.9
+    var light: Color = .white
 
     var body: some View {
         GeometryReader { proxy in
             let h = proxy.size.height
             Capsule()
                 .fill(LinearGradient(
-                    colors: [.white.opacity(0.85), .white.opacity(0.12)],
+                    colors: [light.opacity(0.85), light.opacity(0.12)],
                     startPoint: .top, endPoint: .bottom
                 ))
                 .frame(height: h * 0.48)

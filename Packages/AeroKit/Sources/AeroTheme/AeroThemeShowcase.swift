@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// Every Aero component over ``SkyBackground``, laid out like the dashboard. Used by the
-/// previews and by the render test that writes `build/theme-showcase.png` for visual review.
+/// Every Aero component over ``SkyBackground``, laid out like the dashboard, in one
+/// ``AeroVariant``. Used by the previews and by the render tests that write
+/// `build/theme-showcase.png` and `build/theme-showcase-night.png` for visual review.
 struct AeroThemeShowcase: View {
     static let size = CGSize(width: 1000, height: 700)
+
+    var variant = AeroVariant.day
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -68,13 +71,13 @@ struct AeroThemeShowcase: View {
         .padding(28)
         .frame(width: Self.size.width, height: Self.size.height)
         .background { SkyBackground() }
-        .environment(\.colorScheme, .light)
+        .environment(\.colorScheme, variant == .night ? .dark : .light)
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             StatusOrb(tone: .healthy, size: 22)
-            Text("AeroOps")
+            Text(variant.title)
                 .font(Aero.font(.largeTitle, weight: .bold))
                 .foregroundStyle(Aero.text.primary)
             Text("3 hosts · 1 needs attention")
@@ -155,7 +158,16 @@ private struct HostCardSample: View {
     AeroThemeShowcase()
 }
 
+#Preview("Showcase: night", traits: .fixedLayout(width: 1000, height: 700)) {
+    AeroThemeShowcase(variant: .night)
+}
+
 #Preview("Showcase: all accessibility settings", traits: .fixedLayout(width: 1000, height: 700)) {
     AeroThemeShowcase()
+        .environment(\.aeroAccessibilityOverride, .all)
+}
+
+#Preview("Showcase: night, all accessibility settings", traits: .fixedLayout(width: 1000, height: 700)) {
+    AeroThemeShowcase(variant: .night)
         .environment(\.aeroAccessibilityOverride, .all)
 }

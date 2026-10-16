@@ -77,7 +77,6 @@ public struct GlossyGauge: View {
                 .foregroundStyle(strong ? Aero.text.primary : Aero.text.secondary)
                 .lineLimit(1)
         }
-        .environment(\.colorScheme, .light)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityValue(Self.formatted(value))
@@ -197,7 +196,7 @@ private struct GaugeGroove: View {
                 .inset(by: lineWidth)
                 .stroke(
                     LinearGradient(
-                        colors: [.white.opacity(0.2), .white.opacity(0.9)],
+                        colors: [Aero.sheen.opacity(0.2), Aero.sheen.opacity(0.9)],
                         startPoint: .top, endPoint: .bottom
                     ),
                     lineWidth: 1
@@ -256,7 +255,7 @@ private struct GaugeSpecular: View {
             .inset(by: lineWidth * 0.32)
             .trim(from: 0.56, to: 0.70)
             .stroke(
-                .white.opacity(0.9),
+                Aero.sheen.opacity(0.9),
                 style: StrokeStyle(lineWidth: lineWidth * 0.26, lineCap: .round)
             )
             .blur(radius: 0.5)
@@ -264,29 +263,33 @@ private struct GaugeSpecular: View {
     }
 }
 
-/// The glass bubble in the centre of the ring that carries the value text.
-private struct GaugeBubble: View {
+/// The glass bubble in the centre of the ring that carries the value text: white by day, deep
+/// indigo by night.
+struct GaugeBubble: View {
     let inset: CGFloat
+
+    /// Opacity of the base at the bubble's rim, its most transparent (read by the contrast tests).
+    static let edgeOpacity = 0.62
 
     var body: some View {
         GeometryReader { proxy in
             let d = min(proxy.size.width, proxy.size.height)
             ZStack {
                 Circle().fill(RadialGradient(
-                    colors: [.white.opacity(0.95), .white.opacity(0.62)],
+                    colors: [Aero.base.opacity(0.95), Aero.base.opacity(GaugeBubble.edgeOpacity)],
                     center: UnitPoint(x: 0.5, y: 0.7), startRadius: 0, endRadius: d * 0.6
                 ))
                 // Top gloss.
                 Ellipse()
                     .fill(LinearGradient(
-                        colors: [.white.opacity(0.95), .white.opacity(0)],
+                        colors: [Aero.sheen.opacity(0.95), Aero.sheen.opacity(0)],
                         startPoint: .top, endPoint: .bottom
                     ))
                     .frame(width: d * 0.72, height: d * 0.42)
                     .offset(y: -d * 0.24)
                 Circle().strokeBorder(
                     LinearGradient(
-                        colors: [Aero.ink.opacity(0.10), .white.opacity(0.9)],
+                        colors: [Aero.ink.opacity(0.10), Aero.sheen.opacity(0.9)],
                         startPoint: .top, endPoint: .bottom
                     ),
                     lineWidth: 0.75
