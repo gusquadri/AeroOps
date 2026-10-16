@@ -111,8 +111,15 @@ public struct SSHContext: Sendable, Hashable {
     /// TerminalKit applies ``SSHCommandLine/environment`` on top of the tab's environment.
     /// A password host without an ``askpass`` route prompts in the tab, with ssh's usual three
     /// tries instead of the config's one.
-    public func terminalCommand(for host: RemoteHost) -> SSHCommandLine {
+    ///
+    /// - Parameter sharesConnection: Run as a session on the host's ControlMaster (the default).
+    ///   `false` adds `-o ControlPath=none`: the tab logs in on a connection of its own and takes
+    ///   none of the master's sessions, which sshd caps (`MaxSessions`, 10 by default).
+    public func terminalCommand(for host: RemoteHost, sharesConnection: Bool = true) -> SSHCommandLine {
         var arguments = ["-F", configFile.filePath]
+        if !sharesConnection {
+            arguments += ["-o", "ControlPath=none"]
+        }
         if host.auth == .password, askpass == nil {
             arguments += ["-o", "NumberOfPasswordPrompts=3"]
         }

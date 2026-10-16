@@ -200,6 +200,24 @@ struct SSHConfigWriterTests {
         #expect(command.environment == ["SSH_AUTH_SOCK": "/tmp/aero-golden/.aeroops/agent.sock"])
     }
 
+    @Test("a terminal command that does not share the connection turns off the ControlMaster")
+    func terminalCommandOwnConnection() async throws {
+        let scratch = try ScratchDirectory()
+        let paths = scratch.paths()
+        let context = SSHContext(paths: paths)
+        try SSHConfigWriter(context: context).write([Self.hostA])
+        let command = context.terminalCommand(for: Self.hostA, sharesConnection: false)
+        #expect(command.argv == ["/usr/bin/ssh", "-F", paths.sshConfig.filePath, "-o", "ControlPath=none", Self.hostA.sshAlias])
+
+        // ssh takes the first value it sees: the command line beats the config's ControlPath, and
+        // with no path there is no socket to multiplex over.
+        let shared = try await runTool("/usr/bin/ssh", ["-G"] + context.terminalCommand(for: Self.hostA).arguments)
+        let own = try await runTool("/usr/bin/ssh", ["-G"] + command.arguments)
+        #expect(shared.status == 0 && own.status == 0, "\(shared.stderr) \(own.stderr)")
+        #expect(shared.stdout.contains("\ncontrolpath "))
+        #expect(!own.stdout.contains("\ncontrolpath "))
+    }
+
     @Test("system ssh-agent fallback: IdentityAgent SSH_AUTH_SOCK, no key files, no SSH_AUTH_SOCK override")
     func systemAgent() async throws {
         let scratch = try ScratchDirectory()

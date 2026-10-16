@@ -35,6 +35,8 @@ final class TerminalService {
         let baseTitle: String
         /// 1 for the first open tab with this title, 2 for the next ...; shown as " (2)".
         let ordinal: Int
+        /// The tab's ssh runs as a session on the host's ControlMaster, not on its own connection.
+        let sharesConnection: Bool
 
         var title: String {
             ordinal > 1 ? "\(baseTitle) (\(ordinal))" : baseTitle
@@ -51,7 +53,13 @@ final class TerminalService {
         let replacing: TerminalSession.ID?
     }
 
-    /// The open sessions, in tab order.
+    /// Terminal tabs per host that run on its ControlMaster. sshd allows 10 sessions per
+    /// connection (`MaxSessions`); the others stay free for metrics and container polls, SFTP,
+    /// log follows and agent commands. Later tabs log in on a connection of their own.
+    static let sharedTabLimit = 6
+
+    /// The open sessions. Only the order of one host's sessions matters; ``sessions`` groups
+    /// them by host.
     let manager = TerminalSessionManager(defaultAppearance: .aero)
     /// Tab info per open session.
     private(set) var tabs: [TerminalSession.ID: Tab] = [:]
@@ -254,8 +262,14 @@ final class TerminalService {
             remove(replacing)
         }
         let base = Self.baseTitle(hostName: host.name, kind: kind)
-        let tab = Tab(hostID: host.id, kind: kind, baseTitle: base, ordinal: ordinal ?? nextOrdinal(for: base))
-        let spec = Self.launchSpec(for: host, kind: kind, context: ssh.terminalContext(for: host), title: tab.title)
+        let tab = Tab(
+            hostID: host.id, kind: kind, baseTitle: base, ordinal: ordinal ?? nextOrdinal(for: base),
+            sharesConnection: sharedTabs(on: host.id) < Self.sharedTabLimit
+        )
+        let spec = Self.launchSpec(
+            for: host, kind: kind, context: ssh.terminalContext(for: host), title: tab.title,
+            sharesConnection: tab.sharesConnection
+        )
         let session = manager.open(spec)
         tabs[session.id] = tab
         if let index, index < manager.sessions.count - 1 {
@@ -263,6 +277,11 @@ final class TerminalService {
         }
         selectedID = session.id
         return session
+    }
+
+    /// Open tabs to `hostID` whose ssh still runs on the host's ControlMaster.
+    private func sharedTabs(on hostID: RemoteHost.ID) -> Int {
+        sessions(on: hostID).count { !$0.state.isFinished && tabs[$0.id]?.sharesConnection == true }
     }
 
     private func nextOrdinal(for baseTitle: String) -> Int {
@@ -290,9 +309,12 @@ final class TerminalService {
     /// `/usr/bin/ssh -F <config> -t aero-<id> -- <command>` with `command` as one argument
     /// (ssh joins its arguments with spaces and the remote shell parses them, so the caller's
     /// `ShellQuote` quoting survives as written). The environment points `SSH_AUTH_SOCK` at the
-    /// in-app agent, or at the system agent when that option is on.
-    static func launchSpec(for host: RemoteHost, kind: Kind, context: SSHContext, title: String) -> TerminalLaunchSpec {
-        let command = context.terminalCommand(for: host)
+    /// in-app agent, or at the system agent when that option is on. Without `sharesConnection`
+    /// the tab gets its own connection (`-o ControlPath=none`).
+    static func launchSpec(
+        for host: RemoteHost, kind: Kind, context: SSHContext, title: String, sharesConnection: Bool = true
+    ) -> TerminalLaunchSpec {
+        let command = context.terminalCommand(for: host, sharesConnection: sharesConnection)
         var arguments = command.arguments
         if case .remoteCommand(let remoteCommand, _) = kind {
             if let aliasIndex = arguments.lastIndex(of: host.sshAlias) {
