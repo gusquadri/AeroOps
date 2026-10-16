@@ -4,6 +4,10 @@ AeroOps is a native macOS app for keeping an eye on a handful of Linux servers o
 
 ![Dashboard with six demo hosts in every card state](docs/screenshots/dashboard.png)
 
+In dark mode the app switches to Nightly Frutiger Aero:
+
+![The same dashboard in Nightly Frutiger Aero, the dark theme](docs/screenshots/dashboard-night.png)
+
 | | |
 | --- | --- |
 | ![Host detail inspector](docs/screenshots/host-detail.png) | ![Kubernetes pods with the Events panel](docs/screenshots/kubernetes.png) |
@@ -188,24 +192,21 @@ Scripts/release.sh      signed, notarized release build
 Scripts/verify-appcast.swift  checks a release's Sparkle signature against the app's public key
 .github/workflows/      release.yml: tag vX.Y.Z → tested, signed, notarized GitHub Release + appcast
 dev/                    dev servers, VM, fixtures and self-test helpers
-docs/                   plan, decisions, release guide, screenshots
+docs/screenshots/       README screenshots
 spikes/                 Phase 0 throwaway spikes
 project.yml             XcodeGen spec
 ```
 
 ## Status
 
-Phases 0 to 8 are done: spikes, the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, and the exec tier. In Phase 9, ssh-config import and onboarding are done.
+Done: the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, the exec tier, ssh-config import and onboarding.
 
 Still open:
 
 - **Release signing.**
   - Done: the hardened runtime, Sparkle wiring, `Scripts/release.sh` and the GitHub Actions release. Pushing a `vX.Y.Z` tag publishes a GitHub Release, and installed copies check its appcast every hour.
-  - Left: the Developer ID certificate, the notarization key and the Sparkle signing key, stored as GitHub secrets, and making the repository public so Sparkle can download the feed.A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
+  - Left: the Developer ID certificate, the notarization key and the Sparkle signing key, stored as GitHub secrets, and making the repository public so Sparkle can download the feed. A person has to set these up. A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
 - **Performance pass (in progress).** The target is that 20 polled hosts keep the app under 3% CPU.
 - **T3 Code check.** The copy-config buttons are done, but nobody has yet confirmed by hand that the tools work from T3 Code.
 
 The backlog after v1 includes a hub for history and alerts, tmux-backed tabs, password auth and Podman.
-
-## Docs
-
