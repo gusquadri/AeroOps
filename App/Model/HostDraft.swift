@@ -170,12 +170,15 @@ struct HostDraft: Hashable, Sendable {
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@")
     private static let tagCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.:/"))
 
+    // Closures, not `allowed.contains` passed as a function: Swift 6.4 -O miscompiles that for
+    // CharacterSet and release builds rejected "root" and "178.156.252.190".
     private static func only(_ text: String, in allowed: CharacterSet) -> Bool {
-        text.unicodeScalars.allSatisfy(allowed.contains)
+        text.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     private static func hasControlCharacters(_ text: String) -> Bool {
-        text.unicodeScalars.contains(where: CharacterSet.controlCharacters.union(.newlines).contains)
+        let forbidden = CharacterSet.controlCharacters.union(.newlines)
+        return text.unicodeScalars.contains { forbidden.contains($0) }
     }
 
     static func nameIssue(_ name: String, otherHostNames: some Sequence<String>) -> String? {
@@ -223,7 +226,7 @@ struct HostDraft: Hashable, Sendable {
 
     static func tagsIssue(_ tags: [String]) -> String? {
         for tag in tags {
-            if tag.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains) {
+            if tag.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) }) {
                 return "“\(tag)” contains a space. Separate tags with commas."
             }
             if tag.count > maxTagLength { return "Keep each tag to \(maxTagLength) characters or fewer." }
