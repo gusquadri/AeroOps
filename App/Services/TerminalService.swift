@@ -1,4 +1,5 @@
 import AeroCore
+import Collectors
 import Foundation
 import Observation
 import SSHKit
@@ -16,6 +17,10 @@ import TerminalKit
 ///   first through ``closeConfirmation``. On quit, ``closeAll()`` runs before the agent stops.
 /// - A ControlPersist master started by a tab outlives it by design; ``SSHServices`` closes the
 ///   masters on quit.
+/// - Tabs run with `TERM=xterm-ghostty` on hosts that have Ghostty's terminfo entry, else
+///   `xterm-256color`; ``installTerminfo(_:)`` adds the entry when the user asks.
+/// - Bells, notification requests and long commands of tabs the user is not looking at go to
+///   ``notifier``.
 @MainActor
 @Observable
 final class TerminalService {
@@ -73,6 +78,17 @@ final class TerminalService {
     var openError: String?
     /// Opens still checking the host key, per host; the sidebar shows progress for them.
     private(set) var pendingOpens: [RemoteHost.ID: Int] = [:]
+    /// Ghostty terminfo per host, from the last check (see ``terminfo(for:)``).
+    private var terminfoChecks: [RemoteHost.ID: TerminfoCheck] = [:]
+    /// Hosts whose terminfo entry is being installed.
+    private(set) var installingTerminfo: Set<RemoteHost.ID> = []
+    /// A host the user asked to install the terminfo entry on; shown as a confirmation while set.
+    var terminfoConfirmation: RemoteHost.ID?
+    /// The outcome of the last install, shown as an alert while set.
+    var terminfoInstallResult: TerminfoInstallResult?
+
+    /// Notifications and Dock bounces for tabs the user is not looking at.
+    let notifier = TerminalNotifier()
 
     @ObservationIgnored private let ssh: SSHServices
     @ObservationIgnored private let hostOrder: @MainActor () -> [RemoteHost.ID]
@@ -93,6 +109,10 @@ final class TerminalService {
         // ⌘W, keeping the tab info and the selection in step.
         manager.closeRequestHandler = { [weak self] session in
             self?.requestClose(session.id)
+        }
+        manager.alertHandler = { [weak self] session, alert in
+            guard let self else { return }
+            notifier.handle(alert, from: session, tabTitle: tabs[session.id]?.title ?? session.title)
         }
     }
 
@@ -199,7 +219,8 @@ final class TerminalService {
         }
         switch await checkHostKey(host) {
         case .known:
-            return launch(host, kind: kind, replacing: replacing)
+            let term = await terminalType(for: host)
+            return launch(host, kind: kind, replacing: replacing, term: term)
         case .unknown(let offered):
             if trustRequest?.host.id != host.id {
                 trustRequest = TrustRequest(host: host, offered: offered, kind: kind, replacing: replacing)
@@ -218,7 +239,8 @@ final class TerminalService {
         if trustRequest?.id == request.id {
             trustRequest = nil
         }
-        return launch(request.host, kind: request.kind, replacing: request.replacing)
+        let term = await terminalType(for: request.host)
+        return launch(request.host, kind: request.kind, replacing: request.replacing, term: term)
     }
 
     func cancelTrust() {
@@ -251,9 +273,10 @@ final class TerminalService {
         }
     }
 
-    /// Opens the session now. A Reconnect replaces the old tab in place.
+    /// Opens the session now. A Reconnect replaces the old tab in place. `term` is the
+    /// terminal type, `nil` for ``TerminalLaunchSpec/defaultTerm``.
     @discardableResult
-    func launch(_ host: RemoteHost, kind: Kind, replacing: TerminalSession.ID? = nil) -> TerminalSession {
+    func launch(_ host: RemoteHost, kind: Kind, replacing: TerminalSession.ID? = nil, term: String? = nil) -> TerminalSession {
         var index: Int?
         var ordinal: Int?
         if let replacing, let old = tabs[replacing] {
@@ -268,7 +291,7 @@ final class TerminalService {
         )
         let spec = Self.launchSpec(
             for: host, kind: kind, context: ssh.terminalContext(for: host), title: tab.title,
-            sharesConnection: tab.sharesConnection
+            sharesConnection: tab.sharesConnection, term: term
         )
         let session = manager.open(spec)
         tabs[session.id] = tab
@@ -310,9 +333,11 @@ final class TerminalService {
     /// (ssh joins its arguments with spaces and the remote shell parses them, so the caller's
     /// `ShellQuote` quoting survives as written). The environment points `SSH_AUTH_SOCK` at the
     /// in-app agent, or at the system agent when that option is on. Without `sharesConnection`
-    /// the tab gets its own connection (`-o ControlPath=none`).
+    /// the tab gets its own connection (`-o ControlPath=none`). `term` sets `TERM`, which ssh
+    /// passes to the remote side.
     static func launchSpec(
-        for host: RemoteHost, kind: Kind, context: SSHContext, title: String, sharesConnection: Bool = true
+        for host: RemoteHost, kind: Kind, context: SSHContext, title: String, sharesConnection: Bool = true,
+        term: String? = nil
     ) -> TerminalLaunchSpec {
         let command = context.terminalCommand(for: host, sharesConnection: sharesConnection)
         var arguments = command.arguments
@@ -329,12 +354,95 @@ final class TerminalService {
            let systemSocket = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"], !systemSocket.isEmpty {
             environment["SSH_AUTH_SOCK"] = systemSocket
         }
+        if let term {
+            environment["TERM"] = term
+        }
         return TerminalLaunchSpec(
             executable: command.executable.path(percentEncoded: false),
             arguments: arguments,
             environment: environment,
             title: title
         )
+    }
+
+    // MARK: - Terminfo
+
+    /// The outcome of ``installTerminfo(_:)``.
+    struct TerminfoInstallResult: Identifiable {
+        let id = UUID()
+        let hostName: String
+        /// `nil` when the entry was installed.
+        let failure: String?
+    }
+
+    /// One host's check, valid while its address, port and user stay the same.
+    private struct TerminfoCheck {
+        let endpoint: String
+        let support: TerminfoSupport
+    }
+
+    private static func endpoint(_ host: RemoteHost) -> String {
+        "\(host.user)@\(host.address):\(host.port)"
+    }
+
+    /// What the last check found on `host`; `nil` before a check.
+    func terminfo(for host: RemoteHost) -> TerminfoSupport? {
+        guard let check = terminfoChecks[host.id], check.endpoint == Self.endpoint(host) else { return nil }
+        return check.support
+    }
+
+    /// `xterm-ghostty` when the host has Ghostty's terminfo entry, else `nil` (the default
+    /// `xterm-256color`). A host is checked once, and only over a ControlMaster that is already
+    /// up: the check must never add a login, since failed logins count towards a ban. Until
+    /// then (typically the first tab to a host that is not monitored) tabs use the default.
+    private func terminalType(for host: RemoteHost) async -> String? {
+        if terminfo(for: host) == nil {
+            await checkTerminfo(host)
+        }
+        return terminfo(for: host)?.hasGhosttyEntry == true ? TerminalLaunchSpec.ghosttyTerm : nil
+    }
+
+    private func checkTerminfo(_ host: RemoteHost) async {
+        guard case .running? = try? await ControlMaster(context: ssh.context).check(host),
+              let support = try? await TerminfoCommands(runner: ssh.runner).check(host) else { return }
+        terminfoChecks[host.id] = TerminfoCheck(endpoint: Self.endpoint(host), support: support)
+    }
+
+    /// Whether to offer ``installTerminfo(_:)`` for `host`: not while it runs or once the host
+    /// is known to have the entry.
+    func canInstallTerminfo(_ host: RemoteHost) -> Bool {
+        !installingTerminfo.contains(host.id) && terminfo(for: host)?.hasGhosttyEntry != true
+    }
+
+    /// Asks before ``installTerminfo(_:)`` (``terminfoConfirmation``).
+    func requestTerminfoInstall(_ hostID: RemoteHost.ID) {
+        guard let host = hostLookup(hostID), canInstallTerminfo(host) else { return }
+        terminfoConfirmation = hostID
+    }
+
+    /// Compiles Ghostty's terminfo entry into the login user's `~/.terminfo` on `host`, so new
+    /// tabs to it use `TERM=xterm-ghostty`. Open tabs keep the terminal type they started with.
+    /// The outcome lands in ``terminfoInstallResult``.
+    func installTerminfo(_ hostID: RemoteHost.ID) {
+        guard let host = hostLookup(hostID), canInstallTerminfo(host) else { return }
+        installingTerminfo.insert(host.id)
+        let commands = TerminfoCommands(runner: ssh.runner)
+        Task {
+            var failure: String?
+            do {
+                let support = try await commands.install(host)
+                terminfoChecks[host.id] = TerminfoCheck(endpoint: Self.endpoint(host), support: support)
+                if !support.hasGhosttyEntry {
+                    failure = "tic finished, but the host still does not find xterm-ghostty. Its curses may not read ~/.terminfo."
+                }
+            } catch SSHError.remoteCommandFailed(exitCode: 3, _) {
+                failure = "The host has no tic. Install ncurses (the package is often ncurses-bin or ncurses), then try again."
+            } catch {
+                failure = SSHServices.describe(error, host: host).message
+            }
+            installingTerminfo.remove(host.id)
+            terminfoInstallResult = TerminfoInstallResult(hostName: host.name, failure: failure)
+        }
     }
 
     // MARK: - Tabs
@@ -363,6 +471,7 @@ final class TerminalService {
     private func remove(_ id: TerminalSession.ID) {
         manager.close(id)
         tabs[id] = nil
+        notifier.forget(id)
     }
 
     /// The tab to select after `id` closes: the next one, else the previous one.

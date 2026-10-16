@@ -12,6 +12,9 @@ internal import GhosttyTerminal
 /// keeps running in between and its output keeps landing in the history, which the next
 /// surface gets replayed.
 ///
+/// Output passes a ``KittyGraphicsFilter`` first: the remote program may not make this Mac read
+/// local files or shared memory as images.
+///
 /// Threads: output, exit and replays run on `readQueue`; spawning, input and resizes on
 /// `ioQueue`. `lock` guards what both queues and the callers share.
 final class TerminalProcess: @unchecked Sendable {
@@ -22,11 +25,25 @@ final class TerminalProcess: @unchecked Sendable {
         case failed(String)
         /// The program ended: its exit status, or 128+N for signal N; `nil` when unknown.
         case exited(code: Int32?)
+        /// The shell reported a new working directory (OSC 7), a path on the remote host.
+        case workingDirectory(String)
+        /// The live output rang the bell, sent a notification, reported progress, ...
+        /// Replays never produce these.
+        case output(TerminalOutputEvent)
     }
 
     private struct Exit: Sendable {
         var code: Int32?
         var runtimeMilliseconds: UInt64
+    }
+
+    private struct PendingReplay {
+        let io: InMemoryTerminalSession
+        let token: Int
+        /// The terminal's size when the surface was attached: the size the program drew for.
+        let programSize: InMemoryTerminalViewport?
+        let since: DispatchTime
+        var lastSizeAt: DispatchTime
     }
 
     private static let readSize = 64 << 10
@@ -46,6 +63,13 @@ final class TerminalProcess: @unchecked Sendable {
     private static let spawnSettleTime = DispatchTimeInterval.milliseconds(100)
     /// The program starts by then even if the size keeps changing.
     private static let spawnSettleLimit = DispatchTimeInterval.seconds(1)
+    /// How long a rebuilt surface's grid size must hold before the history is replayed into
+    /// it, unless it is the program's size already.
+    private static let replaySizeSettleTime = DispatchTimeInterval.milliseconds(100)
+    /// The replay starts by then even if the size keeps changing.
+    private static let replaySizeSettleLimit = DispatchTimeInterval.seconds(1)
+    /// Kitty keyboard flag "report all keys as escape codes".
+    private static let reportAllKeysFlag = 8
 
     private let spec: TerminalLaunchSpec
     private let onEvent: @Sendable (Event) -> Void
@@ -54,6 +78,8 @@ final class TerminalProcess: @unchecked Sendable {
 
     // readQueue only.
     private var history = TerminalHistory()
+    private var graphicsFilter = KittyGraphicsFilter()
+    private var reportedWorkingDirectory: String?
     private var readBuffer = [UInt8](repeating: 0, count: TerminalProcess.readSize)
     private var reachedEndOfOutput = false
     private var reaped = false
@@ -66,6 +92,8 @@ final class TerminalProcess: @unchecked Sendable {
     /// When the first and the latest size came in, before the program started.
     private var firstSizeAt: DispatchTime?
     private var lastSizeAt = DispatchTime.now()
+    /// The surface whose replay waits for its grid size.
+    private var pendingReplay: PendingReplay?
 
     // Guarded by lock.
     private let lock = NSLock()
@@ -83,6 +111,7 @@ final class TerminalProcess: @unchecked Sendable {
     private var readPaused = false
     private var exit: Exit?
     private var terminated = false
+    private var lineEditingKeys = true
 
     init(spec: TerminalLaunchSpec, onEvent: @escaping @Sendable (Event) -> Void) {
         self.spec = spec
@@ -101,6 +130,12 @@ final class TerminalProcess: @unchecked Sendable {
 
     /// Makes `io` the surface's I/O: replays the history into it (holding back the answers the
     /// terminal gives to queries in there), then streams live output.
+    ///
+    /// A replay is laid out at the grid size it is parsed at, and a rebuilt surface starts at a
+    /// default size and gets its real one a moment later. Output the program placed on the
+    /// screen (`top` on the main screen) lands elsewhere at another size and leaves bits
+    /// behind. So the replay waits until the surface has the program's size, or until its size
+    /// has held for `replaySizeSettleTime`.
     func attach(_ io: InMemoryTerminalSession, token: Int) {
         lock.withLock {
             activeToken = token
@@ -111,11 +146,56 @@ final class TerminalProcess: @unchecked Sendable {
             [weak self] backlogged in
             self?.setReadPaused(backlogged, token: token)
         }
+        ioQueue.async { [self] in
+            // Before the program started there is nothing to replay.
+            guard spawnAttempted else {
+                pendingReplay = nil
+                replay(into: io, token: token)
+                return
+            }
+            let now = DispatchTime.now()
+            pendingReplay = PendingReplay(io: io, token: token, programSize: viewport, since: now, lastSizeAt: now)
+            ioQueue.asyncAfter(deadline: now + Self.replaySizeSettleTime) { [self] in
+                replayIfSettled()
+            }
+        }
+    }
+
+    /// Replays into the waiting surface once its size held for `replaySizeSettleTime`. ioQueue.
+    private func replayIfSettled() {
+        guard let pending = pendingReplay else { return }
+        let now = DispatchTime.now()
+        guard now >= pending.lastSizeAt + Self.replaySizeSettleTime
+            || now >= pending.since + Self.replaySizeSettleLimit else { return }
+        pendingReplay = nil
+        replay(into: pending.io, token: pending.token)
+    }
+
+    /// A new size for the waiting surface: replays at once if it is the program's size,
+    /// else waits for it to hold. ioQueue.
+    private func replaySizeChanged(_ viewport: InMemoryTerminalViewport, token: Int) {
+        guard var pending = pendingReplay, pending.token == token else { return }
+        if let programSize = pending.programSize,
+           programSize.columns == viewport.columns, programSize.rows == viewport.rows {
+            pendingReplay = nil
+            replay(into: pending.io, token: token)
+            return
+        }
+        let now = DispatchTime.now()
+        pending.lastSizeAt = now
+        pendingReplay = pending
+        ioQueue.asyncAfter(deadline: now + Self.replaySizeSettleTime) { [self] in
+            replayIfSettled()
+        }
+    }
+
+    /// Replays the history into `io`, then streams live output to it.
+    private func replay(into io: InMemoryTerminalSession, token: Int) {
         readQueue.async { [self] in
             let replay = history.isEmpty ? Data() : history.replay()
-            // A full-screen program whose start was dropped draws only changes from here on:
-            // make it repaint.
-            let redraw = history.isTruncated && history.isAlternateScreenActive
+            // A full-screen program whose first frames were dropped draws only changes from
+            // here on: make it repaint.
+            let redraw = history.replayNeedsRepaint
             let (attached, exit): (Bool, Exit?) = lock.withLock {
                 guard activeToken == token, !terminated else { return (false, nil) }
                 sink = io
@@ -182,10 +262,21 @@ final class TerminalProcess: @unchecked Sendable {
 
     // MARK: - Input and size
 
+    /// Whether the program wants the macOS line-editing keys as the bytes a shell reads
+    /// (Ctrl-A, Ctrl-E, Ctrl-U, Meta-b, Meta-f) rather than encoded keys: it is on the main
+    /// screen and did not ask for every key as an escape code (kitty flag 8). Any thread.
+    var usesLineEditingKeys: Bool {
+        lock.withLock { lineEditingKeys }
+    }
+
     /// Input from the surface (keys, pastes, answers to queries).
     func write(_ data: Data, token: Int) {
         let allowed = lock.withLock { activeToken == token && !suppressesInput && !terminated }
         guard allowed, !data.isEmpty else { return }
+        writeToProgram(data)
+    }
+
+    private func writeToProgram(_ data: Data) {
         ioQueue.async { [self] in
             guard writeFD >= 0 else { return }
             data.withUnsafeBytes { buffer in
@@ -209,6 +300,7 @@ final class TerminalProcess: @unchecked Sendable {
         guard viewport.columns > 0, viewport.rows > 0,
               lock.withLock({ activeToken == token }) else { return }
         ioQueue.async { [self] in
+            replaySizeChanged(viewport, token: token)
             self.viewport = viewport
             if spawnAttempted {
                 if writeFD >= 0 {
@@ -335,13 +427,23 @@ final class TerminalProcess: @unchecked Sendable {
             !(name.hasPrefix("GHOSTTY_") || name.hasPrefix("TERM_PROGRAM") || name.hasPrefix("ITERM_")
                 || ["TERMINFO", "TERMINFO_DIRS", "COLUMNS", "LINES", "TMUX", "TMUX_PANE"].contains(name))
         }
-        environment["TERM"] = "xterm-256color"
+        // ssh forwards LANG and LC_* (SendEnv). A bare charset such as Terminal.app's
+        // LC_CTYPE=UTF-8 is a macOS-only value that breaks the locale on Linux.
+        environment = environment.filter { name, value in
+            !(name == "LANG" || name.hasPrefix("LC_")) || isPortableLocale(value)
+        }
+        environment["TERM"] = TerminalLaunchSpec.defaultTerm
         environment["COLORTERM"] = "truecolor"
         if environment["LANG"] == nil, environment["LC_ALL"] == nil, environment["LC_CTYPE"] == nil {
             environment["LANG"] = "en_US.UTF-8"
         }
         environment.merge(variables) { $1 }
         return environment.map { "\($0.key)=\($0.value)" }.sorted()
+    }
+
+    /// A locale name other systems know too: `C`, `POSIX` or `language_TERRITORY[.charset]`.
+    static func isPortableLocale(_ value: String) -> Bool {
+        value == "C" || value == "POSIX" || value.hasPrefix("C.") || value.contains("_")
     }
 
     private static func withCStrings<R>(
@@ -371,8 +473,26 @@ final class TerminalProcess: @unchecked Sendable {
     }
 
     private func deliver(_ data: Data) {
-        history.append(data)
-        lock.withLock { sink }?.receive(data)
+        let filtered = graphicsFilter.filter(data)
+        if !filtered.replies.isEmpty, !lock.withLock({ terminated }) {
+            writeToProgram(filtered.replies)
+        }
+        let output = filtered.output
+        guard !output.isEmpty else { return }
+        history.append(output)
+        let lineEditing = !history.isAlternateScreenActive && history.keyboardFlags & Self.reportAllKeysFlag == 0
+        let sink = lock.withLock {
+            lineEditingKeys = lineEditing
+            return self.sink
+        }
+        sink?.receive(output)
+        if let directory = history.workingDirectory, directory != reportedWorkingDirectory {
+            reportedWorkingDirectory = directory
+            onEvent(.workingDirectory(directory))
+        }
+        for event in history.takeEvents() {
+            onEvent(.output(event))
+        }
     }
 
     private func endOfOutput() {

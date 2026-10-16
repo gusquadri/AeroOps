@@ -44,6 +44,7 @@ struct SSHConfigWriterTests {
           ServerAliveInterval 15
           ServerAliveCountMax 3
           ConnectTimeout 8
+          SendEnv LANG LC_* COLORTERM
           LogLevel ERROR
 
         Host aero-00000000-0000-0000-0000-000000000002
@@ -61,6 +62,7 @@ struct SSHConfigWriterTests {
           ServerAliveInterval 15
           ServerAliveCountMax 3
           ConnectTimeout 8
+          SendEnv LANG LC_* COLORTERM
           LogLevel ERROR
 
         """)
@@ -161,6 +163,8 @@ struct SSHConfigWriterTests {
         #expect(options["controlpersist"] == "600")
         #expect(options["connecttimeout"] == "8")
         #expect(options["batchmode"] == "no")
+        #expect(result.stdout.contains("\nsendenv LANG\n"))
+        #expect(result.stdout.contains("\nsendenv COLORTERM\n"))
         #expect(options["identityagent"]?.contains(dot + "/agent.sock") == true, "\(options["identityagent"] ?? "-")")
         // -G prints IdentityFile unexpanded; ssh percent-expands it (%% -> %) when loading the key.
         #expect(options["identityfile"]?.contains(scratch.path + "/a b%%c/pub/key-1.pub") == true, "\(options["identityfile"] ?? "-")")

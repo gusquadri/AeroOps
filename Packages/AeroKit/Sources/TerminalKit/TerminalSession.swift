@@ -67,10 +67,24 @@ public final class TerminalSession: Identifiable {
     /// ``TerminalSurfaceView``; answer it with ``TerminalClipboardPrompt/allow()`` or
     /// ``TerminalClipboardPrompt/deny()``.
     public internal(set) var clipboardPrompt: TerminalClipboardPrompt?
+    /// The remote shell's working directory (OSC 7), a path on the host; `nil` until the shell
+    /// reports one.
+    public private(set) var workingDirectory: String?
+    /// The program's latest progress report (OSC 9;4); `nil` once it removed it, ended, or
+    /// sent no update for ``progressTimeout``.
+    public private(set) var progress: TerminalProgress?
+    /// The bell rang or a notification came while the tab was not in front of the user.
+    /// Cleared when the tab is shown or focused.
+    public private(set) var needsAttention = false
+    /// The link under the pointer (an OSC 8 hyperlink, or a URL in the text with Cmd held),
+    /// so its real target is visible before a Cmd-click opens it.
+    public private(set) var hoveredLink: String?
+    /// Where the viewport is while scrolled back; `nil` at the bottom.
+    public private(set) var scrollPosition: TerminalScrollPosition?
 
     /// The surface view while the session has one (created when first shown, freed by
     /// ``suspend()`` and ``close()``).
-    @ObservationIgnored private(set) var terminalView: AppTerminalView?
+    @ObservationIgnored private(set) var terminalView: SessionTerminalView?
     @ObservationIgnored private var bridge: SurfaceDelegateBridge?
     @ObservationIgnored private var controller: TerminalController?
     @ObservationIgnored private var surface: TerminalSurface?
@@ -91,6 +105,13 @@ public final class TerminalSession: Identifiable {
     /// Called when the surface goes on screen (`true`) or leaves it (`false`). The manager
     /// uses it to free the surfaces of the least recently shown sessions.
     @ObservationIgnored var onVisibilityChange: ((TerminalSession, Bool) -> Void)?
+    /// Called for each ``TerminalAlert``. The manager hands them to its ``TerminalSessionManager/alertHandler``.
+    @ObservationIgnored var onAlert: ((TerminalSession, TerminalAlert) -> Void)?
+    @ObservationIgnored private var commandStartedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var lastBellAt: ContinuousClock.Instant?
+    @ObservationIgnored private var progressGeneration = 0
+    @ObservationIgnored private var pendingScrollPosition: TerminalScrollPosition?
+    @ObservationIgnored private var scrollPublishScheduled = false
     @ObservationIgnored package private(set) var lastReapReport: ReapReport?
 
     init(spec: TerminalLaunchSpec, appearance: TerminalAppearance) {
@@ -108,7 +129,7 @@ public final class TerminalSession: Identifiable {
         }
 
         // Checked once here; the first surface uses this controller.
-        let controller = Self.makeController(appearance: appearance)
+        let controller = Self.makeController(appearance: appearance, term: spec.term)
         if let issue = controller.lastConfigurationIssue {
             state = .failed(message: "terminal configuration rejected: \(issue)")
             return
@@ -124,9 +145,15 @@ public final class TerminalSession: Identifiable {
         }
     }
 
-    private static func makeController(appearance: TerminalAppearance) -> TerminalController {
+    /// A progress report is dropped when the program sends no update for this long, as in
+    /// ConEmu and Ghostty (a program that crashed mid-way never removes its own).
+    public static let progressTimeout = Duration.seconds(15)
+    /// Bells closer together than this raise one ``TerminalAlert/bell``.
+    static let bellInterval = Duration.seconds(1)
+
+    private static func makeController(appearance: TerminalAppearance, term: String) -> TerminalController {
         TerminalController(
-            configuration: GhosttyConfig.configuration(appearance: appearance),
+            configuration: GhosttyConfig.configuration(appearance: appearance, term: term),
             theme: GhosttyConfig.theme(appearance: appearance)
         )
     }
@@ -136,11 +163,11 @@ public final class TerminalSession: Identifiable {
     /// The surface view, created on first use and again after ``suspend()``; `nil` once
     /// closed or when the session failed to start. The program starts once the first
     /// surface's size has settled.
-    func surfaceView() -> AppTerminalView? {
+    func surfaceView() -> SessionTerminalView? {
         if let terminalView { return terminalView }
         guard !isClosed, let process else { return nil }
 
-        let controller = controller ?? Self.makeController(appearance: appearance)
+        let controller = controller ?? Self.makeController(appearance: appearance, term: spec.term)
         let token = process.makeToken()
         let io = InMemoryTerminalSession(
             write: { [weak process] data in process?.write(data, token: token) },
@@ -148,7 +175,8 @@ public final class TerminalSession: Identifiable {
         )
         let bridge = SurfaceDelegateBridge()
         bridge.session = self
-        let view = AppTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        let view = SessionTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        view.usesLineEditingKeys = { [weak process] in process?.usesLineEditingKeys ?? false }
         // Delegate before controller and configuration, so the surface's first callbacks land.
         view.delegate = bridge
         view.configuration = TerminalSurfaceOptions(
@@ -200,10 +228,23 @@ public final class TerminalSession: Identifiable {
         surface = nil
         surfaceIO = nil
         isFocused = false
+        hoveredLink = nil
+        // A rebuilt surface starts at the bottom.
+        scrollPosition = nil
+        pendingScrollPosition = nil
     }
 
     func visibilityChanged(_ visible: Bool) {
+        if visible {
+            needsAttention = false
+        }
         onVisibilityChange?(self, visible)
+    }
+
+    /// Whether the user is looking at the tab: on screen in the key window of the active app.
+    public var isInFront: Bool {
+        guard let window = terminalView?.window else { return false }
+        return window.isKeyWindow && NSApplication.shared.isActive
     }
 
     // MARK: - Commands
@@ -235,6 +276,19 @@ public final class TerminalSession: Identifiable {
 
     public func selectAll() {
         performBindingAction("select_all")
+    }
+
+    /// Scrolls to the newest output.
+    public func scrollToBottom() {
+        performBindingAction("scroll_to_bottom")
+    }
+
+    /// Moves the viewport by `offset` shell prompts (negative: older). Works where the remote
+    /// shell marks its prompts (OSC 133); `false` when nothing moved.
+    @discardableResult
+    public func jumpToPrompt(by offset: Int) -> Bool {
+        guard !isClosed, let terminalView, offset != 0 else { return false }
+        return terminalView.jumpToPrompt(by: Int16(clamping: offset))
     }
 
     /// Gives the surface keyboard focus; `false` while it is not in a window.
@@ -281,6 +335,8 @@ public final class TerminalSession: Identifiable {
         if !state.isFinished {
             state = .exited(code: reportedExitCode)
         }
+        progress = nil
+        needsAttention = false
         return targets
     }
 
@@ -330,6 +386,59 @@ public final class TerminalSession: Identifiable {
             if !state.isFinished {
                 state = .exited(code: code)
             }
+            setProgress(nil)
+        case let .workingDirectory(path):
+            workingDirectory = path
+        case let .output(event):
+            outputEvent(event)
+        }
+    }
+
+    private func outputEvent(_ event: TerminalOutputEvent) {
+        switch event {
+        case .bell:
+            let now = ContinuousClock.now
+            if let lastBellAt, now - lastBellAt < Self.bellInterval { return }
+            lastBellAt = now
+            raise(.bell)
+        case let .notification(title, body):
+            guard let alert = TerminalAlert.notification(sanitizingTitle: title, body: body) else { return }
+            raise(alert)
+        case let .progress(report):
+            setProgress(report)
+        case .commandStarted:
+            commandStartedAt = .now
+        case let .commandFinished(exitCode):
+            // A shell also marks the end of an empty command line; only a started one counts.
+            guard let commandStartedAt else { return }
+            self.commandStartedAt = nil
+            raise(.commandFinished(exitCode: exitCode, duration: .now - commandStartedAt))
+        }
+    }
+
+    private func raise(_ alert: TerminalAlert) {
+        switch alert {
+        case .bell, .notification:
+            if !isInFront {
+                needsAttention = true
+            }
+        case .commandFinished:
+            break
+        }
+        onAlert?(self, alert)
+    }
+
+    private func setProgress(_ report: TerminalProgress?) {
+        progressGeneration += 1
+        if progress != report {
+            progress = report
+        }
+        guard report != nil else { return }
+        let generation = progressGeneration
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.progressTimeout)
+            guard let self, progressGeneration == generation else { return }
+            progress = nil
         }
     }
 
@@ -380,8 +489,58 @@ public final class TerminalSession: Identifiable {
 
     fileprivate func focusChanged(_ focused: Bool) {
         Task { [weak self] in
-            guard let self, isFocused != focused else { return }
+            guard let self else { return }
+            if focused {
+                needsAttention = false
+            }
+            guard isFocused != focused else { return }
             isFocused = focused
+        }
+    }
+
+    fileprivate func openURLRequested(_ text: String) {
+        guard !isClosed, let url = Self.openableURL(text) else {
+            NSSound.beep()
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// The URL a Cmd-click may open: `http` or `https` with a host. Links come from the remote
+    /// host (OSC 8 or text), so `file:`, app and custom schemes stay closed.
+    public nonisolated static func openableURL(_ text: String) -> URL? {
+        guard text.utf8.count <= 8192, !TerminalLaunchSpec.hasControlCharacter(text),
+              let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host(percentEncoded: false), !host.isEmpty
+        else { return nil }
+        return url
+    }
+
+    fileprivate func hoverLinkChanged(_ url: String?) {
+        let link = url.map { TerminalAlert.sanitized($0, limit: 300) }.flatMap { $0.isEmpty ? nil : $0 }
+        guard hoveredLink != link else { return }
+        hoveredLink = link
+    }
+
+    fileprivate func scrollbarChanged(_ scrollbar: TerminalScrollbar) {
+        let position = TerminalScrollPosition(total: scrollbar.total, offset: scrollbar.offset, visibleRows: scrollbar.len)
+        pendingScrollPosition = position
+        // Leaving or reaching the bottom shows at once; the row count while output comes in
+        // at most a few times a second.
+        if (position == nil) != (scrollPosition == nil) {
+            scrollPosition = position
+            return
+        }
+        guard position != scrollPosition, !scrollPublishScheduled else { return }
+        scrollPublishScheduled = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self else { return }
+            scrollPublishScheduled = false
+            if scrollPosition != pendingScrollPosition {
+                scrollPosition = pendingScrollPosition
+            }
         }
     }
 
@@ -457,7 +616,10 @@ private final class SurfaceDelegateBridge:
     TerminalSurfaceCloseDelegate,
     TerminalSurfaceLifecycleDelegate,
     TerminalSurfaceFontSizeDelegate,
-    TerminalSurfaceClipboardConfirmationDelegate
+    TerminalSurfaceClipboardConfirmationDelegate,
+    TerminalSurfaceOpenURLDelegate,
+    TerminalSurfaceHoverLinkDelegate,
+    TerminalSurfaceScrollbarDelegate
 {
     weak var session: TerminalSession?
 
@@ -495,5 +657,18 @@ private final class SurfaceDelegateBridge:
         } else {
             request.respond(allow: false)
         }
+    }
+
+    /// Conforming tells libghostty the URL was handled, so it never runs `open` itself.
+    func terminalDidRequestOpenURL(_ url: String, kind _: TerminalOpenURLKind) {
+        session?.openURLRequested(url)
+    }
+
+    func terminalDidUpdateHoverLink(_ url: String?) {
+        session?.hoverLinkChanged(url)
+    }
+
+    func terminalDidUpdateScrollbar(_ scrollbar: TerminalScrollbar) {
+        session?.scrollbarChanged(scrollbar)
     }
 }

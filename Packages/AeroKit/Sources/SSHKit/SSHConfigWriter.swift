@@ -184,6 +184,9 @@ public struct SSHConfigWriter: Sendable {
             ("ServerAliveInterval", "15"),
             ("ServerAliveCountMax", "3"),
             ("ConnectTimeout", "8"),
+            // `-F` skips /etc/ssh/ssh_config, which sends the locale on macOS. Servers accept
+            // LANG and LC_* by default (AcceptEnv), COLORTERM where they allow it.
+            ("SendEnv", "LANG LC_* COLORTERM"),
             ("LogLevel", "ERROR"),
         ]
         return (["Host \(host.sshAlias)"] + lines.map { "  \($0.0) \($0.1)" }).joined(separator: "\n")

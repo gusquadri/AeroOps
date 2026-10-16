@@ -49,6 +49,7 @@ struct PasswordAuthTests {
           ServerAliveInterval 15
           ServerAliveCountMax 3
           ConnectTimeout 8
+          SendEnv LANG LC_* COLORTERM
           LogLevel ERROR
 
         """)

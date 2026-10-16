@@ -347,6 +347,32 @@ final class SelfTest {
         lru.type(":q!\n")
         check(await run(lru, "true", marker: "LRU_VI_DONE") != nil, "vi quits back to the shell after the rebuild")
         if !lines(lru).contains("LRU_VI_DONE") { dump(lru, "tab 2 (vi rebuilt)") }
+
+        // What a full-screen program draws does not push the shell's output out of the
+        // recorded output: 6 MB on
+        // the alternate screen, more than the main screen's limit.
+        check(await run(lru, "true", marker: "ALT_BEFORE") != nil, "the shell prints before the flood")
+        let flood = #"printf '\033[?1049h'; yes 0123456789abcdefghijklmnopqrstuvwxyz | head -c 6000000; printf '\033[?1049l'"#
+        check(await run(lru, flood, marker: "ALT_FLOOD_DONE") != nil, "6 MB on the alternate screen")
+        grid.hidden.insert(lru.id)
+        check(await wait(5) { lru.isSuspended }, "the flooded tab is suspended")
+        grid.hidden.remove(lru.id)
+        check(await wait(5) { !lru.isSuspended && lines(lru).contains("ALT_FLOOD_DONE") }, "the flooded tab is rebuilt")
+        check(lines(lru).contains("ALT_BEFORE") && lines(lru).contains("TOP_DONE"), "output from before the flood is replayed")
+        check(!lines(lru).contains { $0.hasPrefix("0123456789abcdefghijklmnopqrstuvwxyz") }, "the flood stays off the main screen")
+        if !lines(lru).contains("ALT_BEFORE") { dump(lru, "tab 2 (after the flood)") }
+
+        // Memory pressure suspends every tab off screen, even under the limit.
+        manager.liveSurfaceLimit = manager.sessions.count + 1
+        grid.hidden.insert(lru.id)
+        try? await Task.sleep(for: .seconds(1))
+        check(!lru.isSuspended, "a hidden tab under the limit keeps its surface")
+        manager.suspendOffScreenSurfaces()
+        check(lru.isSuspended, "memory pressure suspends a hidden tab under the limit")
+        check(!manager.sessions.contains { !grid.hidden.contains($0.id) && $0.isSuspended }, "memory pressure keeps the tabs on screen")
+        grid.hidden.remove(lru.id)
+        check(await wait(5) { !lru.isSuspended && lines(lru).contains("ALT_BEFORE") }, "a tab suspended on memory pressure is rebuilt")
+        check(await run(lru, "true", marker: "PRESSURE_INPUT") != nil, "it takes input")
         manager.liveSurfaceLimit = 3
 
         // Title from OSC 2.

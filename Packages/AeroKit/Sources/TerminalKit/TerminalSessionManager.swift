@@ -6,6 +6,8 @@ import Observation
 /// Every session's program keeps running while its tab is hidden, but only the
 /// ``liveSurfaceLimit`` most recently shown sessions keep their libghostty surface. The others
 /// are suspended (``TerminalSession/suspend()``) and get a new surface when shown again.
+/// When macOS reports memory pressure, every
+/// session off screen is suspended.
 @MainActor
 @Observable
 public final class TerminalSessionManager {
@@ -16,6 +18,9 @@ public final class TerminalSessionManager {
     /// Handles a session asking to be closed from inside the terminal: a key press after its
     /// program ended, or libghostty's close binding while it runs. `nil` closes it at once.
     @ObservationIgnored public var closeRequestHandler: ((TerminalSession) -> Void)?
+    /// Hears every session's ``TerminalAlert``s (bell, notifications, finished commands), on
+    /// the main actor. The texts in them come from the remote host.
+    @ObservationIgnored public var alertHandler: ((TerminalSession, TerminalAlert) -> Void)?
     /// How many sessions keep their surface, counting the ones on screen (at least 1).
     public var liveSurfaceLimit = 3 {
         didSet { scheduleEviction() }
@@ -23,9 +28,23 @@ public final class TerminalSessionManager {
     /// Session IDs by when they were last on screen, the most recent last.
     @ObservationIgnored private var recency: [TerminalSession.ID] = []
     @ObservationIgnored private var evictionScheduled = false
+    @ObservationIgnored private let memoryPressure = DispatchSource.makeMemoryPressureSource(
+        eventMask: [.warning, .critical],
+        queue: .main
+    )
 
     public init(defaultAppearance: TerminalAppearance = .aero) {
         self.defaultAppearance = defaultAppearance
+        memoryPressure.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                self?.suspendOffScreenSurfaces()
+            }
+        }
+        memoryPressure.activate()
+    }
+
+    isolated deinit {
+        memoryPressure.cancel()
     }
 
     /// Opens a session and appends it to ``sessions``. The program starts as soon as the
@@ -44,6 +63,9 @@ public final class TerminalSessionManager {
         }
         session.onVisibilityChange = { [weak self] session, visible in
             self?.visibilityChanged(session, visible: visible)
+        }
+        session.onAlert = { [weak self] session, alert in
+            self?.alertHandler?(session, alert)
         }
         sessions.append(session)
         return session
@@ -118,5 +140,13 @@ public final class TerminalSessionManager {
 
     private func rank(_ id: TerminalSession.ID) -> Int {
         recency.firstIndex(of: id) ?? -1
+    }
+
+    /// Suspends every session that is off screen, whatever ``liveSurfaceLimit`` allows: a
+    /// surface takes far more memory than the history that rebuilds it. Runs on memory pressure.
+    @_spi(AeroSelfTest) public func suspendOffScreenSurfaces() {
+        for session in sessions where session.hasSurface && !session.isOnScreen {
+            session.suspend()
+        }
     }
 }

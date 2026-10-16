@@ -30,6 +30,19 @@ public struct TerminalLaunchSpec: Sendable, Hashable {
         self.workingDirectory = workingDirectory
         self.title = title
     }
+
+    /// The terminal type when ``environment`` sets no `TERM`. Every host has it, but it lacks
+    /// what `xterm-ghostty` describes (styled underlines, synchronized output, ...).
+    public static let defaultTerm = "xterm-256color"
+
+    /// Ghostty's own terminal type, for hosts that have its terminfo entry.
+    public static let ghosttyTerm = "xterm-ghostty"
+
+    /// The terminal type the program sees: `TERM` from ``environment``, else ``defaultTerm``.
+    /// The surface reports the same one (XTGETTCAP).
+    public var term: String {
+        environment["TERM"] ?? Self.defaultTerm
+    }
 }
 
 /// Why a ``TerminalLaunchSpec`` cannot be launched.

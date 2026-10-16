@@ -148,8 +148,9 @@ private struct HostTerminalRows: View {
     }
 }
 
-/// One terminal tab under its host: status orb and title. A tab whose surface was freed to
-/// save memory is dimmed; its ssh session keeps running.
+/// One terminal tab under its host: status orb and title, then the program's progress and a
+/// bell while the tab wants attention (it rang or posted a notification while hidden). A tab
+/// whose surface was freed to save memory is dimmed; its ssh session keeps running.
 private struct SidebarTerminalRow: View {
     @Environment(AppModel.self) private var model
     let session: TerminalSession
@@ -172,8 +173,20 @@ private struct SidebarTerminalRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(session.isSuspended ? Aero.text.secondary : Aero.text.primary)
+            if session.progress != nil || session.needsAttention {
+                Spacer(minLength: 4)
+            }
+            if let progress = session.progress {
+                SidebarTerminalProgress(progress: progress)
+            }
+            if session.needsAttention {
+                Image(systemName: "bell.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(Aero.aquaDeep)
+                    .accessibilityHidden(true)
+            }
         }
-        .help(session.isSuspended ? "\(status.text) · in the background to save memory" : status.text)
+        .help(help)
         // Terminals shows the confirmations and sheets these can lead to.
         .contextMenu {
             Button("Reconnect", systemImage: "arrow.clockwise") {
@@ -186,6 +199,14 @@ private struct SidebarTerminalRow: View {
                 .disabled(!terminals.canMove(session.id, by: -1))
             Button("Move Down", systemImage: "arrow.down") { terminals.move(session.id, by: 1) }
                 .disabled(!terminals.canMove(session.id, by: 1))
+            if let host = tab.flatMap({ model.host(id: $0.hostID) }), terminals.terminfo(for: host)?.hasGhosttyEntry != true {
+                Divider()
+                Button("Install Terminfo on \(host.name)…", systemImage: "arrow.down.doc") {
+                    model.selectedTab = .terminals
+                    terminals.requestTerminfoInstall(host.id)
+                }
+                .disabled(!terminals.canInstallTerminfo(host))
+            }
             Divider()
             Button("Close Tab", systemImage: "xmark") {
                 model.selectedTab = .terminals
@@ -193,7 +214,50 @@ private struct SidebarTerminalRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(status.text)")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var help: String {
+        var parts = [status.text]
+        if let directory = session.workingDirectory {
+            parts.append(directory)
+        }
+        if session.isSuspended {
+            parts.append("in the background to save memory")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [title, status.text]
+        if let percent = session.progress?.percent {
+            parts.append("\(percent)% done")
+        } else if session.progress != nil {
+            parts.append("in progress")
+        }
+        if session.needsAttention {
+            parts.append("needs attention")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// A small ring for a tab's progress report: its percentage, or a spinner without one.
+private struct SidebarTerminalProgress: View {
+    let progress: TerminalProgress
+
+    var body: some View {
+        Group {
+            if let percent = progress.percent {
+                ProgressView(value: Double(percent), total: 100)
+            } else {
+                ProgressView()
+            }
+        }
+        .progressViewStyle(.circular)
+        .controlSize(.mini)
+        .tint(progress.state == .failed ? Aero.coral : progress.state == .paused ? Aero.sun : Aero.aqua)
+        .accessibilityHidden(true)
     }
 }
 

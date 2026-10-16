@@ -94,4 +94,34 @@ struct TerminalProcessTests {
         #expect(!environment.contains { $0.hasPrefix("GHOSTTY_") || $0.hasPrefix("TERM_PROGRAM=") })
         #expect(environment == environment.sorted())
     }
+
+    @Test("only portable locale names are forwarded")
+    func locales() {
+        #expect(TerminalProcess.isPortableLocale("en_US.UTF-8"))
+        #expect(TerminalProcess.isPortableLocale("C.UTF-8"))
+        #expect(TerminalProcess.isPortableLocale("POSIX"))
+        #expect(!TerminalProcess.isPortableLocale("UTF-8"))
+        #expect(!TerminalProcess.isPortableLocale(""))
+    }
+
+    @Test("blocked images never reach the history; the bell and OSC 7 become events")
+    func outputFiltering() async throws {
+        let events = Events()
+        let spec = TerminalLaunchSpec(
+            executable: "/bin/sh",
+            arguments: ["-c", #"printf 'a\033_Ga=T,t=f,i=1;L2V0Yy9wYXNzd2Q=\033\\b\a\033]7;file://h/srv\a'"#],
+            title: "test"
+        )
+        let process = start(spec, events: events)
+        let path = await events.first { if case let .workingDirectory(path) = $0 { path } else { nil } }
+        #expect(path == "/srv")
+        let bell = await events.first { if case .output(.bell) = $0 { true } else { nil } }
+        #expect(bell == true)
+        _ = await events.first { if case .exited = $0 { true } else { nil } }
+        let output = String(decoding: process.replayData(), as: UTF8.self)
+        #expect(output.contains("ab"))
+        // The answer to the blocked command may come back as the terminal's echo, never the command.
+        #expect(!output.contains("\u{1B}_G"))
+        #expect(!output.contains("L2V0Yy9wYXNzd2Q"))
+    }
 }

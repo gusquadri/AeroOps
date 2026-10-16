@@ -2,6 +2,7 @@ import AeroCore
 import Foundation
 import Observation
 import SSHKit
+import TerminalKit
 
 /// The app's root state: host inventory, navigation and per-host live state.
 ///
@@ -94,6 +95,7 @@ final class AppModel {
         addInventoryObserver(ssh)
         bindMonitoring()
         bindAgents()
+        terminals.notifier.showTab = { [weak self] id in self?.showTerminal(id) }
     }
 
     /// Starts the SSH services (agent, key files, `ssh_config`), then monitoring, then the MCP
@@ -256,6 +258,14 @@ final class AppModel {
         guard let host = host(id: id), terminals.canOpen(host) else { return }
         selectedTab = .terminals
         terminals.open(host, kind: .remoteCommand(remoteCommand, title: title))
+    }
+
+    /// Shows an open terminal tab in ``AppTab/terminals`` (e.g. after its notification was
+    /// clicked).
+    func showTerminal(_ id: TerminalSession.ID) {
+        guard terminals.session(id: id) != nil else { return }
+        terminals.selectedID = id
+        selectedTab = .terminals
     }
 
     /// ⌘T: a new tab for the sidebar's host, else for the shown tab's host.

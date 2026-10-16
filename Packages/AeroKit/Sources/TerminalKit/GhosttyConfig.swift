@@ -8,8 +8,17 @@ internal import GhosttyTerminal
 /// `TerminalController` (one `ghostty_app_t`) per surface, freed with it when the session is
 /// suspended.
 enum GhosttyConfig {
+    /// Decoded kitty graphics images one surface may hold per screen. libghostty's default
+    /// (320 MB) is a standalone terminal's; here several surfaces can be live at once.
+    static let imageStorageLimit = 64 << 20
+
     /// `key = value` settings, in order, excluding colours (those go into the theme).
-    static func settings(appearance: TerminalAppearance) -> [(key: String, value: String)] {
+    ///
+    /// - Parameter term: The program's `TERM` (``TerminalLaunchSpec/term``), which the terminal
+    ///   also names in its own answers (XTGETTCAP).
+    static func settings(
+        appearance: TerminalAppearance, term: String = TerminalLaunchSpec.defaultTerm
+    ) -> [(key: String, value: String)] {
         var settings: [(String, String)] = []
         if let family = appearance.sanitizedFontFamily {
             settings.append(("font-family", family))
@@ -24,12 +33,17 @@ enum GhosttyConfig {
             ("wait-after-command", "false"),
             // ... even when it fails fast (ssh to a closed port exits 255 within milliseconds).
             ("abnormal-command-exit-runtime", "0"),
-            // Remote hosts rarely have xterm-ghostty terminfo. TerminalProcess sets the same
-            // TERM; this keeps the terminal's own answers consistent with it.
-            ("term", "xterm-256color"),
+            // xterm-ghostty where the host has its terminfo, else xterm-256color (the app
+            // decides).
+            ("term", term),
+            // Nothing is injected into remote shells. Prompt marks (OSC 133) still work when
+            // the remote shell sends them itself (fish 4 does).
             ("shell-integration", "none"),
-            // Remote OSC 9/777 notifications are not surfaced (yet).
+            // OSC 9/777 notifications, the bell, progress and command ends are read from the
+            // live output by TerminalKit (``TerminalOutputEvent``): a surface rebuilt from a
+            // replay would report them all again, and a suspended session has no surface.
             ("desktop-notifications", "false"),
+            ("image-storage-limit", String(imageStorageLimit)),
             // Remote programs may set the clipboard (vim/tmux yank) but never read it.
             ("clipboard-read", "deny"),
             ("clipboard-write", "allow"),
@@ -49,6 +63,10 @@ enum GhosttyConfig {
     /// app-level actions, so those keys would either do nothing (Cmd+Q) or bypass the host
     /// app (Cmd+W closing a running tab without asking). Without them the keys reach the
     /// host app's menus.
+    ///
+    /// The macOS line-editing keys (Cmd+Left/Right, Cmd+Backspace, Option+Left/Right) are not
+    /// bindings: a binding would send its bytes to every program, a full-screen one included.
+    /// The session's view sends them only to programs on the main screen (``LineEditingKeys``).
     static let keybindings: [String] = [
         "super+c=copy_to_clipboard",
         "super+v=paste_from_clipboard",
@@ -61,21 +79,20 @@ enum GhosttyConfig {
         "super+end=scroll_to_bottom",
         "super+page_up=scroll_page_up",
         "super+page_down=scroll_page_down",
-        // Line editing as in Terminal.app: start / end of line, delete line, word left / right.
-        "super+arrow_left=text:\\x01",
-        "super+arrow_right=text:\\x05",
-        "super+backspace=text:\\x15",
-        "alt+arrow_left=esc:b",
-        "alt+arrow_right=esc:f",
+        // Previous / next shell prompt, where the remote shell marks them (OSC 133).
+        "super+arrow_up=jump_to_prompt:-1",
+        "super+arrow_down=jump_to_prompt:1",
     ]
 
     private static var keybindSettings: [(key: String, value: String)] {
         [("keybind", "clear")] + keybindings.map { ("keybind", $0) }
     }
 
-    static func configuration(appearance: TerminalAppearance) -> TerminalConfiguration {
+    static func configuration(
+        appearance: TerminalAppearance, term: String = TerminalLaunchSpec.defaultTerm
+    ) -> TerminalConfiguration {
         TerminalConfiguration { builder in
-            for (key, value) in settings(appearance: appearance) {
+            for (key, value) in settings(appearance: appearance, term: term) {
                 builder.withCustom(key, value)
             }
         }
