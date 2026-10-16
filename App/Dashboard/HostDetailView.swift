@@ -3,9 +3,9 @@ import AeroTheme
 import SSHKit
 import SwiftUI
 
-/// Everything the last poll of one host returned: status and last error, system (kernel, CPUs,
-/// uptime, load), memory and swap, and every mounted filesystem. Shown in the dashboard's
-/// inspector for the selected host.
+/// Everything the last poll of one host returned: status and last error, system (distribution,
+/// kernel, CPUs, uptime, load), memory and swap, and every mounted filesystem. Shown in the
+/// dashboard's inspector for the selected host.
 ///
 /// df's portable output (`df -Pk`) has no filesystem type, so mounts show their device instead.
 struct HostDetailView: View {
@@ -42,9 +42,9 @@ struct HostDetailView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 10) {
-            StatusOrb(tone: state.orbTone(blocked: keyBlock != nil), size: 16)
-                .padding(.top, 5)
+        HStack(alignment: .center, spacing: 12) {
+            StatusBubble(tone: state.orbTone(blocked: keyBlock != nil), logo: state.systemLogo, size: 44)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(host.name)
                     .font(Aero.font(.title2, weight: .semibold))
@@ -101,7 +101,8 @@ struct HostDetailView: View {
         GlassSection("System", systemImage: "cpu") {
             VStack(alignment: .leading, spacing: 10) {
                 DetailRow("Hostname", metrics?.hostname.nilIfEmpty ?? MetricText.missing)
-                DetailRow("OS", metrics?.kernel.nilIfEmpty ?? state.unsupportedSystem ?? MetricText.missing)
+                DetailRow("OS", metrics?.os?.displayName ?? state.systemLogo?.title ?? MetricText.missing)
+                DetailRow("Kernel", metrics?.kernel.nilIfEmpty ?? state.unsupportedSystem ?? MetricText.missing)
                 DetailRow("CPUs", metrics?.cpuCount.map(String.init) ?? MetricText.missing)
                 DetailRow("CPU use", metrics.map { MetricText.percent($0.cpuPercent.map { $0 / 100 }) } ?? MetricText.missing)
                 DetailRow("Uptime", MetricText.uptime(metrics?.uptimeSeconds))

@@ -37,13 +37,20 @@ enum SampleData {
             memUsedBytes: Int64(Double(8 * gib) * memory), memTotalBytes: 8 * gib,
             disks: [DiskUsage(mount: "/", device: "/dev/sda1", usedBytes: Int64(Double(80 * gib) * disk), totalBytes: 80 * gib)],
             uptimeSeconds: 1_036_800 + 14_400, load1: 0.42, load5: 0.38, load15: 0.30,
-            hostname: "web-01", kernel: "Linux 6.8.0-45-generic x86_64", sampledAt: .now
+            hostname: "web-01", kernel: "Linux 6.8.0-45-generic x86_64", sampledAt: .now,
+            os: ubuntu
         )
     }
 
+    /// os-release of the sample hosts, for the logo in their card's status bubble.
+    static let ubuntu = OSRelease(id: "ubuntu", idLike: ["debian"], name: "Ubuntu", prettyName: "Ubuntu 24.04.1 LTS", versionID: "24.04")
+    static let debian = OSRelease(id: "debian", name: "Debian GNU/Linux", prettyName: "Debian GNU/Linux 13 (trixie)", versionID: "13")
+    static let alpine = OSRelease(id: "alpine", name: "Alpine Linux", prettyName: "Alpine Linux v3.24", versionID: "3.24.2")
+
     /// A snapshot with swap and several mounts, as the detail panel shows them.
     static func detailedMetrics(
-        cpu: Double? = 23, memory: Double = 0.41, disk: Double = 0.52, sampledAt: Date = .now, hostname: String = "web-01"
+        cpu: Double? = 23, memory: Double = 0.41, disk: Double = 0.52, sampledAt: Date = .now, hostname: String = "web-01",
+        os: OSRelease = ubuntu, kernel: String = "Linux 6.8.0-45-generic x86_64"
     ) -> MetricsSnapshot {
         let gib: Int64 = 1 << 30
         return MetricsSnapshot(
@@ -56,8 +63,8 @@ enum SampleData {
                 DiskUsage(mount: "/srv/backups/nightly-snapshots", device: "nas.local:/volume1/backups", usedBytes: 3_900 * gib, totalBytes: 4_000 * gib),
             ],
             uptimeSeconds: 1_036_800 + 14_400, load1: 1.42, load5: 0.98, load15: 0.71,
-            hostname: hostname, kernel: "Linux 6.8.0-45-generic x86_64", sampledAt: sampledAt,
-            swapTotalBytes: 4 * gib, swapUsedBytes: 310 << 20
+            hostname: hostname, kernel: kernel, sampledAt: sampledAt,
+            swapTotalBytes: 4 * gib, swapUsedBytes: 310 << 20, os: os
         )
     }
 
@@ -74,7 +81,7 @@ enum SampleData {
                 let sampled = now.addingTimeInterval(-47)
                 return HostMonitorUpdate(
                     hostID: id, status: .stale,
-                    snapshot: detailedMetrics(cpu: 64, memory: 0.83, disk: 0.71, sampledAt: sampled, hostname: host.name),
+                    snapshot: detailedMetrics(cpu: 64, memory: 0.83, disk: 0.71, sampledAt: sampled, hostname: host.name, os: debian),
                     lastError: .timeout, lastSuccessAt: sampled, consecutiveFailures: 1)
             case 2:
                 return HostMonitorUpdate(hostID: id, status: .offline, hostKeyIssue: .changed(nil))
@@ -84,7 +91,9 @@ enum SampleData {
                 let sampled = now.addingTimeInterval(-260)
                 return HostMonitorUpdate(
                     hostID: id, status: .offline,
-                    snapshot: detailedMetrics(cpu: 8, memory: 0.22, disk: 0.97, sampledAt: sampled, hostname: host.name),
+                    snapshot: detailedMetrics(
+                        cpu: 8, memory: 0.22, disk: 0.97, sampledAt: sampled, hostname: host.name,
+                        os: alpine, kernel: "Linux 6.12.13-0-lts x86_64"),
                     lastError: .connectionRefused, lastSuccessAt: sampled, consecutiveFailures: 6)
             default:
                 return HostMonitorUpdate(hostID: id, status: .unsupported, lastSuccessAt: now, unsupportedSystem: "FreeBSD 14.1-RELEASE amd64")

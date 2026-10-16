@@ -86,6 +86,7 @@ struct DashboardView: View {
             isSelected: model.selection == host.id,
             canOpenSSH: model.canOpenSSH(host.id),
             onOpenSSH: { model.openSSH(host.id) },
+            onBrowseFiles: { model.browseFiles(host.id) },
             keyBlock: model.hostKeyBlock(for: host.id),
             onReviewKey: { model.requestEdit(host.id) },
             onTrustKey: { Task { await model.monitoring.requestHostKeyTrust(for: host) } },
@@ -139,20 +140,28 @@ private struct DashboardSummary: View {
     }
 }
 
-/// A host's dashboard card: orb, name, address and tags on a title-bar wash in the host's status
-/// colour, CPU / memory / disk gauges, uptime, load, an Open SSH button and a status well.
+/// A host's dashboard card: a status bubble with the host's system logo, name and address, with
+/// uptime and the Files and Open SSH buttons in the top-right corner, then tags, all on a
+/// title-bar wash in the host's status colour; CPU / memory / disk gauges below. Load is in the
+/// inspector.
 ///
-/// Every card is the same size whatever the host's state: the tag row and the well's two lines
-/// are always reserved, so errors, held host keys and untagged hosts don't change the height.
-/// Stale or offline hosts keep their last numbers, dimmed, with "updated Xs ago". A held host
-/// key turns the well into a notice with the button that resolves it.
+/// Every card is the same size whatever the host's state: the tag row is always there, as tall
+/// as a small button, so held host keys and untagged hosts don't change the height. The bubble's
+/// colour is the status; what it means (the error, "Connecting…", the system it runs) is the
+/// bubble's tooltip and the card's accessibility value, and the inspector shows it in full. Stale
+/// or offline hosts keep their last numbers, dimmed, with "updated Xs ago" by the tags. A held
+/// host key puts the button that resolves it there: Review… for a changed key, Review Key… for
+/// a first key that is not trusted yet.
 struct HostCard: View {
     let host: RemoteHost
     let state: HostDisplayState
     var isSelected = false
+    /// Whether Open SSH and Files are available (both need the host's SSH connection).
     var canOpenSSH = false
     var onOpenSSH: () -> Void = {}
-    /// Set when the host's key changed: the well shows the blocked notice.
+    /// Shows the host in the Files tab.
+    var onBrowseFiles: () -> Void = {}
+    /// Set when the host's key changed: the card shows Blocked and Review….
     var keyBlock: HostKeyBlock?
     /// Opens the host editor, where the full banner offers Trust New Key.
     var onReviewKey: () -> Void = {}
@@ -163,6 +172,8 @@ struct HostCard: View {
 
     /// Opacity of numbers that are no longer current.
     static let staleOpacity = 0.45
+    /// The name column's width before the buttons shrink to small, then uptime goes.
+    private static let nameIdealWidth: CGFloat = 110
 
     var body: some View {
         let metrics = state.metrics
@@ -171,36 +182,19 @@ struct HostCard: View {
         AeroCard(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top) {
-                        GlossyGauge(value: metrics?.cpuPercent.map { $0 / 100 }, label: "CPU")
-                            .help(cpuHelp(metrics))
-                        Spacer(minLength: 8)
-                        GlossyGauge(value: metrics?.memUsedFraction, label: "Memory")
-                            .help(metrics.map { "Memory: \(MetricText.usage($0.memUsedBytes, of: $0.memTotalBytes))" } ?? "Memory")
-                        Spacer(minLength: 8)
-                        GlossyGauge(value: metrics?.cardDisk()?.usedFraction, label: "Disk")
-                            .help(diskHelp(metrics))
-                    }
-                    .padding(.horizontal, 8)
-                    .opacity(dimmed ? Self.staleOpacity : 1)
-                    // Narrow cards (the grid's 300 pt minimum) drop the button's title, then
-                    // let the figures shrink, so the row never wraps.
-                    ViewThatFits(in: .horizontal) {
-                        figuresRow(metrics, dimmed: dimmed, buttonTitle: true, fixed: true)
-                        figuresRow(metrics, dimmed: dimmed, buttonTitle: false, fixed: true)
-                        figuresRow(metrics, dimmed: dimmed, buttonTitle: false, fixed: false)
-                    }
-                    CardStatusWell(
-                        state: state,
-                        keyBlock: keyBlock,
-                        isScanningKey: isScanningKey,
-                        keyScanError: keyScanError,
-                        onReviewKey: onReviewKey,
-                        onTrustKey: onTrustKey
-                    )
+                HStack(alignment: .top) {
+                    GlossyGauge(value: metrics?.cpuPercent.map { $0 / 100 }, label: "CPU")
+                        .help(cpuHelp(metrics))
+                    Spacer(minLength: 8)
+                    GlossyGauge(value: metrics?.memUsedFraction, label: "Memory")
+                        .help(metrics.map { "Memory: \(MetricText.usage($0.memUsedBytes, of: $0.memTotalBytes))" } ?? "Memory")
+                    Spacer(minLength: 8)
+                    GlossyGauge(value: metrics?.cardDisk()?.usedFraction, label: "Disk")
+                        .help(diskHelp(metrics))
                 }
-                .padding(16)
+                .opacity(dimmed ? Self.staleOpacity : 1)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
             }
         }
         .overlay {
@@ -215,64 +209,45 @@ struct HostCard: View {
         .contentShape(shape)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(host.name)
-        .accessibilityValue(statusTitle)
+        .accessibilityValue(([statusTitle, statusDetail] + (state.status == .online ? [] : systemLines)).joined(separator: ", "))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityHint("Double-click for details")
     }
 
-    private func figuresRow(_ metrics: MetricsSnapshot?, dimmed: Bool, buttonTitle: Bool, fixed: Bool) -> some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            figures(metrics, dimmed: dimmed)
-                .fixedSize(horizontal: fixed, vertical: false)
-            Spacer(minLength: 8)
-            openSSHButton(title: buttonTitle)
-        }
-    }
-
-    private func figures(_ metrics: MetricsSnapshot?, dimmed: Bool) -> some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            CardFigure(label: "Uptime", value: MetricText.uptime(metrics?.uptimeSeconds))
-            CardFigure(label: "Load 1 · 5 · 15", value: MetricText.load(metrics))
-        }
-        .opacity(dimmed ? Self.staleOpacity : 1)
-    }
-
-    private func openSSHButton(title: Bool) -> some View {
-        Button("Open SSH", systemImage: "terminal", action: onOpenSSH)
-            .labelStyle(OpenSSHLabelStyle(showsTitle: title))
-            .buttonStyle(.aqua)
-            .fixedSize()
-            .disabled(!canOpenSSH)
-            .help(openSSHHelp)
-    }
-
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                StatusOrb(tone: orbTone, size: 14)
-                Text(host.name)
-                    .font(Aero.font(.title3, weight: .semibold))
-                    .foregroundStyle(Aero.text.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(statusTitle)
-                    .font(Aero.font(.caption, weight: .semibold))
-                    .foregroundStyle(Aero.text.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                StatusBubble(tone: orbTone, logo: state.systemLogo, size: 44)
+                    .help(statusHelp)
+                    // The card's accessibility value says the status and the system.
+                    .accessibilityHidden(true)
+                // Narrower cards get small buttons, then drop uptime (the inspector shows it), so
+                // the name keeps room down to the grid's 300 pt minimum.
+                ViewThatFits(in: .horizontal) {
+                    titleRow(buttonSize: .regular, showsUptime: true)
+                    titleRow(buttonSize: .small, showsUptime: true)
+                    titleRow(buttonSize: .small, showsUptime: false)
+                }
             }
-            Text(host.connectionSummary)
-                .font(Aero.font(.callout))
-                .foregroundStyle(Aero.text.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if host.tags.isEmpty {
-                // Keeps the row's height, so untagged hosts get the same card size.
-                AeroTag("untagged")
+            ZStack(alignment: .leading) {
+                // As tall as a small button, so cards showing Review… are no taller.
+                Button("Review…") {}
+                    .buttonStyle(.aquaSecondary)
+                    .controlSize(.small)
                     .hidden()
                     .accessibilityHidden(true)
-            } else {
-                TagRow(tags: host.tags, limit: 4)
+                HStack(spacing: 8) {
+                    if !host.tags.isEmpty {
+                        // Fewer tags (and "+N") where the accessory needs the room.
+                        ViewThatFits(in: .horizontal) {
+                            ForEach([4, 3, 2, 1], id: \.self) { limit in
+                                TagRow(tags: host.tags, limit: limit)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    accessory
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -282,74 +257,66 @@ struct HostCard: View {
         .background { AeroHeaderWash(tint: orbTone.color) }
     }
 
-    private var orbTone: OrbTone {
-        state.orbTone(blocked: keyBlock != nil)
-    }
-
-    private var statusTitle: String {
-        state.title(blocked: keyBlock != nil)
-    }
-
-    private var openSSHHelp: String {
-        if canOpenSSH { return "Open a terminal tab to \(host.name)" }
-        if keyBlock != nil { return "Blocked: the host key of \(host.name) changed. Review it first." }
-        if state.needsHostKeyTrust { return "Trust the host key of \(host.name) first." }
-        return "Terminal tabs aren't available for \(host.name) yet."
-    }
-
-    private func cpuHelp(_ metrics: MetricsSnapshot?) -> String {
-        guard let metrics else { return "CPU" }
-        let cores = metrics.cpuCount.map { $0 == 1 ? "1 CPU" : "\($0) CPUs" } ?? "CPU"
-        return metrics.cpuPercent == nil ? "\(cores): measured from the second sample" : cores
-    }
-
-    private func diskHelp(_ metrics: MetricsSnapshot?) -> String {
-        guard let disk = metrics?.cardDisk() else { return "Disk: /" }
-        return "Disk \(disk.mount): \(MetricText.usage(disk.usedBytes, of: disk.totalBytes))"
-    }
-}
-
-/// The card's status well, always two lines tall: why the host is not polled or not online
-/// (with the age of its numbers), "Connecting…", or the kernel line when all is well. A held
-/// host key adds the button that resolves it: Review… for a changed key, Review Key… for a
-/// first key that is not trusted yet.
-private struct CardStatusWell: View {
-    let state: HostDisplayState
-    let keyBlock: HostKeyBlock?
-    let isScanningKey: Bool
-    let keyScanError: String?
-    let onReviewKey: () -> Void
-    let onTrustKey: () -> Void
-
-    var body: some View {
-        AeroWell(tint: tint) {
-            HStack(spacing: 8) {
-                ZStack(alignment: .leading) {
-                    // Two lines' height whatever the message, so every card is the same size.
-                    Text(verbatim: "X\nX")
-                        .hidden()
-                        .accessibilityHidden(true)
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: symbol)
-                            .foregroundStyle(tint)
-                            .accessibilityHidden(true)
-                        Text(text)
-                            .foregroundStyle(Aero.text.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                    }
-                    .help(help)
-                    .accessibilityElement(children: .combine)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                accessory
+    /// Name and address, then uptime and the Files and Open SSH buttons.
+    private func titleRow(buttonSize: ControlSize, showsUptime: Bool) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(host.name)
+                    .font(Aero.font(.title3, weight: .semibold))
+                    .foregroundStyle(Aero.text.primary)
+                    .lineLimit(1)
+                Text(host.connectionSummary)
+                    .font(Aero.font(.callout))
+                    .foregroundStyle(Aero.text.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            .font(Aero.font(.caption, weight: .medium))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .frame(minWidth: 0, idealWidth: Self.nameIdealWidth, maxWidth: .infinity, alignment: .leading)
+            if showsUptime {
+                uptime
+            }
+            HStack(spacing: 8) {
+                filesButton
+                openSSHButton
+            }
+            .controlSize(buttonSize)
         }
     }
 
+    /// Laid out around a hidden sample ("99d 23h") with the real figure drawn over it, so every
+    /// card of a width picks the same buttons whatever its uptime.
+    private var uptime: some View {
+        CardFigure(label: "Uptime", value: Self.sampleUptime, alignment: .trailing)
+            .hidden()
+            .overlay(alignment: .trailing) {
+                CardFigure(label: "Uptime", value: MetricText.uptime(state.metrics?.uptimeSeconds), alignment: .trailing)
+                    .opacity(state.showsOldNumbers ? Self.staleOpacity : 1)
+            }
+            .fixedSize()
+    }
+
+    private static let sampleUptime = MetricText.uptime(99 * 86_400 + 23 * 3_600)
+
+    private var filesButton: some View {
+        Button("Files", systemImage: "folder", action: onBrowseFiles)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.aquaSecondary)
+            .fixedSize()
+            .disabled(!canOpenSSH)
+            .help(actionHelp(available: "Browse the files of \(host.name) over SFTP", notYet: "Files aren't available for \(host.name) yet."))
+    }
+
+    private var openSSHButton: some View {
+        Button("Open SSH", systemImage: "terminal", action: onOpenSSH)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.aqua)
+            .fixedSize()
+            .disabled(!canOpenSSH)
+            .help(actionHelp(available: "Open a terminal tab to \(host.name)", notYet: "Terminal tabs aren't available for \(host.name) yet."))
+    }
+
+    /// The button that resolves a held host key (Review… for a changed key, Review Key… for a
+    /// first key), or the age of old numbers.
     @ViewBuilder private var accessory: some View {
         if keyBlock != nil {
             Button("Review…", action: onReviewKey)
@@ -361,6 +328,12 @@ private struct CardStatusWell: View {
             HStack(spacing: 6) {
                 if isScanningKey {
                     ProgressView().controlSize(.small)
+                } else if let keyScanError {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(Aero.font(.caption))
+                        .foregroundStyle(Aero.coral)
+                        .help(keyScanError)
+                        .accessibilityLabel(keyScanError)
                 }
                 Button("Review Key…", action: onTrustKey)
                     .buttonStyle(.aquaSecondary)
@@ -372,6 +345,7 @@ private struct CardStatusWell: View {
         } else if let since = agedSince {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text("updated \(MetricText.age(of: since, now: context.date)) ago")
+                    .font(Aero.font(.caption, weight: .medium))
                     .monospacedDigit()
                     .foregroundStyle(Aero.text.secondary)
                     .lineLimit(1)
@@ -386,59 +360,63 @@ private struct CardStatusWell: View {
         return state.metrics?.sampledAt ?? state.lastSuccessAt
     }
 
-    private var text: String {
+    /// The distribution ("Ubuntu 24.04.1 LTS") and kernel line, those that are known.
+    private var systemLines: [String] {
+        [state.metrics?.os?.displayName, state.metrics?.kernel.nilIfEmpty ?? state.unsupportedSystem].compactMap { $0 }
+    }
+
+    /// What the status means, in a sentence: why the host is not polled or not online,
+    /// "Connecting…", or the system it runs.
+    private var statusDetail: String {
         if keyBlock != nil { return "Host key changed. Not polled until you review it." }
         if state.needsHostKeyTrust { return keyScanError ?? "Not polled until you trust its host key." }
         switch state.status {
         case .loading: return state.message ?? "Connecting…"
-        case .online: return state.metrics?.kernel.nilIfEmpty ?? "Online"
+        case .online: return systemLines.first ?? "Online"
         case .stale: return state.message ?? "The last poll failed."
         case .offline: return state.message ?? "Not answering."
         case .unsupported: return state.message ?? "Unsupported OS."
         }
     }
 
-    private var help: String {
-        if let keyBlock { return keyBlock.helpText }
-        if state.needsHostKeyTrust { return text }
-        return state.lastError ?? text
-    }
-
-    private var symbol: String {
-        if keyBlock != nil { return "exclamationmark.octagon.fill" }
-        if state.needsHostKeyTrust { return "checkmark.shield.fill" }
-        switch state.status {
-        case .loading: return "hourglass"
-        case .online: return "checkmark.circle.fill"
-        case .stale: return "exclamationmark.triangle.fill"
-        case .offline: return "bolt.horizontal.circle.fill"
-        case .unsupported: return "questionmark.circle.fill"
-        }
-    }
-
-    private var tint: Color {
-        if keyBlock != nil { return Aero.coral }
-        if state.needsHostKeyTrust { return Aero.aqua }
-        switch state.status {
-        case .loading, .unsupported: return Aero.neutral
-        case .online: return Aero.leaf
-        case .stale: return Aero.sun
-        case .offline: return Aero.coral
-        }
-    }
-}
-
-/// Title and icon, or the icon alone on narrow cards (the title stays the accessibility label).
-private struct OpenSSHLabelStyle: LabelStyle {
-    let showsTitle: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        if showsTitle {
-            Label(configuration)
+    /// The bubble's tooltip: the full error or the held key's fingerprints, then the system.
+    private var statusHelp: String {
+        let reason: String
+        if let keyBlock {
+            reason = keyBlock.helpText
+        } else if state.needsHostKeyTrust || state.status == .online {
+            reason = statusDetail
         } else {
-            configuration.icon
-                .accessibilityLabel(Text("Open SSH"))
+            reason = state.lastError ?? statusDetail
         }
+        return ([reason] + systemLines.filter { $0 != reason }).joined(separator: "\n")
+    }
+
+    private var orbTone: OrbTone {
+        state.orbTone(blocked: keyBlock != nil)
+    }
+
+    private var statusTitle: String {
+        state.title(blocked: keyBlock != nil)
+    }
+
+    /// Tooltip for Open SSH or Files: `available`, or why the button is disabled.
+    private func actionHelp(available: String, notYet: String) -> String {
+        if canOpenSSH { return available }
+        if keyBlock != nil { return "Blocked: the host key of \(host.name) changed. Review it first." }
+        if state.needsHostKeyTrust { return "Trust the host key of \(host.name) first." }
+        return notYet
+    }
+
+    private func cpuHelp(_ metrics: MetricsSnapshot?) -> String {
+        guard let metrics else { return "CPU" }
+        let cores = metrics.cpuCount.map { $0 == 1 ? "1 CPU" : "\($0) CPUs" } ?? "CPU"
+        return metrics.cpuPercent == nil ? "\(cores): measured from the second sample" : cores
+    }
+
+    private func diskHelp(_ metrics: MetricsSnapshot?) -> String {
+        guard let disk = metrics?.cardDisk() else { return "Disk: /" }
+        return "Disk \(disk.mount): \(MetricText.usage(disk.usedBytes, of: disk.totalBytes))"
     }
 }
 
@@ -446,9 +424,10 @@ private struct OpenSSHLabelStyle: LabelStyle {
 private struct CardFigure: View {
     let label: String
     let value: String
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: alignment, spacing: 2) {
             Text(label)
                 .font(Aero.font(.caption, weight: .medium))
                 .foregroundStyle(Aero.text.secondary)
@@ -479,6 +458,16 @@ extension HostDisplayState {
         if blocked || isChangedKey { return "Blocked" }
         if needsHostKeyTrust { return "Key not trusted" }
         return status.title
+    }
+
+    /// The logo in the status bubble, from the last sample's os-release and kernel (or the
+    /// `uname` of an unsupported host); `nil`, a generic server, until the host has answered.
+    var systemLogo: SystemLogo? {
+        SystemLogo.match(
+            id: metrics?.os?.id,
+            idLike: metrics?.os?.idLike ?? [],
+            kernel: metrics?.kernel.nilIfEmpty ?? unsupportedSystem
+        )
     }
 
     private var isChangedKey: Bool {

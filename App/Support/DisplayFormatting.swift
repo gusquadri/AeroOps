@@ -74,7 +74,12 @@ enum MetricText {
     /// Load averages "1m 5m 15m", e.g. "0.42 0.38 0.30".
     static func load(_ metrics: MetricsSnapshot?) -> String {
         guard let metrics else { return missing }
-        return [metrics.load1, metrics.load5, metrics.load15]
+        return load(averages: [metrics.load1, metrics.load5, metrics.load15])
+    }
+
+    /// Load averages with two decimals, e.g. "1.42 · 0.98 · 0.71".
+    static func load(averages: [Double]) -> String {
+        averages
             .map { $0.formatted(.number.precision(.fractionLength(2))) }
             .joined(separator: " · ")
     }
