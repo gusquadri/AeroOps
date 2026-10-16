@@ -2,8 +2,8 @@ import Foundation
 
 /// Parses the output of `Scripts/remote/metrics.sh`.
 ///
-/// One run prints `@@stat`, `@@cpus`, `@@mem`, `@@uptime`, `@@load`, `@@df`, `@@host` and `@@end`
-/// sections. Keep the returned ``MetricsSample`` and pass it as `previous` on the next poll: CPU %
+/// One run prints `@@stat`, `@@cpus`, `@@mem`, `@@uptime`, `@@load`, `@@df`, `@@host`, `@@os`
+/// and `@@end` sections. Keep the returned ``MetricsSample`` and pass it as `previous` on the next poll: CPU %
 /// is the busy share of the CPU time that passed between two samples.
 ///
 /// ```swift
@@ -54,7 +54,8 @@ public enum MetricsParser {
             swapUsedBytes: sample.memory.flatMap { memory in
                 guard let total = memory.swapTotalBytes, let free = memory.swapFreeBytes else { return nil }
                 return max(total - free, 0)
-            }
+            },
+            os: sample.os
         )
     }
 
@@ -107,7 +108,8 @@ public enum MetricsParser {
             load: sections["load"]?.first.flatMap { LoadAverage(loadavgLine: $0) },
             disks: parseDF(lines: sections["df"] ?? []),
             kernel: host.first.map { $0.trimmingCharacters(in: .whitespaces) },
-            hostname: host.dropFirst().first.map { $0.trimmingCharacters(in: .whitespaces) }
+            hostname: host.dropFirst().first.map { $0.trimmingCharacters(in: .whitespaces) },
+            os: OSRelease(lines: sections["os"] ?? [])
         )
     }
 
@@ -186,7 +188,7 @@ public enum MetricsParseResult: Sendable, Hashable {
     /// A Linux poll. Keep `sample` for the next poll's CPU delta.
     case success(MetricsSnapshot, sample: MetricsSample)
     /// The script ran to `@@end` but there was no `/proc/stat` (macOS, BSD, ...): the card says
-    /// "unsupported OS". The sample still carries `kernel`, `hostname` and `disks` when present.
+    /// "unsupported OS". The sample still carries `kernel`, `hostname`, `os` and `disks` when present.
     case unsupportedOS(MetricsSample)
     /// No `@@end`: the output was cut off. Count it as a failed poll.
     case truncated
@@ -224,6 +226,8 @@ public struct MetricsSample: Codable, Sendable, Hashable {
     public var kernel: String?
     /// `hostname`.
     public var hostname: String?
+    /// os-release from `@@os`; `nil` when the host has none (macOS) or the script predates it.
+    public var os: OSRelease?
 
     /// Creates a sample.
     public init(
@@ -234,7 +238,8 @@ public struct MetricsSample: Codable, Sendable, Hashable {
         load: LoadAverage? = nil,
         disks: [DiskUsage] = [],
         kernel: String? = nil,
-        hostname: String? = nil
+        hostname: String? = nil,
+        os: OSRelease? = nil
     ) {
         self.cpuTimes = cpuTimes
         self.cpuCount = cpuCount
@@ -244,6 +249,7 @@ public struct MetricsSample: Codable, Sendable, Hashable {
         self.disks = disks
         self.kernel = kernel
         self.hostname = hostname
+        self.os = os
     }
 }
 

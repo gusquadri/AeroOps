@@ -148,7 +148,8 @@ final class FakeToolHandler: BridgeToolHandler {
             cpuPercent: 12.345, cpuCount: 4, memUsedBytes: 1 << 30, memTotalBytes: 4 << 30,
             disks: [DiskUsage(mount: "/", device: "/dev/sda1", usedBytes: 10, totalBytes: 100, availableBytes: 90)],
             uptimeSeconds: 3600, load1: 0.5, load5: 0.25, load15: 0.125, hostname: host.name, kernel: "6.1",
-            sampledAt: Date(timeIntervalSince1970: 1_800_000_000))
+            sampledAt: Date(timeIntervalSince1970: 1_800_000_000),
+            os: OSRelease(id: "ubuntu", idLike: ["debian"], prettyName: "Ubuntu 24.04.1 LTS", versionID: "24.04"))
     }
 
     func containers(on host: RemoteHost, includeStopped: Bool) async throws -> [ContainerInfo] {

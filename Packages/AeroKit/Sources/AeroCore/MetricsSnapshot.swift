@@ -33,6 +33,8 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
     public var swapTotalBytes: Int64?
     /// Used swap in bytes (SwapTotal − SwapFree), if both were reported.
     public var swapUsedBytes: Int64?
+    /// The distribution, from os-release; `nil` without one (or from a script before `@@os`).
+    public var os: OSRelease?
 
     /// Creates a snapshot.
     public init(
@@ -49,7 +51,8 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
         kernel: String,
         sampledAt: Date,
         swapTotalBytes: Int64? = nil,
-        swapUsedBytes: Int64? = nil
+        swapUsedBytes: Int64? = nil,
+        os: OSRelease? = nil
     ) {
         self.cpuPercent = cpuPercent
         self.cpuCount = cpuCount
@@ -65,6 +68,7 @@ public struct MetricsSnapshot: Codable, Sendable, Hashable {
         self.sampledAt = sampledAt
         self.swapTotalBytes = swapTotalBytes
         self.swapUsedBytes = swapUsedBytes
+        self.os = os
     }
 
     /// Memory use as a fraction 0...1, or `nil` when the total is unknown (0).

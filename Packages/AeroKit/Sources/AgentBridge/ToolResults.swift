@@ -62,6 +62,14 @@ enum ToolResults {
         ]
         if let cpu = m.cpuPercent { result["cpuPercent"] = .double(rounded(cpu)) }
         if let count = m.cpuCount { result["cpuCount"] = .int(count) }
+        if let os = m.os {
+            var release: [String: JSONValue] = [:]
+            if let id = os.id { release["id"] = .string(id) }
+            if !os.idLike.isEmpty { release["idLike"] = .array(os.idLike.map { .string($0) }) }
+            if let name = os.displayName { release["name"] = .string(name) }
+            if let version = os.versionID { release["versionID"] = .string(version) }
+            result["os"] = .object(release)
+        }
         return .object(result)
     }
 
