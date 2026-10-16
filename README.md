@@ -49,6 +49,8 @@ Xcode resolves the Swift packages. Most are pinned to exact versions:
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.10.0 |
 | [swift-log](https://github.com/apple/swift-log) | 1.5.0 or later |
 
+The system logos on the cards are [Simple Icons](https://simpleicons.org) 16.35.0 (CC0), bundled in `Packages/AeroKit/Sources/AeroTheme/Logos/`.
+
 ## Build and test
 
 The Xcode project is generated from `project.yml`. `AeroOps.xcodeproj` is git-ignored: edit `project.yml`, never the project.
@@ -179,7 +181,7 @@ Packages/AeroKit/       Swift package with one target per module:
   Sources/TerminalKit     libghostty wrapper
   Sources/BridgeProtocol  bridge.sock messages and client, shared with aeroops-mcp
   Sources/AgentBridge     bridge server, PolicyEngine, run_command
-  Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusOrb, ...)
+  Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusBubble, ...) and the system logos
   Tests/                  one test target per module, plus BridgeHarness and test helpers
 Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)
 Scripts/release.sh      signed, notarized release build

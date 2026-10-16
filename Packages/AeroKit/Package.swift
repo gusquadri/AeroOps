@@ -85,7 +85,8 @@ let package = Package(
         ),
 
         // Frutiger Aero design tokens and glossy components. Must NOT depend on AeroCore.
-        .target(name: "AeroTheme"),
+        // Logos/: the system logo SVGs for StatusBubble (Simple Icons, CC0).
+        .target(name: "AeroTheme", resources: [.copy("Logos")]),
 
         // Test-only helpers shared by every test target (fixture lookup in repo `dev/fixtures/`).
         // Not exported as a product, so it never ships in the app.

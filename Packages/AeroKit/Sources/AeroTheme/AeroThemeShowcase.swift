@@ -10,17 +10,17 @@ struct AeroThemeShowcase: View {
             header
             HStack(alignment: .top, spacing: 18) {
                 HostCardSample(
-                    name: "web-01", tone: .healthy, tags: ["prod", "eu-west"],
+                    name: "web-01", tone: .healthy, logo: .ubuntu, tags: ["prod", "eu-west"],
                     detail: "Ubuntu 24.04 · up 12 days · load 0.42",
                     cpu: 0.23, memory: 0.58, disk: 0.41
                 )
                 HostCardSample(
-                    name: "db-02", tone: .warning, tags: ["prod"],
+                    name: "db-02", tone: .warning, logo: .debian, tags: ["prod"],
                     detail: "Debian 12 · up 3 days · load 7.91",
                     cpu: 0.97, memory: 0.86, disk: 0.72
                 )
                 HostCardSample(
-                    name: "edge-pi", tone: .error, tags: ["lab"],
+                    name: "edge-pi", tone: .error, logo: .raspberryPi, tags: ["lab"],
                     detail: "Offline · last seen 2 h ago",
                     cpu: nil, memory: nil, disk: nil
                 )
@@ -37,9 +37,9 @@ struct AeroThemeShowcase: View {
                 .frame(maxWidth: .infinity)
                 GlassSection("Components", systemImage: "sparkles") {
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 14) {
-                            ForEach(OrbTone.allCases, id: \.self) { tone in
-                                StatusOrb(tone: tone, size: 22)
+                        HStack(spacing: 10) {
+                            ForEach(Array(zip(OrbTone.allCases, [SystemLogo.alpine, .redHat, .freeBSD, nil])), id: \.0) { tone, logo in
+                                StatusBubble(tone: tone, logo: logo, size: 34)
                             }
                             Spacer()
                             ForEach(OrbTone.allCases, id: \.self) { tone in
@@ -111,6 +111,7 @@ struct AeroThemeShowcase: View {
 private struct HostCardSample: View {
     let name: String
     let tone: OrbTone
+    let logo: SystemLogo
     let tags: [String]
     let detail: String
     let cpu: Double?
@@ -120,8 +121,8 @@ private struct HostCardSample: View {
     var body: some View {
         AeroCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    StatusOrb(tone: tone, size: 14)
+                HStack(spacing: 10) {
+                    StatusBubble(tone: tone, logo: logo, size: 36)
                     Text(name)
                         .font(Aero.font(.title3, weight: .bold))
                     Spacer()
