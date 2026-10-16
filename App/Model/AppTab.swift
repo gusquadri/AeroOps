@@ -1,5 +1,5 @@
 /// The five main-window tabs. Shown with their symbols in the
-/// toolbar's tab switcher and bound to ⌘1–⌘5 in the View menu.
+/// toolbar's tab switcher and bound to ⌘1–⌘5 in the View menu. ``activity`` is shown as "MCPs".
 enum AppTab: String, CaseIterable, Identifiable, Sendable {
     case dashboard
     case containers
@@ -15,7 +15,7 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .containers: "Containers"
         case .terminals: "Terminals"
         case .files: "Files"
-        case .activity: "Activity"
+        case .activity: "MCPs"
         }
     }
 
@@ -26,7 +26,7 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .containers: "shippingbox"
         case .terminals: "terminal"
         case .files: "folder"
-        case .activity: "list.bullet.rectangle"
+        case .activity: "point.3.filled.connected.trianglepath.dotted"
         }
     }
 

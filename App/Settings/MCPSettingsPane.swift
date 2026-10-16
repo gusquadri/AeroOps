@@ -69,7 +69,7 @@ private struct BridgeStatusSection: View {
                         }
                     }
                 }
-                Text("Only the aeroops-mcp inside this copy of AeroOps, signed by the same developer, may connect. Anything else is turned away and shown in Activity.")
+                Text("Only the aeroops-mcp inside this copy of AeroOps, signed by the same developer, may connect. Anything else is turned away and shown in the MCPs tab.")
                     .font(Aero.font(.caption))
                     .foregroundStyle(Aero.text.secondary)
                     .fixedSize(horizontal: false, vertical: true)

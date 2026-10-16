@@ -2,7 +2,8 @@ import AeroTheme
 import AgentBridge
 import SwiftUI
 
-/// Activity tab (Phases 7 and 8): what AI agents do through AeroOps' MCP bridge.
+/// MCPs tab (Phases 7 and 8; formerly "Activity"): what AI agents do through
+/// AeroOps' MCP bridge.
 ///
 /// Running and recent `run_command` calls with live output (Cancel stops one). AeroOps does not
 /// ask before a command runs; agents are told to ask the user in their own conversation. Text

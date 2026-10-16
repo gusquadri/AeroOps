@@ -8,8 +8,8 @@ AeroOps is a native macOS app for keeping an eye on a handful of Linux servers o
 | --- | --- |
 | ![Host detail inspector](docs/screenshots/host-detail.png) | ![Kubernetes pods with the Events panel](docs/screenshots/kubernetes.png) |
 | Host detail | Kubernetes pods, with Events for a pending pod |
-| ![Log viewer searching a container's logs](docs/screenshots/logs.png) | ![Activity tab with a running agent command and its live output](docs/screenshots/activity.png) |
-| Container logs with search | Agent commands with live output in Activity |
+| ![Log viewer searching a container's logs](docs/screenshots/logs.png) | ![MCPs tab with a running agent command and its live output](docs/screenshots/activity.png) |
+| Container logs with search | Agent commands with live output in MCPs |
 | ![Settings › MCP with copyable client config](docs/screenshots/mcp-settings.png) | ![Onboarding, server step](docs/screenshots/onboarding.png) |
 | Settings › MCP | First-run onboarding |
 | ![Import from ~/.ssh/config sheet](docs/screenshots/ssh-config-import.png) | ![Terminal tabs to three dev servers, one running top](docs/screenshots/terminals.png) |
@@ -29,7 +29,7 @@ The screenshots show the app's built-in demo data and the dev VM described below
   - Read tools: `list_hosts`, `get_host_metrics`, `list_containers`, `list_pods` and `get_logs`.
   - Exec tool: `run_command`.
 - **Asking before commands.** AeroOps runs `run_command` on a Read + Exec host as soon as the agent calls it. The MCP server's instructions and the tool's description tell the agent to show you the host, the exact command and its reason, and to wait for your yes in the conversation first. The agent skips asking only if you have told it not to ask. This is an instruction to the agent, not something AeroOps enforces. Keep hosts at Read when that matters.
-- **Activity.** The Activity tab shows running and recent agent commands with their live output, and you can cancel a running command there.
+- **MCPs.** The MCPs tab shows running and recent agent commands with their live output, and you can cancel a running command there.
 - **Import from `~/.ssh/config`.** The importer follows `Include`, `Host` patterns and `Match all` the way OpenSSH does. It imports each host's name, address, port and user. It only reads the config: key files are never opened and nothing under `~/.ssh` is written. Hosts that use `ProxyJump` or `ProxyCommand` are listed with the reason they can't be imported.
 - **Onboarding.** On first run, a sheet walks through five steps: Welcome, Key, Server, AI agents and Done. It covers creating or importing a key, adding or importing a first server, and connecting an agent. Existing users never see it.
 

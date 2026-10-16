@@ -221,7 +221,7 @@ public enum ToolCatalog {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": .int(BridgeLimits.maxCommandBytes),
-                        "description": "The shell command, run as `sh -c <command>` on the host. Shown verbatim in AeroOps' Activity tab.",
+                        "description": "The shell command, run as `sh -c <command>` on the host. Shown verbatim in AeroOps' MCPs tab.",
                     ],
                     "reason": [
                         "type": "string",

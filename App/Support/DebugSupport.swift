@@ -304,10 +304,10 @@ private struct DebugSnapshotter {
         await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
     }
 
-    /// Activity and Settings › MCP at full height.
+    /// The MCPs tab and Settings › MCP at full height.
     private func captureAgents() async {
         await captureStandalone(ActivityView().frame(width: 1180, height: 2000).background { SkyBackground() },
-                                title: "Activity", name: "\(prefix)-activity-full")
+                                title: "MCPs", name: "\(prefix)-activity-full")
         await captureStandalone(MCPSettingsPane().frame(width: 780, height: 1500), title: "MCP", name: "\(prefix)-mcp-full")
     }
 
