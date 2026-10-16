@@ -200,9 +200,10 @@ private struct HostTerminalRows: View {
     }
 }
 
-/// One terminal tab under its host: status orb and title, then the program's progress and a
-/// bell while the tab wants attention (it rang or posted a notification while hidden). A tab
-/// whose surface was freed to save memory is dimmed; its ssh session keeps running.
+/// One terminal tab under its host: its title, then the program's progress and a bell while the
+/// tab wants attention (it rang or posted a notification while hidden). The host's orb above
+/// stands for its tabs; a tab's own status is in its tooltip. A tab whose surface was freed to
+/// save memory is dimmed; its ssh session keeps running.
 private struct SidebarTerminalRow: View {
     @Environment(AppModel.self) private var model
     let session: TerminalSession
@@ -219,7 +220,6 @@ private struct SidebarTerminalRow: View {
     var body: some View {
         let terminals = model.terminals
         HStack(spacing: 7) {
-            StatusOrb(tone: status.tone.orbTone, size: 8)
             Text(title)
                 .font(Aero.font(.callout))
                 .lineLimit(1)
