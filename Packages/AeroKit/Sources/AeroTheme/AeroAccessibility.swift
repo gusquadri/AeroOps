@@ -45,6 +45,10 @@ private struct AeroLiquidGlassKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct AeroAnimatedWaterKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     /// Forces Aero accessibility settings regardless of the system (previews and tests only).
     var aeroAccessibilityOverride: AeroAccessibilityOverride? {
@@ -58,5 +62,12 @@ extension EnvironmentValues {
     var aeroLiquidGlass: Bool {
         get { self[AeroLiquidGlassKey.self] }
         set { self[AeroLiquidGlassKey.self] = newValue }
+    }
+
+    /// Whether the gauge water moves. The live water is an AppKit view, which `ImageRenderer`
+    /// cannot draw, so the showcase render test turns it off and the gauges show still water.
+    var aeroAnimatedWater: Bool {
+        get { self[AeroAnimatedWaterKey.self] }
+        set { self[AeroAnimatedWaterKey.self] = newValue }
     }
 }

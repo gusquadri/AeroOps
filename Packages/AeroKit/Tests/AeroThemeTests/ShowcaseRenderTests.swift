@@ -9,7 +9,8 @@ import Testing
 ///
 /// `ImageRenderer` drops every view inside a `.glassEffect` (even `.identity`), so the render
 /// turns Liquid Glass off (`aeroLiquidGlass = false`): cards show their `glass.fill`, gloss
-/// and rim directly over the sky, without the glass's backdrop blur and refraction.
+/// and rim directly over the sky, without the glass's backdrop blur and refraction. It cannot
+/// draw AppKit views either, so the gauges show still water (`aeroAnimatedWater = false`).
 @Suite("Showcase render")
 @MainActor
 struct ShowcaseRenderTests {
@@ -47,7 +48,9 @@ struct ShowcaseRenderTests {
     }
 
     private func render(_ view: some View, to name: String) throws -> CGImage {
-        let renderer = ImageRenderer(content: view.environment(\.aeroLiquidGlass, false))
+        let renderer = ImageRenderer(
+            content: view.environment(\.aeroLiquidGlass, false).environment(\.aeroAnimatedWater, false)
+        )
         renderer.scale = 2
         renderer.proposedSize = ProposedViewSize(AeroThemeShowcase.size)
         let image = try #require(renderer.cgImage, "ImageRenderer produced no image")

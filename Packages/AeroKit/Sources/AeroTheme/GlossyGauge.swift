@@ -5,7 +5,9 @@ import SwiftUI
 /// `value` is a fraction in `0...1` (clamped); `nil` or NaN shows a dash, e.g. CPU on the
 /// first poll. The ring is a glass tube in a recessed groove: leaf-to-aqua normally, leaf-to-sun
 /// from `warningThreshold` (default 80%) and sun-to-coral from `criticalThreshold` (default 95%).
-/// A glass bubble in the centre shows the value as a whole percentage; `label` sits underneath.
+/// Water flows along the filled tube toward its tip, with a rolling wave and bubbles
+/// (``GaugeWater``). A glass bubble in the centre shows the value as a whole percentage;
+/// `label` sits underneath.
 ///
 /// ```swift
 /// GlossyGauge(value: snapshot.memUsedFraction, label: "Memory")
@@ -65,7 +67,9 @@ public struct GlossyGauge: View {
                 ZStack {
                     GaugeGroove(lineWidth: lineWidth, strong: strong)
                     if let fraction, fraction > 0 {
-                        GaugeTube(fraction: fraction, colors: level.colors, lineWidth: lineWidth)
+                        GaugeTube(
+                            fraction: fraction, colors: level.colors, lineWidth: lineWidth, diameter: diameter, strong: strong
+                        )
                     }
                 }
             }
@@ -121,7 +125,7 @@ public struct GlossyGauge: View {
     }
 
     /// Colour band of the ring.
-    enum Level: Sendable, Equatable {
+    enum Level: Sendable, Hashable {
         /// No value: groove only.
         case none
         /// Leaf to aqua.
@@ -205,11 +209,14 @@ private struct GaugeGroove: View {
     }
 }
 
-/// The value arc: a gradient tube with a highlight running along it and a soft glow.
+/// The value arc: a gradient tube with water flowing through it, a highlight running along it
+/// and a soft glow.
 private struct GaugeTube: View {
     let fraction: Double
     let colors: [Color]
     let lineWidth: CGFloat
+    let diameter: CGFloat
+    let strong: Bool
 
     var body: some View {
         // The gradient spans only the arc, so a short arc still shows both colours.
@@ -217,12 +224,30 @@ private struct GaugeTube: View {
             colors: colors, center: .center,
             startAngle: .degrees(0), endAngle: .degrees(360 * max(fraction, 0.02))
         )
+        // The water sits between the tube's colour and its glass, and is not rotated: it draws
+        // its own arc from the top.
         ZStack {
             Circle()
                 .inset(by: lineWidth / 2)
                 .trim(from: 0, to: fraction)
                 .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .shadow(color: (colors.last ?? Aero.aqua).opacity(0.45), radius: 3)
+                .rotationEffect(.degrees(-90))
+            GaugeWaterView(water: GaugeWater(fraction: fraction, strong: strong), lineWidth: lineWidth, diameter: diameter)
+            GaugeTubeGlass(fraction: fraction, lineWidth: lineWidth)
+                .rotationEffect(.degrees(-90))
+        }
+    }
+}
+
+/// The tube's glass over the water: a highlight along its outer half and a shade along its
+/// inner edge.
+private struct GaugeTubeGlass: View {
+    let fraction: Double
+    let lineWidth: CGFloat
+
+    var body: some View {
+        ZStack {
             // Highlight along the outer half of the tube.
             Circle()
                 .inset(by: lineWidth * 0.3)
@@ -242,7 +267,6 @@ private struct GaugeTube: View {
                 )
                 .blur(radius: 0.6)
         }
-        .rotationEffect(.degrees(-90))
     }
 }
 
