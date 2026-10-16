@@ -2,7 +2,8 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// The main window: host sidebar, tab content over the sky background, and the toolbar tab switcher.
+/// The main window: host sidebar, tab content over the sky background, the toolbar tab switcher
+/// and a Settings button.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     /// The host list is the main navigation, so every launch starts with it showing (the user
@@ -24,6 +25,10 @@ struct RootView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 TabSwitcher(selection: $model.selectedTab)
+            }
+            // On every tab; on the Dashboard it sits left of Refresh and Details.
+            ToolbarItem(placement: .primaryAction) {
+                SettingsToolbarButton()
             }
         }
         .sheet(item: $model.editorRequest) { request in
@@ -91,6 +96,16 @@ struct TabSwitcher: View {
         .buttonStyle(.plain)
         .help("\(tab.title) (⌘\(String(tab.shortcutDigit)))")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// Opens the Settings window at the pane it last showed.
+private struct SettingsToolbarButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Settings", systemImage: "gearshape") { openSettings() }
+            .help("Open Settings (⌘,)")
     }
 }
 
