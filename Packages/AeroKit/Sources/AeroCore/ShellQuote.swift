@@ -1,4 +1,4 @@
-/// POSIX shell quoting for every value interpolated into a remote command (CLAUDE.md rule).
+/// POSIX shell quoting for every value interpolated into a remote command (AGENTS.md rule).
 ///
 /// ```swift
 /// let cmd = "docker logs --tail 500 " + ShellQuote.quote(containerName)
