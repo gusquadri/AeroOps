@@ -50,7 +50,8 @@ struct DockerSection: View {
 
 /// The containers table's columns. Fixed widths fit the content and the header: the
 /// Restarting chip, "100.0%", "123.4 MB" and the Logs and Inspect buttons and the Stop, Restart
-/// or Delete menu.
+/// or Delete menu. Sortable headers also fit their bold title beside the sort chevron, which takes
+/// about 25 points.
 private enum ContainerColumn: String, CaseIterable {
     case name, image, state, status, cpu, memory, ports, actions
 
@@ -61,8 +62,8 @@ private enum ContainerColumn: String, CaseIterable {
     static let statusWidths = (min: CGFloat(90), ideal: CGFloat(150), max: CGFloat(240))
     static let portsWidths = (min: CGFloat(70), ideal: CGFloat(110), max: CGFloat(280))
     static let stateWidth: CGFloat = 84
-    static let cpuWidth: CGFloat = 50
-    static let memoryWidth: CGFloat = 62
+    static let cpuWidth: CGFloat = 52
+    static let memoryWidth: CGFloat = 72
     static let actionsWidth: CGFloat = 66
 
     /// Ports give way first, then image, status, memory and CPU.
@@ -88,7 +89,8 @@ private enum ContainerColumn: String, CaseIterable {
 
 /// The containers table: name, image, state, status, CPU, memory, ports and actions. When the
 /// table is too narrow for every column, optional ones give way
-/// (``ContainerColumn/layout(width:)``) rather than the table scrolling sideways.
+/// (``ContainerColumn/layout(width:)``) rather than the table scrolling sideways. Clicking a
+/// header sorts by that column: text A to Z, CPU and memory highest first; clicking again flips it.
 private struct DockerTable: View {
     let host: RemoteHost
     @Bindable var containers: HostContainersModel
@@ -113,8 +115,11 @@ private struct DockerTable: View {
     }
 
     private func table(_ rows: [ContainerInfo], layout: WorkloadTableLayout<ContainerColumn>) -> some View {
-        Table(rows, selection: $containers.selectedContainerID, columnCustomization: $columns) {
-            TableColumn("Name") { container in
+        Table(
+            rows, selection: $containers.selectedContainerID, sortOrder: $containers.containerSortOrder,
+            columnCustomization: $columns
+        ) {
+            TableColumn("Name", value: \.name) { container in
                 HStack(spacing: 8) {
                     StatusOrb(tone: container.health.workloadTone, size: 10)
                     Text(container.name)
@@ -126,7 +131,7 @@ private struct DockerTable: View {
             }
             .width(min: ContainerColumn.nameMinimum, ideal: layout.width(.name))
             .layoutColumn(ContainerColumn.name)
-            TableColumn("Image") { container in
+            TableColumn("Image", value: \.image) { container in
                 Text(container.image)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -137,12 +142,12 @@ private struct DockerTable: View {
                 max: ContainerColumn.imageWidths.max
             )
             .layoutColumn(ContainerColumn.image)
-            TableColumn("State") { container in
+            TableColumn("State", value: \.state.rawValue) { container in
                 AeroTag(container.state.rawValue.capitalized, tone: container.health.workloadTone)
             }
             .width(ContainerColumn.stateWidth)
             .layoutColumn(ContainerColumn.state)
-            TableColumn("Status") { container in
+            TableColumn("Status", value: \.status) { container in
                 Text(container.status)
                     .lineLimit(1)
                     .foregroundStyle(Aero.text.secondary)
@@ -153,14 +158,14 @@ private struct DockerTable: View {
                 max: ContainerColumn.statusWidths.max
             )
             .layoutColumn(ContainerColumn.status)
-            TableColumn("CPU") { container in
+            TableColumn("CPU", sortUsing: KeyPathComparator(\.cpuPercent, order: .reverse)) { container in
                 Text(container.cpuText)
                     .monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .width(ContainerColumn.cpuWidth)
             .layoutColumn(ContainerColumn.cpu)
-            TableColumn("Memory") { container in
+            TableColumn("Memory", sortUsing: KeyPathComparator(\.memUsedBytes, order: .reverse)) { container in
                 Text(container.memoryText)
                     .monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -168,7 +173,7 @@ private struct DockerTable: View {
             }
             .width(ContainerColumn.memoryWidth)
             .layoutColumn(ContainerColumn.memory)
-            TableColumn("Ports") { container in
+            TableColumn("Ports", value: \.portsText) { container in
                 Text(container.portsText)
                     .lineLimit(1)
                     .truncationMode(.tail)

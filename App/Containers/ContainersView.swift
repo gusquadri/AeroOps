@@ -588,6 +588,16 @@ extension PodInfo {
     /// `true` when the metrics API reported this pod.
     var hasUsage: Bool { cpuMillicores != nil || memUsedBytes != nil }
 
+    /// The Ready column's sort key: the share of containers ready, so `1/3` sorts before `1/1`.
+    var readyFraction: Double {
+        containerCount == 0 ? 0 : Double(readyCount) / Double(containerCount)
+    }
+
+    /// The Age column's sort key: larger for older pods; `nil` when the creation time is unknown.
+    var ageSortKey: TimeInterval? {
+        createdAt.map { -$0.timeIntervalSinceReferenceDate }
+    }
+
     /// CPU as `docker stats` shows it, where 100% is one core (`250m` is `25.0%`), or an em dash.
     var cpuText: String {
         guard let cpuMillicores else { return MetricText.missing }

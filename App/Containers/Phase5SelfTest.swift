@@ -264,6 +264,17 @@ struct Phase5SelfTest {
         containers.showStopped = true
         await pause(1.0)
         await snapshotMain("docker-table", r, between: containers)
+
+        // The Memory header sorts the most memory first, containers without stats last.
+        containers.containerSortOrder = [KeyPathComparator(\.memUsedBytes, order: .reverse)]
+        let memory = containers.filteredContainers.map(\.memUsedBytes)
+        r.step(
+            "sort by memory", zip(memory, memory.dropFirst()).allSatisfy { ($0 ?? -1) >= ($1 ?? -1) },
+            memory.map { $0.map { $0.formatted(.byteCount(style: .memory)) } ?? MetricText.missing }.joined(separator: ", ")
+        )
+        await pause(1.0)
+        await snapshotMain("docker-table-sorted", r, between: containers)
+        containers.containerSortOrder = []
     }
 
     private func checkInspect(_ containers: HostContainersModel, _ r: Recorder) async {
@@ -417,6 +428,19 @@ struct Phase5SelfTest {
         }
         await pause(1.0)
         await snapshotMain("pod-table", r, between: containers)
+
+        // The Restarts header sorts the most restarts first, so the crasher leads.
+        containers.podSortOrder = [KeyPathComparator(\.restarts, order: .reverse)]
+        let sorted = containers.filteredPods
+        let restarts = sorted.map(\.restarts)
+        r.step(
+            "sort by restarts",
+            zip(restarts, restarts.dropFirst()).allSatisfy { $0 >= $1 } && sorted.first?.id == crasher?.id,
+            sorted.map { "\($0.name): \($0.restarts)" }.joined(separator: ", ")
+        )
+        await pause(1.0)
+        await snapshotMain("pod-table-sorted", r, between: containers)
+        containers.podSortOrder = []
 
         // One click: the crashed instance's logs.
         if let crasher {

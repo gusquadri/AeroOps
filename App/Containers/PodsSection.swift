@@ -93,7 +93,8 @@ struct PodsSection: View {
 /// "Ready" header, the "Restarts" header and a four-digit crash-loop badge, "120d", the
 /// CrashLoopBackOff, ImagePullBackOff and ContainerCreating chips (longer reasons such as
 /// CreateContainerConfigError get the wide Status column), "1234m", "123.4 MB", and two or
-/// three row buttons and the Stop, Restart or Delete menu.
+/// three row buttons and the Stop, Restart or Delete menu. Sortable headers also fit their bold
+/// title beside the sort chevron, which takes about 25 points.
 private enum PodColumn: String, CaseIterable {
     case namespace, name, ready, status, statusWide, restarts, cpu, memory, age, node, actions, actionsCompact
 
@@ -102,13 +103,13 @@ private enum PodColumn: String, CaseIterable {
     static let nameComfort: CGFloat = 170
     static let namespaceWidths = (min: CGFloat(70), ideal: CGFloat(100))
     static let nodeWidths = (min: CGFloat(70), ideal: CGFloat(110))
-    static let readyWidth: CGFloat = 46
+    static let readyWidth: CGFloat = 60
     static let statusWidth: CGFloat = 126
     static let statusWideWidth: CGFloat = 172
-    static let restartsWidth: CGFloat = 56
-    static let cpuWidth: CGFloat = 50
-    static let memoryWidth: CGFloat = 62
-    static let ageWidth: CGFloat = 34
+    static let restartsWidth: CGFloat = 74
+    static let cpuWidth: CGFloat = 52
+    static let memoryWidth: CGFloat = 72
+    static let ageWidth: CGFloat = 48
     static let actionsWidth: CGFloat = 92
     static let actionsCompactWidth: CGFloat = 66
     /// Statuses up to this length fit the regular Status column.
@@ -152,7 +153,8 @@ private enum PodColumn: String, CaseIterable {
 /// Name takes the spare width; when the table is too narrow for a typical pod name (the
 /// inspector is open, or the window is small), optional columns give way
 /// (``PodColumn/layout(width:namespacePicked:wideStatus:metrics:detailButton:)``) rather than
-/// the table scrolling sideways.
+/// the table scrolling sideways. Clicking a header sorts by that column: text A to Z, restarts,
+/// CPU and memory highest first; clicking again flips it.
 private struct PodTable: View {
     @Bindable var containers: HostContainersModel
     @State private var width: CGFloat = 0
@@ -191,8 +193,11 @@ private struct PodTable: View {
     }
 
     private func table(_ rows: [PodInfo], layout: WorkloadTableLayout<PodColumn>) -> some View {
-        Table(rows, selection: $containers.selectedPodID, columnCustomization: $columns) {
-            TableColumn("Namespace") { pod in
+        Table(
+            rows, selection: $containers.selectedPodID, sortOrder: $containers.podSortOrder,
+            columnCustomization: $columns
+        ) {
+            TableColumn("Namespace", value: \.namespace) { pod in
                 Text(pod.namespace)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -202,7 +207,7 @@ private struct PodTable: View {
             // At most its ideal width: spare width goes to Name.
             .width(min: PodColumn.namespaceWidths.min, ideal: layout.width(.namespace), max: PodColumn.namespaceWidths.ideal)
             .layoutColumn(PodColumn.namespace)
-            TableColumn("Name") { pod in
+            TableColumn("Name", value: \.name) { pod in
                 HStack(spacing: 8) {
                     StatusOrb(tone: pod.health.workloadTone, size: 10)
                     Text(pod.name)
@@ -214,23 +219,23 @@ private struct PodTable: View {
             }
             .width(min: PodColumn.nameMinimum, ideal: layout.width(.name))
             .layoutColumn(PodColumn.name)
-            TableColumn("Ready") { pod in
+            TableColumn("Ready", sortUsing: KeyPathComparator(\.readyFraction)) { pod in
                 Text("\(pod.readyCount)/\(pod.containerCount)")
                     .monospacedDigit()
             }
             .width(PodColumn.readyWidth)
             .layoutColumn(PodColumn.ready)
-            TableColumn("Status") { pod in
+            TableColumn("Status", value: \.displayStatus) { pod in
                 status(pod)
             }
             .width(PodColumn.statusWidth)
             .layoutColumn(PodColumn.status)
-            TableColumn("Status") { pod in
+            TableColumn("Status", value: \.displayStatus) { pod in
                 status(pod)
             }
             .width(PodColumn.statusWideWidth)
             .layoutColumn(PodColumn.statusWide)
-            TableColumn("Restarts") { pod in
+            TableColumn("Restarts", sortUsing: KeyPathComparator(\.restarts, order: .reverse)) { pod in
                 restarts(pod)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -238,7 +243,7 @@ private struct PodTable: View {
             .layoutColumn(PodColumn.restarts)
             // Grouped here and below: the column builder takes at most ten columns.
             Group {
-                TableColumn("CPU") { (pod: PodInfo) in
+                TableColumn("CPU", sortUsing: KeyPathComparator(\PodInfo.cpuMillicores, order: .reverse)) { (pod: PodInfo) in
                     Text(pod.cpuText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -246,7 +251,7 @@ private struct PodTable: View {
                 }
                 .width(PodColumn.cpuWidth)
                 .layoutColumn(PodColumn.cpu)
-                TableColumn("Memory") { (pod: PodInfo) in
+                TableColumn("Memory", sortUsing: KeyPathComparator(\PodInfo.memUsedBytes, order: .reverse)) { (pod: PodInfo) in
                     Text(pod.memoryText)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -255,14 +260,14 @@ private struct PodTable: View {
                 .width(PodColumn.memoryWidth)
                 .layoutColumn(PodColumn.memory)
             }
-            TableColumn("Age") { pod in
+            TableColumn("Age", sortUsing: KeyPathComparator(\.ageSortKey)) { pod in
                 Text(pod.age() ?? MetricText.missing)
                     .monospacedDigit()
                     .foregroundStyle(Aero.text.secondary)
             }
             .width(PodColumn.ageWidth)
             .layoutColumn(PodColumn.age)
-            TableColumn("Node") { pod in
+            TableColumn("Node", sortUsing: KeyPathComparator(\.nodeName)) { pod in
                 Text(pod.nodeName ?? MetricText.missing)
                     .lineLimit(1)
                     .truncationMode(.middle)

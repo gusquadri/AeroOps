@@ -61,6 +61,10 @@ final class HostContainersModel {
     /// Kubernetes: `nil` means all namespaces.
     var namespace: String?
     var podSearch = ""
+    /// The containers table's sort, from its column headers; empty keeps Docker's order.
+    var containerSortOrder: [KeyPathComparator<ContainerInfo>] = []
+    /// The pods table's sort, from its column headers; empty keeps kubectl's order.
+    var podSortOrder: [KeyPathComparator<PodInfo>] = []
     var selectedContainerID: ContainerInfo.ID?
     var selectedPodID: PodInfo.ID? {
         didSet {
@@ -168,6 +172,7 @@ final class HostContainersModel {
                     || container.status.localizedStandardContains(query)
                     || (container.ports ?? "").localizedStandardContains(query))
         }
+        .sorted(using: containerSortOrder)
     }
 
     var namespaces: [String] {
@@ -184,6 +189,7 @@ final class HostContainersModel {
                     || pod.displayStatus.localizedStandardContains(query)
                     || (pod.nodeName ?? "").localizedStandardContains(query))
         }
+        .sorted(using: podSortOrder)
     }
 
     var selectedPod: PodInfo? {
