@@ -1,3 +1,5 @@
+import CoreVideo
+import IOSurface
 import SwiftUI
 
 /// The window background, all drawn once in a single `Canvas`:
@@ -21,6 +23,12 @@ import SwiftUI
 /// is changing (a live window resize), the last bitmap is stretched to fit, and the sky is
 /// painted again, off the main thread, once the size holds. Until the first bitmap is ready,
 /// and for a moment after the appearance changes, the canvas is drawn directly.
+///
+/// The bitmap is an `IOSurface`, shown as the contents of a plain layer (``SkySurface``). A
+/// full-window bitmap is some 30 MB at 2x. Shown through a SwiftUI `Image`, it cost four times
+/// that: the window server got a copy of each image, and SwiftUI's hit-testing kept the image
+/// before the last one alive, copy and all. The window server reads an IOSurface where it is,
+/// and the layer holds only the current one.
 ///
 /// ```swift
 /// RootView().background { SkyBackground() }
@@ -47,8 +55,7 @@ public struct SkyBackground: View {
         Color.clear
             .overlay {
                 if let painting, painting.request.painter == painter {
-                    Image(decorative: painting.image, scale: painting.request.scale)
-                        .resizable()
+                    SkySurfaceView(surface: painting.surface)
                 } else {
                     Canvas(opaque: true) { context, size in
                         painter.paint(in: &context, size: size)
@@ -59,8 +66,8 @@ public struct SkyBackground: View {
             .task(id: request) {
                 guard painting?.request != request, request.size.width > 0, request.size.height > 0 else { return }
                 try? await Task.sleep(for: Self.settleDelay)
-                guard !Task.isCancelled, let image = await request.paint(), !Task.isCancelled else { return }
-                painting = SkyPainting(request: request, image: image)
+                guard !Task.isCancelled, let surface = await request.paint(), !Task.isCancelled else { return }
+                painting = SkyPainting(request: request, surface: surface)
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -82,9 +89,9 @@ private struct SkyPainting {
         ///
         /// `ImageRenderer` only records the drawing and leaves rasterizing it to whoever first
         /// draws the image, which would be Core Animation, on the main thread. The recording is
-        /// drawn into a bitmap of its own in the background instead.
+        /// drawn into a surface of its own in the background instead.
         @MainActor
-        func paint() async -> CGImage? {
+        func paint() async -> IOSurface? {
             let painter = painter, size = size
             let renderer = ImageRenderer(
                 content: Canvas(opaque: true) { context, _ in
@@ -98,24 +105,80 @@ private struct SkyPainting {
             renderer.isOpaque = true
             guard let recording = renderer.cgImage else { return nil }
             return await Task.detached(priority: .userInitiated) {
-                Self.rasterize(recording)
+                SkySurface.rasterize(recording)
             }.value
-        }
-
-        private nonisolated static func rasterize(_ image: CGImage) -> CGImage? {
-            guard let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
-                  let context = CGContext(
-                      data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-                  )
-            else { return nil }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-            return context.makeImage()
         }
     }
 
     let request: Request
-    let image: CGImage
+    let surface: IOSurface
+}
+
+/// The sky's bitmap as an `IOSurface`, which a layer can show without the window server copying
+/// it.
+enum SkySurface {
+    /// Draws `image` into a new BGRA surface of its size, tagged with its colour space so Core
+    /// Animation matches its colours as it would the image's. The first row is the top, as in
+    /// the image.
+    nonisolated static func rasterize(_ image: CGImage) -> IOSurface? {
+        guard let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+              let surface = IOSurface(properties: [
+                  .width: image.width,
+                  .height: image.height,
+                  .bytesPerElement: 4,
+                  .pixelFormat: kCVPixelFormatType_32BGRA,
+              ])
+        else { return nil }
+        guard surface.lock(options: [], seed: nil) == KERN_SUCCESS else { return nil }
+        defer { surface.unlock(options: [], seed: nil) }
+        // Premultiplied rather than skipped alpha: the surface's alpha byte must read opaque.
+        guard let context = CGContext(
+            data: surface.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: surface.bytesPerRow, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        context.flush()
+        if let colorSpace = space.copyPropertyList() {
+            surface.setAttachment(colorSpace, forKey: kIOSurfaceColorSpace as String)
+        }
+        return surface
+    }
+}
+
+/// Shows a sky surface, stretched to the view's bounds.
+private struct SkySurfaceView: NSViewRepresentable {
+    let surface: IOSurface
+
+    func makeNSView(context: Context) -> SkySurfaceLayerView { SkySurfaceLayerView() }
+
+    func updateNSView(_ view: SkySurfaceLayerView, context: Context) {
+        view.show(surface)
+    }
+}
+
+/// A view whose layer shows one surface. AppKit never draws into the layer, so its contents stay
+/// the surface it was last given.
+final class SkySurfaceLayerView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+        layer?.contentsGravity = .resize
+        layer?.isOpaque = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { false }
+
+    /// Shows `surface`, letting go of the one before.
+    func show(_ surface: IOSurface) {
+        guard layer?.contents as? IOSurface !== surface else { return }
+        layer?.contents = surface
+    }
 }
 
 /// Draws the sky. Pure function of the canvas size and variant, so the drawing is deterministic.

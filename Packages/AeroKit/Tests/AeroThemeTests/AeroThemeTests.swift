@@ -1,3 +1,4 @@
+import IOSurface
 import SwiftUI
 import Testing
 @testable import AeroTheme
@@ -206,5 +207,33 @@ struct AeroThemeTests {
                 .environment(\.colorScheme, variant == .night ? .dark : .light))
             _ = renderer.cgImage
         }
+    }
+
+    @Test("sky surface keeps the image's size, rows, colours and opacity")
+    func skySurface() throws {
+        // Red over blue: the top half of the image is red.
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let drawing = try #require(CGContext(
+            data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        drawing.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1))
+        drawing.fill(CGRect(x: 0, y: 0, width: 4, height: 2))
+        drawing.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+        drawing.fill(CGRect(x: 0, y: 2, width: 4, height: 2))
+        let image = try #require(drawing.makeImage())
+
+        let surface = try #require(SkySurface.rasterize(image))
+        #expect(surface.width == 4 && surface.height == 4)
+        #expect(surface.attachment(forKey: kIOSurfaceColorSpace as String) != nil)
+        surface.lock(options: .readOnly, seed: nil)
+        defer { surface.unlock(options: .readOnly, seed: nil) }
+        // BGRA in memory.
+        func pixel(row: Int) -> [UInt8] {
+            let start = surface.baseAddress.advanced(by: row * surface.bytesPerRow).assumingMemoryBound(to: UInt8.self)
+            return Array(UnsafeBufferPointer(start: start, count: 4))
+        }
+        #expect(pixel(row: 0) == [0, 0, 255, 255])
+        #expect(pixel(row: 3) == [255, 0, 0, 255])
     }
 }
