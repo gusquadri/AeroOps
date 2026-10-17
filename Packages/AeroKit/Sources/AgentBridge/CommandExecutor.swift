@@ -160,6 +160,14 @@ public enum CommandActivity: Sendable, Hashable {
     case finished(id: UUID, CommandResult)
     case failed(id: UUID, message: String)
     case cancelled(id: UUID, byUser: Bool)
+
+    /// The command this event is about.
+    public var commandID: UUID {
+        switch self {
+        case .started(let command): command.id
+        case .output(let id, _), .finished(let id, _), .failed(let id, _), .cancelled(let id, _): id
+        }
+    }
 }
 
 /// Runs `run_command` calls through a ``RemoteCommandRunner``.
@@ -177,7 +185,10 @@ public actor CommandExecutor {
     private var tasks: [UUID: Task<RemoteCommandOutcome, any Error>] = [:]
     private var commands: [UUID: RunningCommand] = [:]
     private var cancelledByUser: Set<UUID> = []
-    private nonisolated let broadcaster = Broadcaster<CommandActivity>(bufferSize: 256)
+    /// Keeps every event: a dropped start or end leaves the app's view of a command wrong, and a
+    /// dropped piece of output leaves a silent gap. What a slow reader can pile up stays small,
+    /// since each command's output is capped per stream.
+    private nonisolated let broadcaster = Broadcaster<CommandActivity>(bufferSize: nil)
 
     /// - Parameter heartbeatSeconds: how often the remote watchdog checks that the client is still
     ///   there; tests shorten it.

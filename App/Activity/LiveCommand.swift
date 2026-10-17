@@ -20,10 +20,26 @@ struct LiveCommand: Identifiable, Hashable {
     struct Segment: Identifiable, Hashable {
         let id: Int
         let stream: CommandOutputChunk.Stream
-        var data: Data
+        private(set) var data: Data
+        /// Plain text: invalid UTF-8 replaced, terminal escapes stripped. Decoded when output
+        /// arrives, not on every render.
+        private(set) var text: String
 
-        /// Plain text: invalid UTF-8 replaced, terminal escapes stripped.
-        var text: String { LogText.stripANSI(String(decoding: data, as: UTF8.self)) }
+        init(id: Int, stream: CommandOutputChunk.Stream, data: Data) {
+            self.id = id
+            self.stream = stream
+            self.data = data
+            text = Self.decode(data)
+        }
+
+        mutating func append(_ more: Data) {
+            data.append(more)
+            text = Self.decode(data)
+        }
+
+        private static func decode(_ data: Data) -> String {
+            LogText.stripANSI(String(decoding: data, as: UTF8.self))
+        }
     }
 
     /// Output kept per command; later output is dropped and ``isTruncated`` set.
@@ -67,7 +83,7 @@ struct LiveCommand: Identifiable, Hashable {
         guard !data.isEmpty else { return }
         byteCount += data.count
         if let last = segments.indices.last, segments[last].stream == chunk.stream {
-            segments[last].data.append(data)
+            segments[last].append(data)
         } else {
             segments.append(Segment(id: segments.count, stream: chunk.stream, data: data))
         }

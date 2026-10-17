@@ -2,19 +2,20 @@ import Foundation
 import Synchronization
 
 /// Fans values out to any number of `AsyncStream` subscribers. Each subscriber keeps the newest
-/// `bufferSize` values it has not consumed yet.
+/// `bufferSize` values it has not consumed yet, or every one when `bufferSize` is `nil`.
 final class Broadcaster<Element: Sendable>: Sendable {
     private let subscribers = Mutex<[UInt64: AsyncStream<Element>.Continuation]>([:])
     private let nextID = Atomic<UInt64>(1)
-    private let bufferSize: Int
+    private let bufferSize: Int?
 
-    init(bufferSize: Int = 64) {
+    init(bufferSize: Int? = 64) {
         self.bufferSize = bufferSize
     }
 
     /// A new stream, starting with `initial` when given.
     func subscribe(initial: Element? = nil) -> AsyncStream<Element> {
-        let (stream, continuation) = AsyncStream.makeStream(of: Element.self, bufferingPolicy: .bufferingNewest(bufferSize))
+        let policy: AsyncStream<Element>.Continuation.BufferingPolicy = bufferSize.map { .bufferingNewest($0) } ?? .unbounded
+        let (stream, continuation) = AsyncStream.makeStream(of: Element.self, bufferingPolicy: policy)
         let id = nextID.add(1, ordering: .relaxed).oldValue
         if let initial { continuation.yield(initial) }
         subscribers.withLock { $0[id] = continuation }

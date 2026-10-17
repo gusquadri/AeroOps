@@ -129,4 +129,36 @@ struct CommandExecutorTests {
         #expect(events[1] == .output(id: id, CommandOutputChunk(stream: .stdout, data: Data("hi\n".utf8))))
         #expect(events[2] == .finished(id: id, result))
     }
+
+    @Test func activityKeepsEveryEventWhenTheReaderFallsBehind() async throws {
+        let executor = CommandExecutor(runner: ChattyRunner(chunks: 1000))
+        let activity = executor.activity()
+        let id = UUID()
+        // Nothing reads the feed until the command is over.
+        let result = try await executor.execute("seq 1000", on: host, timeoutSeconds: 5, id: id)
+        var events: [CommandActivity] = []
+        for await event in activity {
+            events.append(event)
+            if case .finished = event { break }
+        }
+        #expect(events.count == 1002)
+        guard case .started(let command)? = events.first else {
+            Issue.record("first event: \(String(describing: events.first))")
+            return
+        }
+        #expect(command.id == id)
+        #expect(events.dropFirst().dropLast().allSatisfy { $0 == .output(id: id, CommandOutputChunk(stream: .stdout, data: Data("x".utf8))) })
+        #expect(events.last == .finished(id: id, result))
+    }
+}
+
+/// Sends its output as `chunks` one-byte pieces, then exits 0.
+private struct ChattyRunner: RemoteCommandRunner {
+    let chunks: Int
+
+    func run(_ remoteCommand: String, on host: RemoteHost, timeout: Duration, outputLimit: Int,
+             output: @escaping @Sendable (CommandOutputChunk) -> Void) async throws -> RemoteCommandOutcome {
+        for _ in 0..<chunks { output(CommandOutputChunk(stream: .stdout, data: Data("x".utf8))) }
+        return RemoteCommandOutcome(exitCode: 0, stdout: Data(repeating: UInt8(ascii: "x"), count: chunks))
+    }
 }

@@ -57,6 +57,9 @@ final class BridgeService {
     static let eventLimit = 200
     /// Finished commands kept in the Activity tab (with their output) besides the running ones.
     static let finishedCommandsKept = 5
+    /// Command activity is applied at most this often, in one change to ``liveCommands``: live
+    /// output can arrive as hundreds of small reads a second.
+    static let activityFlushInterval = Duration.milliseconds(100)
 
     private(set) var status: Status = .stopped
     /// Connected clients, oldest first.
@@ -68,7 +71,8 @@ final class BridgeService {
 
     /// `false` keeps the bridge closed (demo and snapshot launches show sample state instead).
     @ObservationIgnored var isEnabled = true
-    /// Called after each command event is applied (self-test only).
+    /// Called with each command event once its batch is applied (self-test only). Consecutive
+    /// output may come merged into one event.
     @ObservationIgnored var didReceiveCommandActivity: ((CommandActivity) -> Void)?
 
     @ObservationIgnored private let ssh: SSHServices
@@ -77,6 +81,8 @@ final class BridgeService {
     @ObservationIgnored private(set) var bridge: Bridge?
     @ObservationIgnored private var executor: CommandExecutor?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
+    @ObservationIgnored private var pendingActivity = CommandActivityBuffer()
+    @ObservationIgnored private var activityFlush: Task<Void, Never>?
     @ObservationIgnored private var isShutDown = false
 
     init(ssh: SSHServices) {
@@ -133,6 +139,8 @@ final class BridgeService {
         isShutDown = true
         tasks.forEach { $0.cancel() }
         tasks = []
+        activityFlush?.cancel()
+        activityFlush = nil
         peers = []
         status = .stopped
         guard let bridge else { return nil }
@@ -194,30 +202,49 @@ final class BridgeService {
         }
     }
 
+    /// Buffers the event; the first one after a flush schedules the next.
     private func receive(_ activity: CommandActivity) {
-        switch activity {
-        case .started(let command):
-            liveCommands.insert(LiveCommand(command), at: 0)
-        case .output(let id, let chunk):
-            update(id) { $0.append(chunk) }
-        case .finished(let id, let result):
-            update(id) { $0.end(.finished(exitCode: result.exitCode, durationMs: result.durationMs)) }
-        case .failed(let id, let message):
-            update(id) { $0.end(.failed(message)) }
-        case .cancelled(let id, let byUser):
-            update(id) { $0.end(.cancelled(byUser: byUser)) }
+        pendingActivity.append(activity)
+        guard activityFlush == nil else { return }
+        activityFlush = Task { [weak self] in
+            try? await Task.sleep(for: Self.activityFlushInterval)
+            guard !Task.isCancelled else { return }
+            self?.flushActivity()
         }
-        let finished = liveCommands.indices.filter { !liveCommands[$0].isRunning }
-        if finished.count > Self.finishedCommandsKept {
-            let drop = Set(finished.dropFirst(Self.finishedCommandsKept).map { liveCommands[$0].id })
-            liveCommands.removeAll { drop.contains($0.id) }
-        }
-        didReceiveCommandActivity?(activity)
     }
 
-    private func update(_ id: LiveCommand.ID, _ change: (inout LiveCommand) -> Void) {
-        guard let index = liveCommands.firstIndex(where: { $0.id == id }) else { return }
-        change(&liveCommands[index])
+    /// Applies the buffered events to a copy of ``liveCommands`` and stores it once, only when
+    /// something changed (output past a command's cap changes nothing).
+    private func flushActivity() {
+        activityFlush = nil
+        let batch = pendingActivity.drain()
+        var commands = liveCommands
+        for activity in batch {
+            switch activity {
+            case .started(let command):
+                commands.insert(LiveCommand(command), at: 0)
+            case .output(let id, let chunk):
+                Self.update(id, in: &commands) { $0.append(chunk) }
+            case .finished(let id, let result):
+                Self.update(id, in: &commands) { $0.end(.finished(exitCode: result.exitCode, durationMs: result.durationMs)) }
+            case .failed(let id, let message):
+                Self.update(id, in: &commands) { $0.end(.failed(message)) }
+            case .cancelled(let id, let byUser):
+                Self.update(id, in: &commands) { $0.end(.cancelled(byUser: byUser)) }
+            }
+        }
+        let finished = commands.indices.filter { !commands[$0].isRunning }
+        if finished.count > Self.finishedCommandsKept {
+            let drop = Set(finished.dropFirst(Self.finishedCommandsKept).map { commands[$0].id })
+            commands.removeAll { drop.contains($0.id) }
+        }
+        if commands != liveCommands { liveCommands = commands }
+        if let didReceiveCommandActivity { batch.forEach(didReceiveCommandActivity) }
+    }
+
+    private static func update(_ id: LiveCommand.ID, in commands: inout [LiveCommand], _ change: (inout LiveCommand) -> Void) {
+        guard let index = commands.firstIndex(where: { $0.id == id }) else { return }
+        change(&commands[index])
     }
 
     /// Keeps the runner's agent environment and askpass route in step with ``SSHServices``.
