@@ -163,15 +163,19 @@ struct HostContainersView: View {
 
 /// Host name, what the probe found, last update, the section switcher and Refresh.
 private struct ContainersHeader: View {
+    @Environment(AppModel.self) private var model
     let host: RemoteHost
     @Bindable var containers: HostContainersModel
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            let state = model.displayState(for: host.id)
+            let blocked = model.hostKeyBlock(for: host.id) != nil
+            StatusBubble(tone: state.orbTone(blocked: blocked), logo: state.systemLogo, size: 44)
+                .help(state.title(blocked: blocked))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(host.name)
-                    .font(Aero.font(.title2, weight: .semibold))
-                    .foregroundStyle(Aero.text.primary)
+                hostMenu
                 HStack(spacing: 6) {
                     ForEach(capabilityTags, id: \.text) { tag in
                         // The tags keep their text; the updated label gives way first.
@@ -203,6 +207,54 @@ private struct ContainersHeader: View {
             .help("Probe the host again and reload containers and pods")
             .keyboardShortcut("r", modifiers: .command)
         }
+    }
+
+    /// The host's name as a pull-down of every host, each with its status bubble. Picking one
+    /// selects it, as the sidebar does. A list taller than the screen scrolls, as menus do.
+    private var hostMenu: some View {
+        Menu {
+            Picker("Host", selection: hostSelection) {
+                ForEach(model.hosts) { other in
+                    let state = model.displayState(for: other.id)
+                    Label {
+                        Text(other.name)
+                    } icon: {
+                        Image(nsImage: StatusBubbleImage.image(
+                            tone: state.orbTone(blocked: model.hostKeyBlock(for: other.id) != nil),
+                            logo: state.systemLogo
+                        ))
+                    }
+                    .tag(other.id)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 6) {
+                Text(host.name)
+                    .font(Aero.font(.title2, weight: .semibold))
+                    .foregroundStyle(Aero.text.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Aero.font(.callout, weight: .semibold))
+                    .foregroundStyle(Aero.text.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .help("Switch to another host")
+        .accessibilityLabel("Host")
+        .accessibilityValue(host.name)
+    }
+
+    private var hostSelection: Binding<RemoteHost.ID> {
+        Binding(
+            get: { host.id },
+            set: { model.selection = $0 }
+        )
     }
 
     private var sectionBinding: Binding<HostContainersModel.Section> {
@@ -257,6 +309,32 @@ private struct ContainersHeader: View {
             ))
         }
         return tags
+    }
+}
+
+/// Small status bubbles as images, for menu items, which show an image but not a view. Each tone
+/// and logo is rendered once.
+@MainActor
+private enum StatusBubbleImage {
+    private struct Key: Hashable {
+        var tone: OrbTone
+        var logo: SystemLogo?
+    }
+
+    /// The bubble's diameter, a menu item's icon size.
+    private static let size: CGFloat = 16
+    private static var cache: [Key: NSImage] = [:]
+
+    static func image(tone: OrbTone, logo: SystemLogo?) -> NSImage {
+        let key = Key(tone: tone, logo: logo)
+        if let image = cache[key] { return image }
+        // A point of room for the bubble's shadow.
+        let side = size + 2
+        let renderer = ImageRenderer(content: StatusBubble(tone: tone, logo: logo, size: size).padding(1))
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        let image = renderer.cgImage.map { NSImage(cgImage: $0, size: NSSize(width: side, height: side)) } ?? NSImage()
+        cache[key] = image
+        return image
     }
 }
 
@@ -510,18 +588,25 @@ extension PodInfo {
     /// `true` when the metrics API reported this pod.
     var hasUsage: Bool { cpuMillicores != nil || memUsedBytes != nil }
 
-    /// Millicores as `kubectl top` prints them (`12m`), or an em dash.
+    /// CPU as `docker stats` shows it, where 100% is one core (`250m` is `25.0%`), or an em dash.
     var cpuText: String {
         guard let cpuMillicores else { return MetricText.missing }
-        return "\(cpuMillicores)m"
+        return Self.corePercent(cpuMillicores)
     }
 
-    /// `250m of 500m limit (50.0%)`, or that there is no limit.
+    /// `25.0% of one core, 50.0% of its 0.5-core limit`, or that there is no limit.
     var cpuHelp: String? {
         guard let cpuMillicores else { return nil }
-        guard let limit = cpuLimitMillicores, limit > 0 else { return "\(cpuMillicores)m, no CPU limit" }
-        let percent = (Double(cpuMillicores) / Double(limit)).formatted(.percent.precision(.fractionLength(1)))
-        return "\(cpuMillicores)m of \(limit)m limit (\(percent))"
+        let used = "\(Self.corePercent(cpuMillicores)) of one core"
+        guard let limit = cpuLimitMillicores, limit > 0 else { return "\(used), no CPU limit" }
+        let share = (Double(cpuMillicores) / Double(limit)).formatted(.percent.precision(.fractionLength(1)))
+        let cores = (Double(limit) / 1000).formatted(.number.precision(.fractionLength(0...3)))
+        return "\(used), \(share) of its \(cores)-core limit"
+    }
+
+    /// Millicores as a share of one core: `250` is `25.0%`.
+    private static func corePercent(_ millicores: Int) -> String {
+        (Double(millicores) / 1000).formatted(.percent.precision(.fractionLength(1)))
     }
 
     /// `12.3 MB` (working set), or an em dash.
