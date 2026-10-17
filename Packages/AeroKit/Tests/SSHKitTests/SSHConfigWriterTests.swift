@@ -39,7 +39,7 @@ struct SSHConfigWriterTests {
           UserKnownHostsFile /tmp/aero-golden/.aeroops/known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
-          ControlPath /tmp/aero-golden/.aeroops/cm/%C
+          ControlPath /tmp/aero-golden/.aeroops/cm/ed59b22e31123a3e
           ControlPersist 10m
           ServerAliveInterval 15
           ServerAliveCountMax 3
@@ -57,7 +57,7 @@ struct SSHConfigWriterTests {
           UserKnownHostsFile /tmp/aero-golden/.aeroops/known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
-          ControlPath /tmp/aero-golden/.aeroops/cm/%C
+          ControlPath /tmp/aero-golden/.aeroops/cm/6285eb46845dc62c
           ControlPersist 10m
           ServerAliveInterval 15
           ServerAliveCountMax 3
@@ -108,7 +108,40 @@ struct SSHConfigWriterTests {
         let text = try SSHConfigWriter(context: SSHContext(paths: paths)).render([Self.hostA]).text
         #expect(text.contains(#"  IdentityAgent "/tmp/aero q 100%%/.aeroops/agent.sock""#))
         #expect(text.contains(#"  IdentityFile "/tmp/aero q 100%%/.aeroops/pub/key-1.pub""#))
-        #expect(text.contains(#"  ControlPath "/tmp/aero q 100%%/.aeroops/cm/%C""#))
+        #expect(text.contains(#"  ControlPath "/tmp/aero q 100%%/.aeroops/cm/c15ec83577c06350""#))
+    }
+
+    @Test("a new endpoint, key or login method gets a new ControlPath; other edits keep the master")
+    func controlPathFollowsLogin() throws {
+        let writer = SSHConfigWriter(context: SSHContext(paths: Self.goldenPaths))
+        func controlPath(_ host: RemoteHost) throws -> String {
+            let line = try writer.render([host]).text.split(separator: "\n").first { $0.hasPrefix("  ControlPath ") }
+            return String(try #require(line))
+        }
+        let base = try controlPath(Self.hostA)
+        #expect(try controlPath(Self.hostA) == base)
+
+        var renamed = Self.hostA
+        renamed.name = "Web 1 (old)"
+        renamed.dockerSudo = true
+        #expect(try controlPath(renamed) == base)
+
+        var moved = Self.hostA
+        moved.port = 2222
+        var otherUser = Self.hostA
+        otherUser.user = "root"
+        var rekeyed = Self.hostA
+        rekeyed.keyId = "key-2"
+        var keyless = Self.hostA
+        keyless.keyId = nil
+        var password = Self.hostA
+        password.auth = .password
+        let changed = try [moved, otherUser, rekeyed, keyless, password].map(controlPath)
+        #expect(Set(changed + [base]).count == 6)
+
+        let system = SSHConfigWriter(context: SSHContext(paths: Self.goldenPaths, agent: .system))
+        let systemLine = try system.render([Self.hostA]).text.split(separator: "\n").first { $0.hasPrefix("  ControlPath ") }
+        #expect(systemLine.map(String.init) != base)
     }
 
     @Test("refuses paths ssh_config cannot represent")
@@ -124,14 +157,19 @@ struct SSHConfigWriterTests {
     }
 
     @Test("refuses a ControlPath that cannot fit in sun_path")
-    func socketPathTooLong() {
-        let long = "/tmp/" + String(repeating: "x", count: 60) + "/"
-        let paths = AeroPaths(
-            dotDirectory: URL(filePath: long, directoryHint: .isDirectory),
-            applicationSupport: URL(filePath: "/tmp/x/", directoryHint: .isDirectory)
-        )
+    func socketPathTooLong() throws {
+        func writer(_ length: Int) -> SSHConfigWriter {
+            let dot = "/tmp/" + String(repeating: "x", count: length) + "/"
+            let paths = AeroPaths(
+                dotDirectory: URL(filePath: dot, directoryHint: .isDirectory),
+                applicationSupport: URL(filePath: "/tmp/x/", directoryHint: .isDirectory)
+            )
+            return SSHConfigWriter(context: SSHContext(paths: paths))
+        }
+        // `/tmp/<61>/cm` + `/` + 16-hex name + `.` + 16 random is 103 bytes, the most sun_path holds.
+        #expect(try writer(61).render([Self.hostA]).included == [Self.hostA.id])
         #expect(throws: SSHConfigError.self) {
-            try SSHConfigWriter(context: SSHContext(paths: paths)).render([Self.hostA])
+            try writer(62).render([Self.hostA])
         }
     }
 

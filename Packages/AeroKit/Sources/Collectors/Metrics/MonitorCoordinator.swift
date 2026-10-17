@@ -67,9 +67,9 @@ public final class MonitorCoordinator {
     public func latestUpdate(for id: RemoteHost.ID) -> HostMonitorUpdate? { latest[id] }
 
     /// Matches the monitors to `hosts`: starts monitors for new hosts, stops those for removed
-    /// hosts, and replaces a monitor whose address, port, user or key changed (its previous
-    /// sample and status belong to the old endpoint). Other edits (name, tags) only update the
-    /// stored host.
+    /// hosts, and replaces a monitor whose address, port, user, key or login method changed (its
+    /// previous sample and status belong to the old endpoint). Other edits (name, tags) only
+    /// update the stored host.
     ///
     /// Call it after `SSHConfigWriter` has written the new hosts, so new monitors connect with
     /// the new settings.
@@ -139,6 +139,7 @@ public final class MonitorCoordinator {
 
     private static func needsRestart(_ old: RemoteHost, _ new: RemoteHost) -> Bool {
         old.address != new.address || old.port != new.port || old.user != new.user || old.keyId != new.keyId
+            || old.auth != new.auth
     }
 
     private func add(_ host: RemoteHost) {

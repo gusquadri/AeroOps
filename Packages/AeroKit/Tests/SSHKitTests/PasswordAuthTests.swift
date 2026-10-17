@@ -44,7 +44,7 @@ struct PasswordAuthTests {
           UserKnownHostsFile /tmp/aero-golden/.aeroops/known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
-          ControlPath /tmp/aero-golden/.aeroops/cm/%C
+          ControlPath /tmp/aero-golden/.aeroops/cm/37f6476c15b1883d
           ControlPersist 10m
           ServerAliveInterval 15
           ServerAliveCountMax 3

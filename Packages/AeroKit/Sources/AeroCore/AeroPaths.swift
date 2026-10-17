@@ -31,7 +31,7 @@ public struct AeroPaths: Sendable, Hashable {
     public var bridgeSocket: URL { dotDirectory.appending(path: "bridge.sock") }
     /// `~/.aeroops/askpass.sock`: hands password hosts' passwords to `aeroops-askpass`.
     public var askpassSocket: URL { dotDirectory.appending(path: "askpass.sock") }
-    /// `~/.aeroops/cm/`: ControlMaster sockets, named by `%C` hash.
+    /// `~/.aeroops/cm/`: ControlMaster sockets, named by a hash of each host's connection settings.
     public var controlMasterDirectory: URL { dotDirectory.appending(path: "cm", directoryHint: .isDirectory) }
     /// `~/.aeroops/ssh_config`: generated, one block per host.
     public var sshConfig: URL { dotDirectory.appending(path: "ssh_config") }

@@ -78,7 +78,7 @@ struct HostMonitorCoordinatorTests {
         try await runner.waitForCalls(3, for: b)
         #expect(runner.calls(for: b).map(\.host.port) == [22, 2222, 2222])
 
-        // User, address and key changes restart too.
+        // User, address, key and login method changes restart too.
         for change in [\RemoteHost.user, \RemoteHost.address] as [WritableKeyPath<RemoteHost, String>] {
             var changed = renamedA
             changed[keyPath: change] += "x"
@@ -91,6 +91,11 @@ struct HostMonitorCoordinatorTests {
         let beforeKey = try #require(coordinator.monitor(for: a.id))
         coordinator.setHosts([keyed, movedB, c])
         #expect(coordinator.monitor(for: a.id) !== beforeKey)
+        var password = keyed
+        password.auth = .password
+        let beforeAuth = try #require(coordinator.monitor(for: a.id))
+        coordinator.setHosts([password, movedB, c])
+        #expect(coordinator.monitor(for: a.id) !== beforeAuth)
 
         // Removing hosts stops their monitors.
         coordinator.setHosts([c])
