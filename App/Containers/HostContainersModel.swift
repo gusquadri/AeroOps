@@ -11,7 +11,8 @@ import Observation
 ///
 /// Errors become ``WorkloadIssue``s. A setup problem (docker group, sudo, kubeconfig) stops
 /// polling that section until Refresh or a host edit; an ssh login or host-key problem stops all
-/// polling until Refresh, so a failing login is never retried in a loop.
+/// polling until Refresh, so a failing login is never retried in a loop. A service that is down
+/// (Docker daemon, Kubernetes API server) clears the section's rows but keeps being polled.
 @MainActor
 @Observable
 final class HostContainersModel {

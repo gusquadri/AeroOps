@@ -15,7 +15,7 @@ struct DockerSection: View {
                     issue: issue, hostID: host.id, containers: containers, compact: issue.kind == .transient
                 )
             }
-            if containers.dockerIssue?.kind != .setup, containers.dockerIssue?.kind != .access {
+            if containers.dockerIssue.map({ $0.kind == .transient }) ?? true {
                 DockerTable(host: host, containers: containers)
             } else {
                 Spacer(minLength: 0)

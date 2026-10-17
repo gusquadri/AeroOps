@@ -15,7 +15,7 @@ struct PodsSection: View {
                     issue: issue, hostID: host.id, containers: containers, compact: issue.kind == .transient
                 )
             }
-            if containers.podsIssue?.kind != .setup, containers.podsIssue?.kind != .access {
+            if containers.podsIssue.map({ $0.kind == .transient }) ?? true {
                 PodTable(containers: containers)
             } else {
                 Spacer(minLength: 0)

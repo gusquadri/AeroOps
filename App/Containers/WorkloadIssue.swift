@@ -14,6 +14,10 @@ struct WorkloadIssue: Hashable, Sendable {
         /// ssh can't sign in or the host key isn't trusted: all polling stops until Refresh, so a
         /// failing login is never retried in a loop (sshd penalises repeated auth failures).
         case access
+        /// The service is installed but down (the Docker daemon, the Kubernetes API server): the
+        /// section's rows are cleared and polling keeps checking, so it recovers once the service
+        /// is back (after `systemctl restart docker`, a k3s restart, or a reboot).
+        case unavailable
         /// May go away by itself (timeout, unreachable, a failed command): polling continues.
         case transient
     }
@@ -33,16 +37,18 @@ struct WorkloadIssue: Hashable, Sendable {
         switch error {
         case let error as DockerError:
             let kind: Kind = switch error {
-            case .permissionDenied, .sudoRefused, .notInstalled, .daemonNotRunning: .setup
+            case .permissionDenied, .sudoRefused, .notInstalled: .setup
+            case .daemonNotRunning: .unavailable
             case .failed: .transient
             }
-            return WorkloadIssue(title: error.errorDescription ?? "Docker failed.", hint: error.hint, kind: kind)
+            return WorkloadIssue(title: error.errorDescription ?? "Docker failed.", hint: hint(error.hint, kind), kind: kind)
         case let error as KubectlError:
             let kind: Kind = switch error {
-            case .kubeconfigUnreadable, .sudoRefused, .notInstalled, .connectionRefused: .setup
+            case .kubeconfigUnreadable, .sudoRefused, .notInstalled: .setup
+            case .connectionRefused: .unavailable
             case .noPreviousContainer, .invalidOutput, .failed: .transient
             }
-            var issue = WorkloadIssue(title: error.errorDescription ?? "kubectl failed.", hint: error.hint, kind: kind)
+            var issue = WorkloadIssue(title: error.errorDescription ?? "kubectl failed.", hint: hint(error.hint, kind), kind: kind)
             if case .kubeconfigUnreadable = error, host?.kubectlPrefix == nil {
                 issue.suggestedPrefix = capabilities?.suggestedKubectlPrefix
             }
@@ -55,6 +61,12 @@ struct WorkloadIssue: Hashable, Sendable {
         default:
             return WorkloadIssue(title: error.localizedDescription, hint: nil, kind: .transient)
         }
+    }
+
+    /// The collector's hint, telling the user that AeroOps keeps checking a service that is down.
+    private static func hint(_ hint: String?, _ kind: Kind) -> String? {
+        guard kind == .unavailable else { return hint }
+        return [hint, "AeroOps keeps checking."].compactMap(\.self).joined(separator: " ")
     }
 
     private static func from(_ error: SSHError, host: RemoteHost?) -> WorkloadIssue? {
