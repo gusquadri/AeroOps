@@ -727,7 +727,6 @@ struct SkyPainter: Sendable, Equatable {
         Bubble(x: 0.86, y: 0.17, diameter: 0.04, opacity: 0.85),
         Bubble(x: 0.69, y: 0.37, diameter: 0.028, opacity: 0.7),
         Bubble(x: 0.95, y: 0.47, diameter: 0.03, opacity: 0.75),
-        Bubble(x: 0.766, y: 0.215, diameter: 0.05, opacity: 0.9),
         Bubble(x: 0.22, y: 0.58, diameter: 0.025, opacity: 0.6),
     ]
 
@@ -735,7 +734,6 @@ struct SkyPainter: Sendable, Equatable {
     private static let sparkles: [Bubble] = [
         Bubble(x: 0.27, y: 0.07, diameter: 0.07, opacity: 0.9),
         Bubble(x: 0.47, y: 0.21, diameter: 0.04, opacity: 0.7),
-        Bubble(x: 0.766, y: 0.215, diameter: 0.06, opacity: 1),
         Bubble(x: 0.085, y: 0.775, diameter: 0.045, opacity: 0.85),
         Bubble(x: 0.71, y: 0.855, diameter: 0.04, opacity: 0.75),
     ]
