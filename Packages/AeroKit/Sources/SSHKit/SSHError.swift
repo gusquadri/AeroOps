@@ -88,7 +88,7 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
     }
 
     /// Trims whitespace (including ssh's `\r\n` line ends) and caps the length.
-    static func trimmed(_ text: String) -> String {
+    package static func trimmed(_ text: String) -> String {
         let clean = text.replacing("\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count > messageLimit else { return clean }
         return String(clean.prefix(messageLimit)) + "…"

@@ -20,7 +20,7 @@ public struct SSHConfigLocations: Sendable, Hashable {
     }
 
     /// `~/.ssh/config` for the given home directory.
-    public static func user(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> SSHConfigLocations {
+    public static func user(home: URL = URL.homeDirectory) -> SSHConfigLocations {
         let home = home.standardizedFileURL.path(percentEncoded: false).trimmingTrailingSlashes()
         return SSHConfigLocations(configFile: home + "/.ssh/config", sshDirectory: home + "/.ssh", homeDirectory: home)
     }

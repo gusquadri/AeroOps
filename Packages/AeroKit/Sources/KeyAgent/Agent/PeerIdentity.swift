@@ -52,6 +52,9 @@ public struct PeerIdentity: Sendable, Hashable {
     }
 }
 
+// Peer inspection reads code signatures and process ancestry: macOS only (iOS has no ssh
+// processes to inspect).
+#if os(macOS)
 /// Reads a connected Unix socket's peer: credentials, audit token, code signature and ancestry.
 enum PeerInspector {
     /// The connected process's uid, or `nil` if the kernel does not say.
@@ -154,3 +157,4 @@ public enum ProcessAncestry {
         return chain
     }
 }
+#endif

@@ -1,29 +1,41 @@
 import AeroCore
 import AeroTheme
+import Collectors
 import SSHKit
 import SwiftUI
 
 /// Everything the last poll of one host returned: status and last error, system (distribution,
-/// kernel, CPUs, uptime, load), memory and swap, and every mounted filesystem. Shown in the
-/// dashboard's inspector for the selected host.
+/// kernel, CPUs, uptime, load), memory and swap, and every mounted filesystem. Shown in the Mac
+/// dashboard's inspector for the selected host, and as the iOS app's host screen.
 ///
 /// df's portable output (`df -Pk`) has no filesystem type, so mounts show their device instead.
 struct HostDetailView: View {
     /// Old numbers are dimmed less than on a card: the panel is for reading them.
     static let oldNumbersOpacity = 0.6
 
-    @Environment(AppModel.self) private var model
     let host: RemoteHost
     let state: HostDisplayState
     var keyBlock: HostKeyBlock?
+    /// Polls the host now.
+    var onRefresh: () -> Void = {}
+    /// The changed-key banner's Trust New Key and Fetch Current Key (see ``HostKeyChangedBanner``).
+    var onTrustNewKey: () async throws -> Void = {}
+    var onRecheckKey: () async throws -> Void = {}
+    /// Open a terminal or the file browser for the host (the iOS host screen; the Mac has them
+    /// on the card). `nil` hides the button.
+    var onOpenTerminal: (() -> Void)?
+    var onBrowseFiles: (() -> Void)?
 
     var body: some View {
         let metrics = state.metrics
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                if onOpenTerminal != nil || onBrowseFiles != nil {
+                    sessionButtons
+                }
                 if let keyBlock {
-                    HostKeyChangedBanner(host: host, block: keyBlock)
+                    HostKeyChangedBanner(host: host, block: keyBlock, onTrustNewKey: onTrustNewKey, onRecheck: onRecheckKey)
                 }
                 statusSection(metrics)
                 Group {
@@ -58,12 +70,33 @@ struct HostDetailView: View {
                     .textSelection(.enabled)
             }
             Spacer(minLength: 8)
-            Button("Refresh", systemImage: "arrow.clockwise") { model.refresh(host.id) }
+            Button("Refresh", systemImage: "arrow.clockwise", action: onRefresh)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.aquaSecondary)
                 .controlSize(.small)
-                .help("Poll \(host.name) now")
+                .disabled(!host.monitored)
+                .help(host.monitored ? "Poll \(host.name) now" : "Monitoring is off for \(host.name)")
         }
+    }
+
+    private var sessionButtons: some View {
+        HStack(spacing: 12) {
+            if let onOpenTerminal {
+                Button(action: onOpenTerminal) {
+                    Label("Terminal", systemImage: "terminal")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.aqua)
+            }
+            if let onBrowseFiles {
+                Button(action: onBrowseFiles) {
+                    Label("Files", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.aquaSecondary)
+            }
+        }
+        .disabled(keyBlock != nil)
     }
 
     // MARK: Sections
@@ -287,9 +320,9 @@ private struct UsageBar: View {
 }
 
 #Preview("Host detail") {
-    let model = AppModel.preview(withMetrics: true)
-    let host = model.hosts[0]
-    return HostDetailView(host: host, state: model.displayState(for: host.id))
-        .environment(model)
+    let host = SampleData.hosts[0]
+    let state = HostDisplayState(hostID: host.id)
+    state.apply(SampleData.liveUpdates(for: [host])[0])
+    return HostDetailView(host: host, state: state)
         .frame(width: 360, height: 800)
 }

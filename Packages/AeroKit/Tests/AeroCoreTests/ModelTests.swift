@@ -11,7 +11,7 @@ struct ModelTests {
         let host = RemoteHost(
             id: id, name: "web-01", address: "10.0.0.12", port: 2222, user: "deploy",
             keyId: "key-1", auth: .password, tags: ["prod", "eu"], kubectlPrefix: "sudo -n k3s kubectl",
-            dockerSudo: true, mcpTier: .readExec
+            dockerSudo: true, mcpTier: .readExec, monitored: false
         )
         let decoded = try JSONDecoder().decode(RemoteHost.self, from: JSONEncoder().encode(host))
         #expect(decoded == host)
@@ -32,6 +32,7 @@ struct ModelTests {
         #expect(host.kubectlPrefix == nil)
         #expect(host.dockerSudo == false)
         #expect(host.mcpTier == .read)
+        #expect(host.monitored)
     }
 
     @Test("RemoteHost requires id, name, address and user", arguments: ["id", "name", "address", "user"])

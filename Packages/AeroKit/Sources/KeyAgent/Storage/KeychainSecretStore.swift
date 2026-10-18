@@ -31,11 +31,31 @@ import Synchronization
 public struct KeychainSecretStore: SecretStore {
     /// Which keychain holds the items.
     public enum Backend: Sendable, Hashable {
+        #if os(macOS)
         /// The legacy file-based login keychain. Works for any consistently signed build.
         case legacyFileKeychain
-        /// SWITCH POINT: the data protection keychain. Requires the `keychain-access-groups`
-        /// entitlement and a provisioning profile; see the type documentation.
+        #endif
+        /// SWITCH POINT (macOS): the data protection keychain. Requires the `keychain-access-groups`
+        /// entitlement and a provisioning profile; see the type documentation. iOS has only this
+        /// keychain, and with `accessGroup: nil` it needs no entitlement.
         case dataProtection(accessGroup: String?)
+
+        /// What the app uses: the legacy keychain on macOS, the app's own access group on iOS.
+        public static var platformDefault: Backend {
+            #if os(macOS)
+            .legacyFileKeychain
+            #else
+            .dataProtection(accessGroup: nil)
+            #endif
+        }
+
+        var isLegacy: Bool {
+            #if os(macOS)
+            self == .legacyFileKeychain
+            #else
+            false
+            #endif
+        }
     }
 
     /// The Keychain service of AeroOps key items.
@@ -54,7 +74,7 @@ public struct KeychainSecretStore: SecretStore {
 
     public init(
         service: String = defaultService,
-        backend: Backend = .legacyFileKeychain,
+        backend: Backend = .platformDefault,
         allowsUserInteraction: Bool = false,
         label: String = "AeroOps SSH key",
         itemDescription: String = "AeroOps SSH private key"
@@ -131,7 +151,7 @@ public struct KeychainSecretStore: SecretStore {
             switch status {
             case errSecSuccess, errSecItemNotFound:
                 return
-            case errSecInvalidOwnerEdit where backend == .legacyFileKeychain:
+            case errSecInvalidOwnerEdit where backend.isLegacy:
                 try deleteByReference(id)
             default:
                 throw Self.error("delete", status)
@@ -148,10 +168,12 @@ public struct KeychainSecretStore: SecretStore {
             kSecAttrAccount: id.uuidString,
         ]
         switch backend {
+        #if os(macOS)
         case .legacyFileKeychain:
             if !allowsUserInteraction {
                 query[Self.legacy.authenticationUIKey] = Self.legacy.authenticationUIFail
             }
+        #endif
         case .dataProtection(let accessGroup):
             query[kSecUseDataProtectionKeychain] = true
             query[kSecAttrSynchronizable] = false
@@ -168,6 +190,7 @@ public struct KeychainSecretStore: SecretStore {
     /// The -25244 fallback: a build other than the item's creator may not `SecItemDelete` it,
     /// but `SecKeychainItemDelete` on the reference succeeds without a prompt.
     private func deleteByReference(_ id: UUID) throws(SecretStoreError) {
+        #if os(macOS)
         // A loop, in case an earlier bug left duplicates behind; bounded so it cannot spin.
         for _ in 0..<8 {
             var find = query(for: id)
@@ -181,6 +204,9 @@ public struct KeychainSecretStore: SecretStore {
             guard deleted == errSecSuccess else { throw Self.error("delete", deleted) }
         }
         throw .keychain(operation: "delete", status: errSecInvalidOwnerEdit, message: "item for \(id) keeps reappearing")
+        #else
+        throw Self.error("delete", errSecInvalidOwnerEdit)
+        #endif
     }
 
     /// Serialises this type's keychain operations, which also keeps the process-wide
@@ -189,11 +215,15 @@ public struct KeychainSecretStore: SecretStore {
 
     private func withInteractionPolicy<T>(_ body: () throws(SecretStoreError) -> T) throws(SecretStoreError) -> T {
         try Self.lock.withLock { _ throws(SecretStoreError) -> T in
-            guard backend == .legacyFileKeychain, !allowsUserInteraction else { return try body() }
+            #if os(macOS)
+            guard backend.isLegacy, !allowsUserInteraction else { return try body() }
             let previous = Self.legacy.userInteractionAllowed()
             if previous { Self.legacy.setUserInteractionAllowed(false) }
             defer { if previous { Self.legacy.setUserInteractionAllowed(true) } }
             return try body()
+            #else
+            return try body()
+            #endif
         }
     }
 
@@ -207,8 +237,12 @@ public struct KeychainSecretStore: SecretStore {
         }
     }
 
+    #if os(macOS)
     private static let legacy: any LegacyKeychainAPI = LegacyKeychain()
+    #endif
 }
+
+#if os(macOS)
 
 // MARK: Legacy keychain calls
 
@@ -247,3 +281,4 @@ private struct LegacyKeychain: LegacyKeychainAPI {
     @available(macOS, deprecated: 11.0)
     var authenticationUIFail: CFString { kSecUseAuthenticationUIFail }
 }
+#endif

@@ -553,25 +553,3 @@ extension SSHServices {
         }
     }
 }
-
-/// Well-formed but meaningless host keys for previews and demo snapshots.
-enum SampleHostKeys {
-    static func ed25519(seed: UInt8) -> HostKey {
-        make(type: "ssh-ed25519", body: [Data(repeating: seed, count: 32)])
-    }
-
-    static func ecdsa(seed: UInt8) -> HostKey {
-        make(type: "ecdsa-sha2-nistp256", body: [Data("nistp256".utf8), Data([0x04]) + Data(repeating: seed, count: 64)])
-    }
-
-    private static func make(type: String, body: [Data]) -> HostKey {
-        var blob = Data()
-        for field in [Data(type.utf8)] + body {
-            var length = UInt32(field.count).bigEndian
-            blob.append(Data(bytes: &length, count: 4))
-            blob.append(field)
-        }
-        // The blob is built above with a valid type prefix, so parsing cannot fail.
-        return try! HostKey(type: type, base64: blob.base64EncodedString())
-    }
-}

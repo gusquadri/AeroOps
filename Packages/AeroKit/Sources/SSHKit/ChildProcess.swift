@@ -54,15 +54,15 @@ struct CappedOutput: Sendable, Hashable {
 
 /// Splits a byte stream into lines (`\n`, with a trailing `\r` removed). Lines longer than
 /// `maxLength` bytes are emitted in pieces so one runaway line cannot grow memory without bound.
-struct LineSplitter {
-    let maxLength: Int
+package struct LineSplitter {
+    package let maxLength: Int
     private var pending: [UInt8] = []
 
-    init(maxLength: Int) {
+    package init(maxLength: Int) {
         self.maxLength = max(1, maxLength)
     }
 
-    mutating func append(_ bytes: UnsafeRawBufferPointer, emit: (String) -> Void) {
+    package mutating func append(_ bytes: UnsafeRawBufferPointer, emit: (String) -> Void) {
         for byte in bytes {
             if byte == UInt8(ascii: "\n") {
                 emitPending(emit)
@@ -74,7 +74,7 @@ struct LineSplitter {
     }
 
     /// Emits a final unterminated line, if any.
-    mutating func finish(emit: (String) -> Void) {
+    package mutating func finish(emit: (String) -> Void) {
         if !pending.isEmpty { emitPending(emit) }
     }
 

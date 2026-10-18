@@ -9,7 +9,7 @@ extension HostStatus {
         case .online: .healthy
         case .stale: .warning
         case .offline: .error
-        case .loading, .unsupported: .neutral
+        case .loading, .unsupported, .unmonitored: .neutral
         }
     }
 
@@ -21,6 +21,7 @@ extension HostStatus {
         case .stale: "Stale"
         case .offline: "Offline"
         case .unsupported: "Unsupported OS"
+        case .unmonitored: "Not monitored"
         }
     }
 
@@ -32,6 +33,7 @@ extension HostStatus {
         case .stale: "stale"
         case .offline: "offline"
         case .unsupported: "unsupported OS"
+        case .unmonitored: "not monitored"
         }
     }
 }

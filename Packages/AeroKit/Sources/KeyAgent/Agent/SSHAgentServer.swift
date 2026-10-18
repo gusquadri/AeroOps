@@ -4,6 +4,9 @@ import Dispatch
 import Foundation
 import Synchronization
 
+// The agent socket serves /usr/bin/ssh, which exists only on macOS.
+#if os(macOS)
+
 /// Why the agent socket could not be started.
 public enum AgentServerError: Error, Equatable, Sendable, LocalizedError {
     /// `sun_path` holds at most 103 bytes plus the terminating NUL.
@@ -207,3 +210,4 @@ final class AgentServerCore: Sendable {
         func take() -> T { value.withLock { $0! } }
     }
 }
+#endif

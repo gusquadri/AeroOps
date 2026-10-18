@@ -64,6 +64,17 @@ struct HostKeyTrustSheet: View {
     @State private var error: String?
 
     var body: some View {
+        #if os(macOS)
+        content
+            .frame(width: 520)
+            .background { Aero.sky.gradient.ignoresSafeArea() }
+        #else
+        ScrollView { content }
+            .background { Aero.sky.gradient.ignoresSafeArea() }
+        #endif
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "checkmark.shield")
@@ -111,8 +122,6 @@ struct HostKeyTrustSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520)
-        .background { Aero.sky.gradient.ignoresSafeArea() }
     }
 
     private func trust() {
@@ -136,10 +145,12 @@ struct HostKeyTrustSheet: View {
 /// instead, and the sidebar a tag. The host stays blocked until the user explicitly trusts the
 /// new key.
 struct HostKeyChangedBanner: View {
-    @Environment(AppModel.self) private var model
-
     let host: RemoteHost
     let block: HostKeyBlock
+    /// Pins `block.offered` in place of the trusted key; a thrown error is shown in the banner.
+    let onTrustNewKey: () async throws -> Void
+    /// Scans the server again for the key it presents now.
+    let onRecheck: () async throws -> Void
 
     @State private var isConfirming = false
     @State private var isWorking = false
@@ -219,11 +230,11 @@ struct HostKeyChangedBanner: View {
     }
 
     private func trustNewKey() {
-        perform { try await model.ssh.trust(block.offered, for: host, replacingPinned: true) }
+        perform(onTrustNewKey)
     }
 
     private func recheck() {
-        perform { _ = try await model.ssh.recheckHostKey(host) }
+        perform(onRecheck)
     }
 
     private func perform(_ work: @escaping @MainActor () async throws -> Void) {
@@ -262,9 +273,8 @@ private enum HostKeyPreviewData {
 }
 
 #Preview("Changed-key banner") {
-    HostKeyChangedBanner(host: HostKeyPreviewData.host, block: HostKeyPreviewData.block)
+    HostKeyChangedBanner(host: HostKeyPreviewData.host, block: HostKeyPreviewData.block, onTrustNewKey: {}, onRecheck: {})
         .padding(20)
         .frame(width: 540)
         .background { Aero.sky.gradient }
-        .environment(AppModel.preview())
 }

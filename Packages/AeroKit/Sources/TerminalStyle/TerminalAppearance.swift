@@ -45,7 +45,7 @@ public struct TerminalRGB: Sendable, Hashable, CustomStringConvertible {
 public struct TerminalAppearance: Sendable, Hashable {
     /// Font family name as Core Text knows it (e.g. `"SF Mono"`); `nil` uses libghostty's default.
     public var fontFamily: String?
-    /// Font size in points; also the size ``TerminalSession/resetFontSize()`` returns to.
+    /// Font size in points; also the size a font-size reset returns to.
     public var fontSize: Float
     public var foreground: TerminalRGB
     public var background: TerminalRGB
@@ -107,7 +107,7 @@ public struct TerminalAppearance: Sendable, Hashable {
     )
 
     /// Config lines for the colours (`key = value`), in libghostty config syntax.
-    var colorSettings: [(key: String, value: String)] {
+    package var colorSettings: [(key: String, value: String)] {
         var settings: [(String, String)] = [
             ("foreground", foreground.hexString),
             ("background", background.hexString),
@@ -122,7 +122,7 @@ public struct TerminalAppearance: Sendable, Hashable {
     }
 
     /// Font family with characters that would break a config line removed.
-    var sanitizedFontFamily: String? {
+    package var sanitizedFontFamily: String? {
         guard let fontFamily else { return nil }
         let cleaned = String(fontFamily.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F })
             .trimmingCharacters(in: .whitespaces)
@@ -130,7 +130,7 @@ public struct TerminalAppearance: Sendable, Hashable {
     }
 
     /// Font size clamped to a range libghostty renders sensibly.
-    var clampedFontSize: Float {
+    package var clampedFontSize: Float {
         guard fontSize.isFinite else { return 13 }
         return min(max(fontSize, 6), 72)
     }

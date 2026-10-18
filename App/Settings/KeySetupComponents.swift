@@ -25,13 +25,6 @@ struct NewKeyDraft: Hashable {
     }
 }
 
-extension KeyGenerationType {
-    /// The type offered first: Secure Enclave when this Mac has one, else Ed25519.
-    static var recommended: KeyGenerationType {
-        SecureEnclave.isAvailable ? .secureEnclaveP256 : .ed25519
-    }
-}
-
 /// The name, type and Touch ID rows for a new key, with their explanations. Place inside a `Form`.
 struct KeyGenerationFields: View {
     @Binding var draft: NewKeyDraft

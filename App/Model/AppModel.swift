@@ -187,6 +187,14 @@ final class AppModel {
         try? ssh.deletePassword(for: id)
     }
 
+    /// Turns monitoring of the host with `id` on or off (``RemoteHost/monitored``) and saves.
+    /// Its card, terminals, files and containers stay either way.
+    func setMonitoring(_ isOn: Bool, for id: RemoteHost.ID) throws(HostStoreError) {
+        guard var host = host(id: id), host.monitored != isOn else { return }
+        host.monitored = isOn
+        try updateHost(host)
+    }
+
     /// Re-reads `hosts.json` (e.g. after a load error was fixed on disk).
     func reloadHosts() {
         hostStore.reload()

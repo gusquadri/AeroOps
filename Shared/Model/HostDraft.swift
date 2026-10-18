@@ -30,8 +30,10 @@ struct HostDraft: Hashable, Sendable {
     var kubectlPrefix: String
     var dockerSudo: Bool
     var mcpTier: MCPTier
+    /// Poll the host's metrics for its card.
+    var monitored: Bool
 
-    /// A blank draft for a new host: port 22, default MCP tier.
+    /// A blank draft for a new host: port 22, default MCP tier, monitored.
     init(id: RemoteHost.ID = UUID()) {
         self.id = id
         name = ""
@@ -45,6 +47,7 @@ struct HostDraft: Hashable, Sendable {
         kubectlPrefix = ""
         dockerSudo = false
         mcpTier = .default
+        monitored = true
     }
 
     /// A draft that edits `host`.
@@ -61,6 +64,7 @@ struct HostDraft: Hashable, Sendable {
         kubectlPrefix = host.kubectlPrefix ?? ""
         dockerSudo = host.dockerSudo
         mcpTier = host.mcpTier
+        monitored = host.monitored
     }
 
     // MARK: - Limits
@@ -109,7 +113,8 @@ struct HostDraft: Hashable, Sendable {
             tags: parsedTags,
             kubectlPrefix: prefix.isEmpty ? nil : prefix,
             dockerSudo: dockerSudo,
-            mcpTier: mcpTier
+            mcpTier: mcpTier,
+            monitored: monitored
         )
     }
 

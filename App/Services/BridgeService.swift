@@ -324,6 +324,9 @@ final class BridgeDataSource {
         if model.ssh.configRejections[host.id] != nil {
             throw BridgeHandlerError.unavailable("AeroOps does not connect to this host: its connection settings were rejected. The user can fix them in Settings › Hosts.")
         }
+        if model.host(id: host.id)?.monitored == false {
+            throw BridgeHandlerError.unavailable("Monitoring is off for this host in AeroOps, so there are no metrics. The user can turn it back on from the host's card.")
+        }
         let state = model.displayState(for: host.id)
         if let error = Self.blocked(state) { throw error }
         if let metrics = state.metrics, Self.isFresh(metrics, state) { return metrics }

@@ -2,7 +2,8 @@ import AeroCore
 import Foundation
 import SSHKit
 
-/// Keeps one ``HostMonitor`` per host in the inventory and merges their updates into one stream.
+/// Keeps one ``HostMonitor`` per monitored host in the inventory and merges their updates into
+/// one stream.
 ///
 /// It is a `@MainActor` class rather than an actor because everything that drives it lives on
 /// the main actor and calls synchronously: the inventory observer (``setHosts(_:)``), sleep and
@@ -69,12 +70,14 @@ public final class MonitorCoordinator {
     /// Matches the monitors to `hosts`: starts monitors for new hosts, stops those for removed
     /// hosts, and replaces a monitor whose address, port, user, key or login method changed (its
     /// previous sample and status belong to the old endpoint). Other edits (name, tags) only
-    /// update the stored host.
+    /// update the stored host. Hosts with ``RemoteHost/monitored`` off count as absent: turning
+    /// monitoring off stops the monitor, turning it back on starts a new one.
     ///
     /// Call it after `SSHConfigWriter` has written the new hosts, so new monitors connect with
     /// the new settings.
     public func setHosts(_ hosts: [RemoteHost]) {
         guard !isShutDown else { return }
+        let hosts = hosts.filter(\.monitored)
         var wanted: [RemoteHost.ID: RemoteHost] = [:]
         for host in hosts { wanted[host.id] = host }
 

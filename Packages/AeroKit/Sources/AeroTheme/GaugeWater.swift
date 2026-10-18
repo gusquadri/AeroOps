@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import QuartzCore
 import SwiftUI
 
@@ -281,11 +283,16 @@ struct GaugeWaterView: View {
     var body: some View {
         let variant = AeroVariant(colorScheme)
         Group {
+            #if os(macOS)
             if animated && !accessibility.reduceMotion {
                 LiveWater(water: water, lineWidth: lineWidth, variant: variant)
             } else {
                 StillWater(water: water, variant: variant, lineWidth: lineWidth, diameter: diameter, scale: displayScale)
             }
+            #else
+            // iOS: still water for now (the live water's layers are an AppKit view).
+            StillWater(water: water, variant: variant, lineWidth: lineWidth, diameter: diameter, scale: displayScale)
+            #endif
         }
         .frame(width: diameter, height: diameter)
         .allowsHitTesting(false)
@@ -326,6 +333,7 @@ private struct StillWater: View {
     }
 }
 
+#if os(macOS)
 /// Live water: a Core Animation layer tree driven by the render server.
 private struct LiveWater: NSViewRepresentable {
     let water: GaugeWater
@@ -518,3 +526,4 @@ final class WaterView: NSView {
         }
     }
 }
+#endif

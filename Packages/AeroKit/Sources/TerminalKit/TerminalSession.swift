@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import TerminalStyle
 internal import GhosttyTerminal
 
 /// Terminal grid size in character cells.

@@ -114,6 +114,44 @@ struct HostMonitorCoordinatorTests {
         await coordinator.shutdown()
     }
 
+    @Test("Hosts with monitoring off get no monitor; turning it on and off starts and stops one")
+    func monitoringOff() async throws {
+        let a = MonitorTestHosts.make(name: "a", address: "10.0.0.1")
+        var b = MonitorTestHosts.make(name: "b", address: "10.0.0.2")
+        b.monitored = false
+        try respondOnline(a, b)
+        let (coordinator, updates) = makeCoordinator()
+
+        coordinator.setHosts([a, b])
+        #expect(coordinator.monitoredHostIDs == [a.id])
+        #expect(created.entries.map(\.host.id) == [a.id])
+        try await updates.waitForAny("a online") { $0.hostID == a.id && $0.status == .online }
+        coordinator.refresh(b.id)
+        coordinator.refreshAll()
+        try await settle()
+        #expect(runner.calls(for: b).isEmpty)
+
+        // On: a monitor starts and polls.
+        b.monitored = true
+        coordinator.setHosts([a, b])
+        #expect(coordinator.monitoredHostIDs == [a.id, b.id])
+        try await updates.waitForAny("b online") { $0.hostID == b.id && $0.status == .online }
+        let monitorB = try #require(coordinator.monitor(for: b.id))
+
+        // Off again: the monitor stops and polls no more.
+        b.monitored = false
+        coordinator.setHosts([a, b])
+        #expect(coordinator.monitoredHostIDs == [a.id])
+        #expect(coordinator.latestUpdate(for: b.id) == nil)
+        await monitorB.stop()
+        let callsB = runner.calls(for: b).count
+        clock.advance(to: .seconds(60))
+        try await runner.waitForCalls(2, for: a)
+        try await settle()
+        #expect(runner.calls(for: b).count == callsB)
+        await coordinator.shutdown()
+    }
+
     @Test("Activity changes reach every monitor, including ones added later")
     func activityFanOut() async throws {
         let a = MonitorTestHosts.make(name: "a", address: "10.0.0.1")

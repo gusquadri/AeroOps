@@ -5,6 +5,9 @@ import Foundation
 import Security
 import Synchronization
 
+// The askpass helper and code-signature checks exist only on macOS.
+#if os(macOS)
+
 /// Hands password hosts' passwords to `aeroops-askpass` over `~/.aeroops/askpass.sock`.
 ///
 /// One request per connection. Before answering, the server checks:
@@ -209,3 +212,4 @@ public struct SignedAskpassPeerValidator: AskpassPeerValidator {
         return PeerInspector.signingInfo(code).team
     }
 }
+#endif

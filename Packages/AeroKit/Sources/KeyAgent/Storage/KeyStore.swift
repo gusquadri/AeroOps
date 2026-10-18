@@ -280,6 +280,40 @@ public actor KeyStore {
         return (record, key)
     }
 
+    // MARK: Embedded SSH client
+
+    /// A stored key's private part for AeroKit's in-process SSH client (EmbeddedSSH, used on iOS
+    /// where there is no `/usr/bin/ssh`). `package`, so it never reaches the app: the key only
+    /// signs inside this process and is never written anywhere.
+    package enum ClientPrivateKey: Sendable {
+        case ed25519(Curve25519.Signing.PrivateKey)
+        case p256(P256.Signing.PrivateKey)
+        case secureEnclaveP256(SecureEnclave.P256.Signing.PrivateKey)
+    }
+
+    package enum ClientKeyError: Error, Equatable, Sendable, LocalizedError {
+        /// swift-nio-ssh has no RSA user keys.
+        case unsupportedAlgorithm(SSHKeyAlgorithm)
+
+        package var errorDescription: String? {
+            switch self {
+            case .unsupportedAlgorithm(let algorithm): "\(algorithm.displayName) keys are not supported on this device. Use an Ed25519 or ECDSA key."
+            }
+        }
+    }
+
+    /// The record and private key of `id`, for the embedded client's `publickey` userauth.
+    package func clientPrivateKey(id: UUID) throws -> (record: SSHKeyRecord, key: ClientPrivateKey) {
+        let blob = try record(id).publicKeyBlob
+        guard let (record, signingKey) = try signingKey(forPublicKeyBlob: Array(blob)) else { throw KeyStoreError.keyNotFound(id) }
+        switch signingKey {
+        case let key as Ed25519SigningKey: return (record, .ed25519(key.privateKey))
+        case let key as P256SigningKey: return (record, .p256(key.privateKey))
+        case let key as SecureEnclaveP256SigningKey: return (record, .secureEnclaveP256(key.privateKey))
+        default: throw ClientKeyError.unsupportedAlgorithm(record.algorithm)
+        }
+    }
+
     // MARK: Files
 
     private func record(_ id: UUID) throws -> SSHKeyRecord {

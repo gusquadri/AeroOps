@@ -10,8 +10,9 @@ public struct AeroPaths: Sendable, Hashable {
     /// `~/Library/Application Support/AeroOps/`: `hosts.json`.
     public var applicationSupport: URL
 
-    /// Paths rooted at `home` (the app is not sandboxed, so this is the real home directory).
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    /// Paths rooted at `home`: the real home directory on macOS (the app is not sandboxed), the
+    /// app container on iOS.
+    public init(home: URL = URL.homeDirectory) {
         dotDirectory = home.appending(path: ".aeroops", directoryHint: .isDirectory)
         applicationSupport = home.appending(path: "Library/Application Support/AeroOps", directoryHint: .isDirectory)
     }

@@ -16,8 +16,9 @@ import UniformTypeIdentifiers
 /// AeroOps.app/Contents/MacOS/AeroOps \
 ///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json, keys.json and the ~/.aeroops files
 ///                                                # (in <dir>/dot) live here; keys stay in memory
-///   -AeroOpsDemoHosts YES \                      # an empty data directory gets the six sample hosts
-///   -AeroOpsDemoStatuses YES \                   # every card state: online, stale, host-key issues, offline, unsupported
+///   -AeroOpsDemoHosts YES \                      # an empty data directory gets the seven sample hosts
+///   -AeroOpsDemoStatuses YES \                   # every card state: online, stale, host-key issues, offline, unsupported,
+///                                                # monitoring off
 ///   -AeroOpsDemoKeys YES \                       # sample keys, and a changed host key on the third host
 ///   -AeroOpsSnapshotDirectory build/snapshots \  # write PNGs of every tab, the editor and Settings, then quit
 ///   -AeroOpsSnapshotPrefix many \                # file name prefix for the PNGs (default "main")
@@ -315,7 +316,7 @@ private struct DebugSnapshotter {
     private func captureHostDetails() async {
         for (index, label) in [(0, "online"), (1, "stale"), (4, "offline")] where model.hosts.count > index {
             let host = model.hosts[index]
-            let view = HostDetailView(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
+            let view = HostDetailView(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id), model: model)
                 .frame(width: 380, height: 1000)
             await captureStandalone(view, title: host.name, name: "\(prefix)-detail-\(label)")
         }

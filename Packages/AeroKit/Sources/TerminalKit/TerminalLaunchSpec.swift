@@ -1,4 +1,5 @@
 import Foundation
+import TerminalStyle
 
 /// What a terminal tab runs: one local executable with its arguments.
 ///
@@ -33,7 +34,7 @@ public struct TerminalLaunchSpec: Sendable, Hashable {
 
     /// The terminal type when ``environment`` sets no `TERM`. Every host has it, but it lacks
     /// what `xterm-ghostty` describes (styled underlines, synchronized output, ...).
-    public static let defaultTerm = "xterm-256color"
+    public static let defaultTerm = GhosttyConfig.defaultTerm
 
     /// Ghostty's own terminal type, for hosts that have its terminfo entry.
     public static let ghosttyTerm = "xterm-ghostty"

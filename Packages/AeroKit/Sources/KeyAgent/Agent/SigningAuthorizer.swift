@@ -105,21 +105,36 @@ public actor PolicySigningAuthorizer: SigningAuthorizer {
     }
 
     public func authorize(_ request: SignRequest) async -> SigningDecision {
-        switch SigningPolicyEvaluator.requirement(for: request) {
+        await authorize(
+            SigningPolicyEvaluator.requirement(for: request), keyID: request.key.id,
+            reason: SigningPolicyEvaluator.reason(for: request))
+    }
+
+    /// For AeroKit's in-process SSH client (iOS, EmbeddedSSH): the app itself signs its own
+    /// userauth request, so no other process can be asking and the key's policy alone decides.
+    public func authorizeClientSignature(key: SSHKeyRecord, user: String, host: String) async -> SigningDecision {
+        let requirement: UserPresenceRequirement = switch key.policy {
+        case .always: .none
+        case .oncePerSession: .oncePerSession
+        case .everySignature: .everySignature
+        }
+        return await authorize(requirement, keyID: key.id, reason: "sign in with the key “\(key.name)” as \(user) on \(host)")
+    }
+
+    private func authorize(_ requirement: UserPresenceRequirement, keyID: UUID, reason: String) async -> SigningDecision {
+        switch requirement {
         case .none:
             return .allow
         case .everySignature:
-            let approved = await verifier.verifyUserPresence(reason: SigningPolicyEvaluator.reason(for: request))
+            let approved = await verifier.verifyUserPresence(reason: reason)
             return approved ? .allow : .deny(reason: "user presence not confirmed")
         case .oncePerSession:
-            let keyID = request.key.id
             if approvedKeys.contains(keyID) { return .allow }
             let pending: Task<Bool, Never>
             if let existing = pendingApprovals[keyID] {
                 pending = existing
             } else {
                 let verifier = verifier
-                let reason = SigningPolicyEvaluator.reason(for: request)
                 pending = Task { await verifier.verifyUserPresence(reason: reason) }
                 pendingApprovals[keyID] = pending
             }

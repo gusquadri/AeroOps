@@ -1,12 +1,13 @@
 import AeroCore
 import Foundation
 
-/// An SFTP version 3 session over the system ssh (`ssh -s <alias> sftp`), so it shares the
-/// host's ControlMaster connection, pinned host key and in-app agent like every other SSHKit call.
+/// An SFTP version 3 session over any ``RemoteByteChannel``. On macOS that is the system ssh
+/// (`ssh -s <alias> sftp`), so it shares the host's ControlMaster connection, pinned host key and
+/// in-app agent like every other SSHKit call; on iOS, EmbeddedSSH's `sftp` subsystem channel.
 ///
 /// Requests are pipelined: each carries an id, any number may be outstanding, and replies are
 /// matched by id. Cancelling the task waiting on a request abandons it (a late reply is
-/// dropped). When ssh exits, every outstanding and later request fails with
+/// dropped). When the channel ends, every outstanding and later request fails with
 /// ``SFTPError/disconnected(_:)``.
 ///
 /// ```swift
@@ -23,7 +24,7 @@ public actor SFTPClient {
     /// uses up to 255 KiB).
     static let maxChunkSize = 255 * 1024
 
-    private let channel: SSHChannel
+    private let channel: any RemoteByteChannel
     private var nextID: UInt32 = 0
     private var pending: [UInt32: CheckedContinuation<SFTPWire.Response, any Error>] = [:]
     private var versionWaiter: CheckedContinuation<[(String, Data)], any Error>?
@@ -37,7 +38,7 @@ public actor SFTPClient {
     /// Bytes sent per write.
     public private(set) var writeChunkSize = SFTPClient.defaultChunkSize
 
-    init(channel: SSHChannel) {
+    init(channel: any RemoteByteChannel) {
         self.channel = channel
     }
 
@@ -60,7 +61,12 @@ public actor SFTPClient {
         return try await connect(channel: channel, timeout: timeout)
     }
 
-    static func connect(channel: SSHChannel, timeout: Duration = .seconds(30)) async throws -> SFTPClient {
+    /// Completes the version handshake over `channel`, an `sftp` subsystem session (EmbeddedSSH's
+    /// on iOS).
+    ///
+    /// - Throws: ``SFTPError/disconnected(_:)`` when the channel ends or the handshake does not
+    ///   finish within `timeout`.
+    public static func connect(channel: any RemoteByteChannel, timeout: Duration = .seconds(30)) async throws -> SFTPClient {
         let client = SFTPClient(channel: channel)
         do {
             try await withTaskCancellationHandler {
@@ -76,7 +82,7 @@ public actor SFTPClient {
         return client
     }
 
-    /// Ends the session: ssh is terminated and outstanding requests fail.
+    /// Ends the session: the channel is closed and outstanding requests fail.
     public nonisolated func disconnect() {
         channel.close()
     }
@@ -337,8 +343,8 @@ public actor SFTPClient {
                         await self.deliver(packet)
                     }
                 }
-                let result = await channel.waitForExit()
-                await self?.fail(.disconnected(result.transportError ?? .connectionClosed))
+                let error = await channel.waitForEnd()
+                await self?.fail(.disconnected(error ?? .connectionClosed))
             } catch let error as SFTPError {
                 channel.close()
                 await self?.fail(error)

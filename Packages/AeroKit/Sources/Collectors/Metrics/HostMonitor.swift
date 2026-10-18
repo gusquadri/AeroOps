@@ -275,6 +275,8 @@ public actor HostMonitor {
             )
         } catch let error as SSHError {
             if error == .hostKeyChanged { return .hostKey(.changed(await recordChangedKey())) }
+            // An in-process client (EmbeddedSSH) throws what ssh reports as a transport error.
+            if error == .hostKeyUnknown { return .hostKey(.unknown) }
             return .failure(error)
         } catch {
             if error is CancellationError || Task.isCancelled { return .cancelled }

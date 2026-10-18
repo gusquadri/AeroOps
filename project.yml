@@ -2,12 +2,14 @@
 #   xcodegen generate
 #   xcodebuild -scheme AeroOps -destination 'platform=macOS' build
 #   xcodebuild -scheme AeroOps -destination 'platform=macOS' test   # runs the AeroKit package tests
+#   xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 name: AeroOps
 
 options:
   bundleIdPrefix: app.aeroops
   deploymentTarget:
     macOS: "26.0"
+    iOS: "26.0"
   createIntermediateGroups: true
   groupSortPosition: top
 
@@ -51,6 +53,8 @@ targets:
     platform: macOS
     sources:
       - path: App
+      # Views and models the iOS app uses too (no AppModel, no AppKit).
+      - path: Shared
     entitlements:
       path: App/AeroOps.entitlements
       properties:
@@ -105,6 +109,54 @@ targets:
         codeSign: true
         copy:
           destination: executables
+
+  # The iOS app: dashboard, hosts, keys, a terminal and a file browser per host. iOS cannot run
+  # /usr/bin/ssh, so it connects with AeroKit's in-process EmbeddedSSH client (EmbeddedTerminal
+  # puts libghostty on top for the terminal); everything else (hosts, host keys, keys, passwords,
+  # collectors, SFTP, theme) is the same AeroKit code the Mac app uses, plus Shared/.
+  AeroOpsMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: Mobile
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: AeroOps
+        PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.AeroOpsMobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: AeroOps
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSFaceIDUsageDescription: AeroOps uses Face ID before it signs in to a server with one of your SSH keys.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: AeroOps connects over SSH to the servers you add, including ones on your local network.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        ENABLE_PREVIEWS: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        # Simulator builds sign locally; device builds need a provisioning profile, which comes
+        # with the paid developer account (and iCloud Keychain sync with it).
+        CODE_SIGN_STYLE: Automatic
+        "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]": "-"
+    dependencies:
+      - package: AeroKit
+        product: AeroCore
+      - package: AeroKit
+        product: SSHKit
+      - package: AeroKit
+        product: KeyAgent
+      - package: AeroKit
+        product: AskpassProtocol
+      - package: AeroKit
+        product: Collectors
+      - package: AeroKit
+        product: EmbeddedSSH
+      - package: AeroKit
+        product: EmbeddedTerminal
+      - package: AeroKit
+        product: AeroTheme
 
   aeroops-mcp:
     type: tool
@@ -168,11 +220,25 @@ schemes:
         - package: AeroKit/SSHKitTests
         - package: AeroKit/KeyAgentTests
         - package: AeroKit/CollectorsTests
+        - package: AeroKit/EmbeddedSSHTests
         - package: AeroKit/TerminalKitTests
         - package: AeroKit/BridgeProtocolTests
         - package: AeroKit/AskpassProtocolTests
         - package: AeroKit/AgentBridgeTests
         - package: AeroKit/AeroThemeTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AeroOpsMobile:
+    build:
+      targets:
+        AeroOpsMobile: all
+    run:
+      config: Debug
     profile:
       config: Release
     analyze:

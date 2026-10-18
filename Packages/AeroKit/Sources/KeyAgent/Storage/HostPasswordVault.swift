@@ -5,7 +5,8 @@ import Synchronization
 /// Password hosts' login passwords: Keychain items (service ``keychainService``, account = host
 /// id), plus short-lived passwords for testing an unsaved host.
 ///
-/// Passwords leave the vault only through ``AskpassServer``, to a verified `aeroops-askpass`.
+/// Passwords leave the vault only through ``AskpassServer``, to a verified `aeroops-askpass`, and
+/// on iOS through ``loginPassword(for:token:)`` to EmbeddedSSH, which sends them to the host.
 /// The vault only answers for hosts set with ``setPasswordHosts(_:)``, so a host switched back to
 /// key authentication stops getting its old password even before the app deletes it.
 public final class HostPasswordVault: Sendable {
@@ -99,23 +100,30 @@ public final class HostPasswordVault: Sendable {
 
     /// The password for `request`, or why there is none (safe to show).
     func answer(_ request: AskpassRequest) -> Result<String, AskpassRefusal> {
-        if let token = request.token {
+        loginPassword(for: request.host, token: request.token)
+    }
+
+    /// The password for host `id` (the test password of `token`, if given), or why there is none.
+    /// `package`: besides ``AskpassServer``, only AeroKit's in-process SSH client (EmbeddedSSH,
+    /// used on iOS) reads passwords, and it sends them only to the host's verified server.
+    package func loginPassword(for id: UUID, token: String? = nil) -> Result<String, AskpassRefusal> {
+        if let token {
             let entry = state.withLock { state -> Temporary? in
                 guard let entry = state.temporary[token], entry.expires > .now else { return nil }
                 return entry
             }
-            guard let entry, entry.host == request.host else { return .failure(.unknownToken) }
+            guard let entry, entry.host == id else { return .failure(.unknownToken) }
             return .success(entry.password)
         }
-        guard state.withLock({ $0.passwordHosts.contains(request.host) }) else { return .failure(.notPasswordHost) }
+        guard state.withLock({ $0.passwordHosts.contains(id) }) else { return .failure(.notPasswordHost) }
         let data: Data?
         do {
-            data = try store.load(for: request.host)
+            data = try store.load(for: id)
         } catch {
             return .failure(.store(error.localizedDescription))
         }
         guard let data, let password = String(data: data, encoding: .utf8), Askpass.passwordProblem(password) == nil else {
-            state.withLock { _ = $0.saved.remove(request.host) }
+            state.withLock { _ = $0.saved.remove(id) }
             return .failure(.noPassword)
         }
         return .success(password)

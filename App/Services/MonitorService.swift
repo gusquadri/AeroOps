@@ -16,7 +16,8 @@ import Synchronization
 /// ``beginShutdown()`` runs when the app quits.
 ///
 /// - Polling goes through the app's ``SSHRunner`` (system ssh, `~/.aeroops/ssh_config`, the
-///   in-app agent) and ``HostKeyStore``. Hosts that `ssh_config` rejected are not polled.
+///   in-app agent) and ``HostKeyStore``. Hosts that `ssh_config` rejected are not polled, nor
+///   are hosts with monitoring off (``RemoteHost/monitored``), which show ``HostStatus/unmonitored``.
 /// - Activity: ``MonitorActivity/visible`` (5 s) while the main window is visible and the app
 ///   is active, ``MonitorActivity/background`` (30 s) otherwise, ``MonitorActivity/paused``
 ///   while the Mac or its displays sleep. Waking refreshes every host at once.
@@ -232,19 +233,24 @@ final class MonitorService {
     // MARK: - Hosts
 
     private func applyHosts() {
+        // Monitoring off shows on the card whether or not the service runs (demo launches too),
+        // without old numbers; turned back on, the host waits for its first poll.
+        for host in hosts {
+            guard let state = displayState(host.id) else { continue }
+            if !host.monitored {
+                state.reset(status: .unmonitored)
+            } else if state.status == .unmonitored {
+                state.reset()
+            }
+        }
         guard let coordinator else { return }
         let rejected = ssh.configRejections
-        for host in hosts {
+        for host in hosts where host.monitored {
             guard let reason = rejected[host.id] else { continue }
             displayState(host.id)?.reset(status: .offline, message: "Not monitored: \(reason)")
         }
-        let monitored = hosts.filter { rejected[$0.id] == nil }
-        let wasMonitored = coordinator.monitoredHostIDs
-        coordinator.setHosts(monitored)
-        // A host that leaves monitoring (now rejected) keeps no stale numbers.
-        for id in wasMonitored where !coordinator.monitoredHostIDs.contains(id) && rejected[id] == nil {
-            displayState(id)?.reset()
-        }
+        // The coordinator skips hosts with monitoring off.
+        coordinator.setHosts(hosts.filter { rejected[$0.id] == nil })
     }
 
     /// Keeps the runner's agent environment and askpass route in step with ``SSHServices``.

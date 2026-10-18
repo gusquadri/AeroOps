@@ -1,8 +1,24 @@
 import AeroCore
 import Foundation
 
+/// Fetches a server's host keys on first contact, before anything is trusted: ``HostKeyScanner``
+/// (`ssh-keyscan`) on macOS, EmbeddedSSH's scanner on iOS.
+public protocol HostKeyScanning: Sendable {
+    /// Every key the server offers, deduplicated. Throws ``HostKeyError/invalidHost(_:)`` for an
+    /// address or port that cannot be used, ``SSHError`` when nothing was received, and
+    /// `CancellationError`.
+    func scan(address: String, port: Int) async throws -> [HostKey]
+}
+
+extension HostKeyScanning {
+    /// Scans `host`. See ``scan(address:port:)``.
+    public func scan(_ host: RemoteHost) async throws -> [HostKey] {
+        try await scan(address: host.address, port: host.port)
+    }
+}
+
 /// Fetches a server's host keys with `ssh-keyscan` (first contact, before anything is trusted).
-public struct HostKeyScanner: Sendable {
+public struct HostKeyScanner: HostKeyScanning {
     /// `/usr/bin/ssh-keyscan` in the app.
     public var executable: URL
     /// Passed as `-T`: seconds per connection attempt.
@@ -31,11 +47,6 @@ public struct HostKeyScanner: Sendable {
     /// `ssh-keyscan -t ed25519,ecdsa,rsa -p <port> -T <timeout> -- <address>`.
     func arguments(address: String, port: Int) -> [String] {
         ["-t", Self.keyTypes, "-p", String(port), "-T", String(connectTimeoutSeconds), "--", address]
-    }
-
-    /// Scans `host`. See ``scan(address:port:)``.
-    public func scan(_ host: RemoteHost) async throws -> [HostKey] {
-        try await scan(address: host.address, port: host.port)
     }
 
     /// Returns every key the server offers (Ed25519, ECDSA, RSA), deduplicated, in output order.
@@ -130,10 +141,10 @@ public struct HostKeyBlock: Sendable, Hashable {
 /// calls ``unblock(_:)``. Blocks are in memory: after a relaunch ssh detects the change again.
 public actor HostKeyStore {
     public nonisolated let knownHostsFile: URL
-    public nonisolated let scanner: HostKeyScanner
+    public nonisolated let scanner: any HostKeyScanning
     private var blocks: [String: HostKeyBlock] = [:]
 
-    public init(knownHostsFile: URL, scanner: HostKeyScanner = HostKeyScanner()) {
+    public init(knownHostsFile: URL, scanner: any HostKeyScanning = HostKeyScanner()) {
         self.knownHostsFile = knownHostsFile
         self.scanner = scanner
     }

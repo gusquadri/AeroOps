@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// ```swift
 /// AeroEmptyState(systemImage: "terminal", title: "No terminal tabs", message: "…") {
-///     AddHostButton()
+///     Button("Add Host", systemImage: "plus") { … }.buttonStyle(.aqua)
 /// }
 /// ```
 struct AeroEmptyState<Actions: View>: View {
@@ -59,17 +59,6 @@ extension AeroEmptyState where Actions == EmptyView {
     }
 }
 
-/// The primary "Add Host" call to action. Opens the main window's host editor sheet.
-struct AddHostButton: View {
-    @Environment(AppModel.self) private var model
-    var title = "Add Host"
-
-    var body: some View {
-        Button(title, systemImage: "plus") { model.requestNewHost() }
-            .buttonStyle(.aqua)
-    }
-}
-
 /// A "Coming soon" capsule for placeholder screens.
 struct ComingSoonBadge: View {
     var text = "Coming soon"
@@ -85,9 +74,9 @@ struct ComingSoonBadge: View {
         title: "Your servers will appear here",
         message: "Add a host to see its CPU, memory, disk and uptime at a glance."
     ) {
-        AddHostButton()
+        Button("Add Host", systemImage: "plus") {}
+            .buttonStyle(.aqua)
     }
-    .environment(AppModel.preview(hosts: []))
     .background { SkyBackground() }
     .frame(width: 600, height: 420)
 }

@@ -1,6 +1,9 @@
 import CoreVideo
 import IOSurface
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// The window background, all drawn once in a single `Canvas`:
 ///
@@ -146,6 +149,7 @@ enum SkySurface {
     }
 }
 
+#if os(macOS)
 /// Shows a sky surface, stretched to the view's bounds.
 private struct SkySurfaceView: NSViewRepresentable {
     let surface: IOSurface
@@ -180,6 +184,38 @@ final class SkySurfaceLayerView: NSView {
         layer?.contents = surface
     }
 }
+#else
+/// Shows a sky surface, stretched to the view's bounds.
+private struct SkySurfaceView: UIViewRepresentable {
+    let surface: IOSurface
+
+    func makeUIView(context: Context) -> SkySurfaceLayerView { SkySurfaceLayerView() }
+
+    func updateUIView(_ view: SkySurfaceLayerView, context: Context) {
+        view.show(surface)
+    }
+}
+
+/// A view whose layer shows one surface. UIKit never draws into the layer, so its contents stay
+/// the surface it was last given.
+final class SkySurfaceLayerView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        layer.contentsGravity = .resize
+        layer.isOpaque = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Shows `surface`, letting go of the one before.
+    func show(_ surface: IOSurface) {
+        guard layer.contents as? IOSurface !== surface else { return }
+        layer.contents = surface
+    }
+}
+#endif
 
 /// Draws the sky. Pure function of the canvas size and variant, so the drawing is deterministic.
 struct SkyPainter: Sendable, Equatable {
@@ -786,7 +822,6 @@ struct SkyPainter: Sendable, Equatable {
     private static let starSparkles: [Bubble] = [
         Bubble(x: 0.07, y: 0.14, diameter: 0.045, opacity: 0.8),
         Bubble(x: 0.33, y: 0.24, diameter: 0.03, opacity: 0.7),
-        Bubble(x: 0.56, y: 0.08, diameter: 0.06, opacity: 0.95),
         Bubble(x: 0.86, y: 0.17, diameter: 0.04, opacity: 0.85),
         Bubble(x: 0.69, y: 0.37, diameter: 0.028, opacity: 0.7),
         Bubble(x: 0.95, y: 0.47, diameter: 0.03, opacity: 0.75),

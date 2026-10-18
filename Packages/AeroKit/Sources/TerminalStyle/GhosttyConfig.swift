@@ -1,23 +1,26 @@
 import Foundation
-internal import GhosttyTerminal
+package import GhosttyTerminal
 
-/// Builds the libghostty configuration for one session's surface.
+/// Builds the libghostty configuration for one surface, the same for both apps' terminals:
+/// TerminalKit's tabs on the Mac and EmbeddedTerminal's sessions on iOS.
 ///
 /// Surfaces use the host-managed backend: the program runs on TerminalKit's own
-/// pseudo-terminal (``TerminalProcess``), so the config carries no command. One
-/// `TerminalController` (one `ghostty_app_t`) per surface, freed with it when the session is
-/// suspended.
-enum GhosttyConfig {
+/// pseudo-terminal, or on the other end of an EmbeddedSSH channel, so the config carries no
+/// command. One `TerminalController` (one `ghostty_app_t`) per surface, freed with it.
+package enum GhosttyConfig {
+    /// The terminal type every host has (TerminalKit's `TerminalLaunchSpec.defaultTerm`).
+    package static let defaultTerm = "xterm-256color"
+
     /// Decoded kitty graphics images one surface may hold per screen. libghostty's default
     /// (320 MB) is a standalone terminal's; here several surfaces can be live at once.
-    static let imageStorageLimit = 64 << 20
+    package static let imageStorageLimit = 64 << 20
 
     /// `key = value` settings, in order, excluding colours (those go into the theme).
     ///
-    /// - Parameter term: The program's `TERM` (``TerminalLaunchSpec/term``), which the terminal
-    ///   also names in its own answers (XTGETTCAP).
-    static func settings(
-        appearance: TerminalAppearance, term: String = TerminalLaunchSpec.defaultTerm
+    /// - Parameter term: The program's `TERM`, which the terminal also names in its own answers
+    ///   (XTGETTCAP).
+    package static func settings(
+        appearance: TerminalAppearance, term: String = defaultTerm
     ) -> [(key: String, value: String)] {
         var settings: [(String, String)] = []
         if let family = appearance.sanitizedFontFamily {
@@ -40,7 +43,7 @@ enum GhosttyConfig {
             // the remote shell sends them itself (fish 4 does).
             ("shell-integration", "none"),
             // OSC 9/777 notifications, the bell, progress and command ends are read from the
-            // live output by TerminalKit (``TerminalOutputEvent``): a surface rebuilt from a
+            // live output by TerminalKit (`TerminalOutputEvent`): a surface rebuilt from a
             // replay would report them all again, and a suspended session has no surface.
             ("desktop-notifications", "false"),
             ("image-storage-limit", String(imageStorageLimit)),
@@ -66,8 +69,8 @@ enum GhosttyConfig {
     ///
     /// The macOS line-editing keys (Cmd+Left/Right, Cmd+Backspace, Option+Left/Right) are not
     /// bindings: a binding would send its bytes to every program, a full-screen one included.
-    /// The session's view sends them only to programs on the main screen (``LineEditingKeys``).
-    static let keybindings: [String] = [
+    /// TerminalKit's session view sends them only to programs on the main screen (`LineEditingKeys`).
+    package static let keybindings: [String] = [
         "super+c=copy_to_clipboard",
         "super+v=paste_from_clipboard",
         "super+a=select_all",
@@ -88,8 +91,8 @@ enum GhosttyConfig {
         [("keybind", "clear")] + keybindings.map { ("keybind", $0) }
     }
 
-    static func configuration(
-        appearance: TerminalAppearance, term: String = TerminalLaunchSpec.defaultTerm
+    package static func configuration(
+        appearance: TerminalAppearance, term: String = defaultTerm
     ) -> TerminalConfiguration {
         TerminalConfiguration { builder in
             for (key, value) in settings(appearance: appearance, term: term) {
@@ -99,7 +102,7 @@ enum GhosttyConfig {
     }
 
     /// Same colours for light and dark so the OS appearance never changes the terminal.
-    static func theme(appearance: TerminalAppearance) -> TerminalTheme {
+    package static func theme(appearance: TerminalAppearance) -> TerminalTheme {
         let colors = TerminalConfiguration { builder in
             for (key, value) in appearance.colorSettings {
                 builder.withCustom(key, value)
@@ -109,7 +112,7 @@ enum GhosttyConfig {
     }
 
     /// ghostty parses floats with `.` only, independent of the user's locale.
-    static func fontSizeLiteral(_ size: Float) -> String {
+    package static func fontSizeLiteral(_ size: Float) -> String {
         let rounded = (size * 100).rounded() / 100
         if rounded == rounded.rounded() {
             return String(Int(rounded))

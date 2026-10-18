@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 
 /// Frutiger Aero design tokens.
@@ -80,18 +84,30 @@ public enum Aero {
     /// system fonts, so `.system(style, design: .monospaced)` and `Font.monospaced()` come out
     /// proportional.
     public static func monospacedFont(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
+        #if os(macOS)
         Font(monospacedNSFont(style.appKit, weight: weight.appKit) as CTFont)
+        #else
+        Font(UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: style.appKit).pointSize, weight: weight.appKit) as CTFont)
+        #endif
     }
 
+    #if os(macOS)
     /// ``monospacedFont(_:weight:)`` for AppKit text views (the log viewer).
     public static func monospacedNSFont(_ style: NSFont.TextStyle, weight: NSFont.Weight = .regular) -> NSFont {
         .monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
     }
+    #endif
 }
 
+#if os(macOS)
+typealias PlatformFont = NSFont
+#else
+typealias PlatformFont = UIFont
+#endif
+
 extension Font.TextStyle {
-    /// The AppKit text style of the same size.
-    var appKit: NSFont.TextStyle {
+    /// The AppKit (UIKit on iOS) text style of the same size.
+    var appKit: PlatformFont.TextStyle {
         switch self {
         case .largeTitle: .largeTitle
         case .title: .title1
@@ -110,8 +126,8 @@ extension Font.TextStyle {
 }
 
 extension Font.Weight {
-    /// The AppKit font weight of the same name.
-    var appKit: NSFont.Weight {
+    /// The AppKit (UIKit on iOS) font weight of the same name.
+    var appKit: PlatformFont.Weight {
         switch self {
         case .ultraLight: .ultraLight
         case .thin: .thin
@@ -268,10 +284,17 @@ extension Color {
     /// scheme wherever it is drawn (views, `Canvas`, `Color.resolve(in:)`) and AppKit against the
     /// view's effective appearance (the log text view).
     init(day: Color, night: Color) {
+        #if os(macOS)
         let day = NSColor(day), night = NSColor(night)
         self.init(nsColor: NSColor(name: nil) { appearance in
             AeroVariant(appearance) == .night ? night : day
         })
+        #else
+        let day = UIColor(day), night = UIColor(night)
+        self.init(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? night : day
+        })
+        #endif
     }
 
     /// ``init(day:night:)`` from two 0xRRGGBB literals.
@@ -296,11 +319,13 @@ public enum AeroVariant: String, Sendable, Hashable, CaseIterable {
         self = colorScheme == .dark ? .night : .day
     }
 
+    #if os(macOS)
     /// The variant for an AppKit appearance (any dark or vibrant-dark appearance is night).
     public init(_ appearance: NSAppearance) {
         let match = appearance.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark])
         self = match == .darkAqua || match == .vibrantDark ? .night : .day
     }
+    #endif
 
     /// The theme's name, e.g. for Settings › Appearance.
     public var title: String {

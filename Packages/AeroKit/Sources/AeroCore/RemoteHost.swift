@@ -33,6 +33,9 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
     public var dockerSudo: Bool
     /// What AI agents may do on this host through MCP. Defaults to ``MCPTier/read``.
     public var mcpTier: MCPTier
+    /// Poll the host's metrics for its card. `false` keeps the host for terminals, files and
+    /// containers without polling it. Defaults to `true`.
+    public var monitored: Bool
 
     /// The default SSH port.
     public static let defaultPort = 22
@@ -49,7 +52,8 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         tags: [String] = [],
         kubectlPrefix: String? = nil,
         dockerSudo: Bool = false,
-        mcpTier: MCPTier = .default
+        mcpTier: MCPTier = .default,
+        monitored: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -62,10 +66,11 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         self.kubectlPrefix = kubectlPrefix
         self.dockerSudo = dockerSudo
         self.mcpTier = mcpTier
+        self.monitored = monitored
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, port, user, keyId, auth, tags, kubectlPrefix, dockerSudo, mcpTier
+        case id, name, address, port, user, keyId, auth, tags, kubectlPrefix, dockerSudo, mcpTier, monitored
     }
 
     /// Tolerant decoding: required `id`, `name`, `address`, `user`; everything else defaulted.
@@ -82,6 +87,7 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
         kubectlPrefix = try c.decodeIfPresent(String.self, forKey: .kubectlPrefix)
         dockerSudo = try c.decodeIfPresent(Bool.self, forKey: .dockerSudo) ?? false
         mcpTier = try c.decodeIfPresent(MCPTier.self, forKey: .mcpTier) ?? .default
+        monitored = try c.decodeIfPresent(Bool.self, forKey: .monitored) ?? true
     }
 }
 

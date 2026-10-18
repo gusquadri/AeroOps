@@ -1,5 +1,7 @@
 import Foundation
 import Observation
+// The appearance types live in TerminalStyle, shared with iOS; callers keep getting them here.
+@_exported import TerminalStyle
 
 /// The open terminal tabs, in tab order.
 ///

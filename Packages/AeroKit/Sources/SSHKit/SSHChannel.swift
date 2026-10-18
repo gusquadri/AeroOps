@@ -2,13 +2,35 @@ import AeroCore
 import Foundation
 import Synchronization
 
+/// A long-lived two-way byte stream to a program on a host, such as the `sftp` subsystem: what
+/// ``SFTPClient`` runs over. On macOS it is an ``SSHChannel`` (the system ssh); the iOS app gets
+/// one from EmbeddedSSH.
+public protocol RemoteByteChannel: Sendable {
+    /// Everything the remote side wrote, in order. Finishes when the session ends.
+    var incoming: AsyncStream<Data> { get }
+
+    /// Queues `data` for the remote side. Dropped once the channel was closed.
+    func send(_ data: Data)
+
+    /// Closes the remote side's stdin once everything queued was sent; the remote program sees
+    /// EOF and normally exits.
+    func closeInput()
+
+    /// Ends the session now.
+    func close()
+
+    /// Waits until the session ended and returns why the connection failed, or `nil` when the
+    /// remote program ended by itself.
+    func waitForEnd() async -> SSHError?
+}
+
 /// A long-lived ssh session whose stdin and stdout carry a binary protocol, such as the `sftp`
 /// subsystem. Opened with ``SSHRunner/openSubsystem(_:on:)``.
 ///
 /// Bytes from the remote side arrive on ``incoming`` in order; ``send(_:)`` queues bytes for
 /// the remote side. The stream finishes when ssh exits, after which ``waitForExit()`` returns
 /// how it ended (``SSHResult/transportError`` says why the connection failed).
-public final class SSHChannel: Sendable {
+public final class SSHChannel: RemoteByteChannel {
     /// Everything the remote side wrote, in order. Unbounded: the consumer is expected to keep up.
     public let incoming: AsyncStream<Data>
 
@@ -58,6 +80,10 @@ public final class SSHChannel: Sendable {
     /// Waits until ssh exited and returns how it ended.
     public func waitForExit() async -> SSHResult {
         await exit.wait()
+    }
+
+    public func waitForEnd() async -> SSHError? {
+        await waitForExit().transportError
     }
 }
 
@@ -148,7 +174,7 @@ extension SSHRunner {
     }
 
     /// Letters, digits, `.`, `_`, `-` and `@` (as in `sftp` or `name@example.com`); not starting with `-`.
-    static func isValidSubsystem(_ name: String) -> Bool {
+    public static func isValidSubsystem(_ name: String) -> Bool {
         guard let first = name.utf8.first, first != UInt8(ascii: "-") else { return false }
         return name.utf8.allSatisfy { byte in
             switch byte {

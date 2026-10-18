@@ -84,7 +84,7 @@ struct HostEditorForm: View {
             Form {
                 if let keyBlock {
                     Section {
-                        HostKeyChangedBanner(host: keyHost, block: keyBlock)
+                        HostKeyChangedBanner(host: keyHost, block: keyBlock, ssh: model.ssh)
                     }
                 }
                 Section("Connection") {
@@ -116,6 +116,12 @@ struct HostEditorForm: View {
                     }
                     if validation.message(for: .tags) == nil, !draft.parsedTags.isEmpty {
                         TagRow(tags: draft.parsedTags, limit: 8)
+                    }
+                }
+                Section("Monitoring") {
+                    Toggle(isOn: $draft.monitored) {
+                        Text("Monitor this host")
+                        Text("Polls CPU, memory, disk and uptime over SSH every few seconds for the host’s card. Off, the card stays without metrics; terminals, files and containers still work.")
                     }
                 }
                 Section("Containers") {
@@ -397,23 +403,6 @@ struct HostEditorForm: View {
         testTask?.cancel()
         testTask = nil
         test = .idle
-    }
-}
-
-/// An inline validation or error message: coral warning icon and readable text.
-struct ValidationMessage: View {
-    let text: String
-
-    var body: some View {
-        Label {
-            Text(text)
-                .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Aero.coral)
-        }
-        .font(Aero.font(.caption))
-        .foregroundStyle(Aero.text.secondary)
     }
 }
 

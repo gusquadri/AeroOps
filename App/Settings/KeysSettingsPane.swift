@@ -432,46 +432,6 @@ private struct GenerateKeySheet: View {
     }
 }
 
-// MARK: - Labels
-
-extension SigningPolicy {
-    var title: String {
-        switch self {
-        case .always: "Never ask"
-        case .oncePerSession: "Once per session"
-        case .everySignature: "Every connection"
-        }
-    }
-
-    var explanation: String {
-        switch self {
-        case .always: "Signs without Touch ID when ssh started by AeroOps asks. Any other program always needs Touch ID."
-        case .oncePerSession: "Touch ID the first time the key signs, then not again until the Mac sleeps, locks or AeroOps quits."
-        case .everySignature: "Touch ID for every new SSH connection."
-        }
-    }
-}
-
-extension KeyGenerationType {
-    var title: String {
-        switch self {
-        case .ed25519: "Ed25519"
-        case .secureEnclaveP256: "Secure Enclave (ECDSA P-256)"
-        }
-    }
-
-    var explanation: String {
-        switch self {
-        case .ed25519:
-            "Stored in your Keychain. Works with every OpenSSH server from 6.5 on."
-        case .secureEnclaveP256:
-            SecureEnclave.isAvailable
-                ? "Created inside this Mac’s Secure Enclave and can never leave it. Back it up by adding a second key to your servers."
-                : "This Mac has no Secure Enclave."
-        }
-    }
-}
-
 // MARK: - Previews
 
 /// The Keys pane with sample keys (generated in memory).

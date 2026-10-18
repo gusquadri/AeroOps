@@ -140,7 +140,7 @@ public struct HostMonitorUpdate: Sendable, Hashable {
             return "Unsupported OS: the host has no /proc/stat."
         case .stale, .offline:
             return lastError.map { $0.errorDescription ?? String(describing: $0) }
-        case .loading, .online:
+        case .loading, .online, .unmonitored:
             return nil
         }
     }

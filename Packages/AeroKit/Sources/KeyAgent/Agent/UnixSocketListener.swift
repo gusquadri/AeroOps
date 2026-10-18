@@ -3,6 +3,9 @@ import Dispatch
 import Foundation
 import Synchronization
 
+// Serves only the macOS agent and askpass sockets.
+#if os(macOS)
+
 /// A private Unix socket that serves each connection on its own thread. Shared by the agent
 /// (`agent.sock`) and the askpass server (`askpass.sock`).
 ///
@@ -191,3 +194,4 @@ final class UnixSocketListener: Sendable {
         }
     }
 }
+#endif

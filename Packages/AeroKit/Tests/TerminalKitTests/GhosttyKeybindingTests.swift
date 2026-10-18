@@ -1,5 +1,6 @@
 import Testing
 @testable import TerminalKit
+import TerminalStyle
 
 @Suite("Ghostty key bindings")
 struct GhosttyKeybindingTests {

@@ -712,59 +712,6 @@ struct FileIssueCard: View {
     }
 }
 
-// MARK: - Formatting
-
-extension FileItem {
-    var symbol: String {
-        switch kind {
-        case .folder: "folder.fill"
-        case .file: "doc"
-        case .symlink: "arrow.up.right.square"
-        case .other: "questionmark.square.dashed"
-        }
-    }
-
-    var sizeText: String {
-        size.map { $0.formatted(.byteCount(style: .file)) } ?? MetricText.missing
-    }
-
-    /// Finder-style: today's items by time, older ones by date (the full date is in the tooltip).
-    var modifiedText: String {
-        guard let modified else { return MetricText.missing }
-        if Calendar.current.isDateInToday(modified) {
-            return "Today, \(modified.formatted(date: .omitted, time: .shortened))"
-        }
-        return modified.formatted(date: .abbreviated, time: .omitted)
-    }
-
-    /// `ls -l` style, e.g. `drwxr-xr-x`, with set-id and sticky bits.
-    var permissionsText: String {
-        guard let mode else { return MetricText.missing }
-        let type: Character = switch kind {
-        case .folder: "d"
-        case .symlink: "l"
-        case .file: "-"
-        case .other: "?"
-        }
-        var text = String(type)
-        let triples: [(shift: UInt32, special: UInt32, set: Character, unset: Character)] = [
-            (6, 0o4000, "s", "S"), (3, 0o2000, "s", "S"), (0, 0o1000, "t", "T"),
-        ]
-        for triple in triples {
-            let bits = mode >> triple.shift & 0o7
-            text.append(bits & 0o4 != 0 ? "r" : "-")
-            text.append(bits & 0o2 != 0 ? "w" : "-")
-            let executable = bits & 0o1 != 0
-            if mode & triple.special != 0 {
-                text.append(executable ? triple.set : triple.unset)
-            } else {
-                text.append(executable ? "x" : "-")
-            }
-        }
-        return text
-    }
-}
-
 // MARK: - Transfers
 
 /// The transfer queue under the panes, newest first.
@@ -811,13 +758,7 @@ private struct TransferList: View {
     }
 
     private var summary: String {
-        let active = files.transfers.count { $0.phase.isActive }
-        let waiting = files.transfers.count { $0.phase == .waiting }
-        return switch (active, waiting) {
-        case (0, 0): "All done"
-        case (_, 0): "\(active) running"
-        default: "\(active) running, \(waiting) waiting"
-        }
+        files.queue.summary
     }
 }
 
@@ -827,9 +768,9 @@ private struct TransferRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: transfer.direction == .upload ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+            Image(systemName: transfer.symbol)
                 .font(Aero.font(.title3))
-                .foregroundStyle(tint)
+                .foregroundStyle(transfer.tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -854,9 +795,9 @@ private struct TransferRow: View {
                     .controlSize(.small)
                     .tint(Aero.aqua)
                 }
-                Text(status)
+                Text(transfer.statusText)
                     .font(Aero.font(.caption))
-                    .foregroundStyle(statusIsProblem ? Aero.coral : Aero.text.secondary)
+                    .foregroundStyle(transfer.hasProblem ? Aero.coral : Aero.text.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -869,68 +810,6 @@ private struct TransferRow: View {
         }
         .padding(.horizontal, 12)
         .frame(height: TransferList.rowHeight)
-        .help(details)
-    }
-
-    private var tint: Color {
-        switch transfer.phase {
-        case .waiting, .cancelled: Aero.neutral
-        case .preparing, .copying: Aero.aqua
-        case .finished: transfer.failures.isEmpty && transfer.skipped.isEmpty ? Aero.leaf : Aero.sun
-        case .failed: Aero.coral
-        }
-    }
-
-    private var statusIsProblem: Bool {
-        switch transfer.phase {
-        case .failed: true
-        case .finished: !transfer.failures.isEmpty
-        default: false
-        }
-    }
-
-    private var status: String {
-        switch transfer.phase {
-        case .waiting:
-            return "Waiting"
-        case .preparing:
-            return "Connecting and listing folders…"
-        case .copying:
-            var parts = ["\(Self.bytes(transfer.copiedBytes)) of \(Self.bytes(transfer.totalBytes))"]
-            if let speed = transfer.speed { parts.append("\(Self.bytes(Int64(speed)))/s") }
-            if let file = transfer.currentFile { parts.append((file as NSString).lastPathComponent) }
-            return parts.joined(separator: " · ")
-        case .finished:
-            var parts = [transfer.failures.isEmpty
-                ? "Copied \(Self.files(transfer.fileCount)), \(Self.bytes(transfer.totalBytes))"
-                : "\(transfer.failures.count) of \(Self.files(transfer.fileCount)) failed"]
-            if !transfer.skipped.isEmpty { parts.append("\(transfer.skipped.count) skipped") }
-            return parts.joined(separator: " · ")
-        case .failed(let message):
-            return message
-        case .cancelled:
-            return "Cancelled"
-        }
-    }
-
-    /// Every failure and skipped item, for the tooltip.
-    private var details: String {
-        var lines = transfer.failures.prefix(12).map { "\($0.path): \($0.message)" }
-        if transfer.failures.count > 12 { lines.append("…and \(transfer.failures.count - 12) more failures") }
-        if !transfer.skipped.isEmpty {
-            lines.append("Skipped:")
-            lines += transfer.skipped.prefix(12)
-            if transfer.skipped.count > 12 { lines.append("…and \(transfer.skipped.count - 12) more") }
-        }
-        if case .failed(let message) = transfer.phase { lines.insert(message, at: 0) }
-        return lines.isEmpty ? "\(transfer.title) to \(transfer.destination)" : lines.joined(separator: "\n")
-    }
-
-    private static func bytes(_ count: Int64) -> String {
-        count.formatted(.byteCount(style: .file))
-    }
-
-    private static func files(_ count: Int) -> String {
-        count == 1 ? "1 file" : "\(count) files"
+        .help(transfer.details)
     }
 }

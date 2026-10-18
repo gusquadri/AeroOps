@@ -2,7 +2,6 @@ import AeroCore
 import Foundation
 import Observation
 import SSHKit
-import Synchronization
 
 /// The Files tab's services: the local pane, one ``RemoteFileSession`` and remote pane per host,
 /// and the transfer queue.
@@ -40,7 +39,7 @@ final class FileService: HostInventoryObserver {
 
     let ssh: SSHServices
     let local = FilePaneModel(backend: LocalFileBackend())
-    private(set) var transfers: [FileTransfer] = []
+    let queue = FileTransferQueue(concurrentTransfers: FileService.concurrentTransfers)
     var trustRequest: TrustRequest?
     var conflict: Conflict?
 
@@ -90,14 +89,14 @@ final class FileService: HostInventoryObserver {
             } else {
                 pane.backend.session.disconnect()
                 remotes[id] = nil
-                for transfer in transfers where transfer.hostID == id { cancel(transfer) }
+                for transfer in queue.transfers where transfer.hostID == id { queue.cancel(transfer) }
             }
         }
     }
 
     /// Cancels every transfer and closes every SFTP session (at quit).
     func closeAll() {
-        for transfer in transfers { cancel(transfer) }
+        queue.cancelAll()
         for pane in remotes.values { pane.backend.session.disconnect() }
         trustRequest = nil
         conflict = nil
@@ -200,305 +199,46 @@ final class FileService: HostInventoryObserver {
 
     private func enqueueDownload(_ sources: [SFTPPath], from host: RemoteHost, into directory: String) {
         guard !sources.isEmpty else { return }
-        let session = remotePane(for: host).backend.session
+        let backend = remotePane(for: host).backend
         let transfer = FileTransfer(
             direction: .download, hostID: host.id,
-            title: Self.title(sources.map(\.name)), destination: (directory as NSString).abbreviatingWithTildeInPath
+            title: FileTransfer.title(for: sources.map(\.name)), destination: (directory as NSString).abbreviatingWithTildeInPath
         ) { transfer, progress in
-            let client = try await session.client(.transfer)
-            let plan = try await client.planDownload(sources, into: directory)
-            transfer.begin(totalBytes: plan.totalBytes, files: plan.files.count, skipped: plan.skipped.map { "\($0.path): \($0.reason)" })
-            transfer.failures = try await client.download(plan) { progress.record($0) }
+            try await backend.download(sources, into: directory, for: transfer, progress: progress)
         } completion: { [weak self] in
             guard let self, local.directory == directory else { return }
             local.refresh()
         }
-        add(transfer)
+        queue.add(transfer)
     }
 
     private func enqueueUpload(_ sources: [String], to host: RemoteHost, into directory: SFTPPath) {
         guard !sources.isEmpty else { return }
         let pane = remotePane(for: host)
-        let session = pane.backend.session
+        let backend = pane.backend
         let transfer = FileTransfer(
             direction: .upload, hostID: host.id,
-            title: Self.title(sources.map { ($0 as NSString).lastPathComponent }), destination: "\(host.name):\(directory.string)"
+            title: FileTransfer.title(for: sources.map { ($0 as NSString).lastPathComponent }), destination: "\(host.name):\(directory.string)"
         ) { transfer, progress in
-            let client = try await session.client(.transfer)
-            let plan = try await client.planUpload(sources, into: directory)
-            transfer.begin(totalBytes: plan.totalBytes, files: plan.files.count, skipped: plan.skipped.map { "\($0.path): \($0.reason)" })
-            transfer.failures = try await client.upload(plan) { progress.record($0) }
+            try await backend.upload(sources, into: directory, for: transfer, progress: progress)
         } completion: { [weak pane] in
             guard let pane, pane.directory == directory else { return }
             pane.refresh()
         }
-        add(transfer)
+        queue.add(transfer)
     }
 
-    private func add(_ transfer: FileTransfer) {
-        transfers.append(transfer)
-        schedule()
-    }
-
-    /// Starts waiting transfers while fewer than ``concurrentTransfers`` run.
-    private func schedule() {
-        var running = transfers.count { $0.phase.isActive }
-        for transfer in transfers where transfer.phase == .waiting && running < Self.concurrentTransfers {
-            start(transfer)
-            running += 1
-        }
-    }
-
-    private func start(_ transfer: FileTransfer) {
-        transfer.phase = .preparing
-        transfer.started = .now
-        let progress = TransferProgress()
-        transfer.task = Task { [weak self] in
-            let ticker = Task {
-                while !Task.isCancelled {
-                    transfer.update(progress)
-                    try? await Task.sleep(for: .milliseconds(250))
-                }
-            }
-            do {
-                try await transfer.run(transfer, progress)
-                transfer.phase = .finished
-            } catch {
-                transfer.phase = Task.isCancelled || error is CancellationError
-                    ? .cancelled
-                    : .failed(error.localizedDescription)
-            }
-            ticker.cancel()
-            transfer.update(progress)
-            transfer.ended = .now
-            transfer.completion()
-            self?.schedule()
-        }
-    }
+    var transfers: [FileTransfer] { queue.transfers }
 
     func cancel(_ transfer: FileTransfer) {
-        switch transfer.phase {
-        case .waiting:
-            transfer.phase = .cancelled
-            transfer.ended = .now
-        case .preparing, .copying:
-            transfer.task?.cancel()
-        case .finished, .failed, .cancelled:
-            break
-        }
+        queue.cancel(transfer)
     }
 
     func remove(_ transfer: FileTransfer) {
-        guard !transfer.phase.isActive else { return }
-        transfers.removeAll { $0.id == transfer.id }
+        queue.remove(transfer)
     }
 
     func clearFinished() {
-        transfers.removeAll { $0.phase.isOver }
-    }
-
-    /// "report.pdf", or "report.pdf and 2 more".
-    private static func title(_ names: [String]) -> String {
-        guard let first = names.first else { return "" }
-        return names.count == 1 ? first : "\(first) and \(names.count - 1) more"
-    }
-}
-
-// MARK: - Session
-
-/// A host's SFTP sessions: one for browsing and one for transfers, so a big copy never queues
-/// in front of a folder listing. Both connect on first use and reconnect after the connection
-/// drops; with ControlMaster, the second rides on the first's connection.
-@MainActor
-@Observable
-final class RemoteFileSession {
-    enum Status: Equatable {
-        case idle
-        case connecting
-        case connected
-        case failed
-    }
-
-    enum Role {
-        case browse
-        case transfer
-    }
-
-    private(set) var host: RemoteHost
-    /// The browsing session's state, for the pane header.
-    private(set) var status: Status = .idle
-
-    @ObservationIgnored private let connector: @MainActor (RemoteHost) async throws -> SFTPClient
-    @ObservationIgnored private var clients: [Role: SFTPClient] = [:]
-    @ObservationIgnored private var pending: [Role: Task<SFTPClient, any Error>] = [:]
-    /// Bumped by ``disconnect()``, so a connection finishing afterwards is dropped.
-    @ObservationIgnored private var generation = 0
-
-    init(host: RemoteHost, connector: @escaping @MainActor (RemoteHost) async throws -> SFTPClient) {
-        self.host = host
-        self.connector = connector
-    }
-
-    /// The session for `role`, connecting (or reconnecting) if needed.
-    func client(_ role: Role = .browse) async throws -> SFTPClient {
-        if let client = clients[role] {
-            if await client.isConnected { return client }
-            if clients[role] === client { clients[role] = nil }
-        }
-        if let task = pending[role] {
-            return try await task.value
-        }
-        let token = generation
-        let task = Task { [host, connector] in try await connector(host) }
-        pending[role] = task
-        if role == .browse { status = .connecting }
-        do {
-            let client = try await task.value
-            guard token == generation else {
-                client.disconnect()
-                throw CancellationError()
-            }
-            pending[role] = nil
-            clients[role] = client
-            if role == .browse { status = .connected }
-            return client
-        } catch {
-            if token == generation {
-                pending[role] = nil
-                if role == .browse { status = .failed }
-            }
-            throw error
-        }
-    }
-
-    /// Takes the edited host; a new address, user or login closes the sessions so the next
-    /// request connects with it.
-    func update(_ host: RemoteHost) {
-        let old = self.host
-        self.host = host
-        if host.address != old.address || host.port != old.port || host.user != old.user
-            || host.keyId != old.keyId || host.auth != old.auth {
-            disconnect()
-        }
-    }
-
-    /// Ends both sessions; running requests and transfers fail.
-    func disconnect() {
-        generation += 1
-        for client in clients.values { client.disconnect() }
-        for task in pending.values { task.cancel() }
-        clients = [:]
-        pending = [:]
-        status = .idle
-    }
-}
-
-// MARK: - Transfer
-
-/// One queued upload or download of one or more items (folders included).
-@MainActor
-@Observable
-final class FileTransfer: Identifiable {
-    enum Direction {
-        case upload
-        case download
-    }
-
-    enum Phase: Equatable {
-        case waiting
-        /// Connecting and walking the folders.
-        case preparing
-        case copying
-        /// Done; some items may have failed (``FileTransfer/failures``).
-        case finished
-        case failed(String)
-        case cancelled
-
-        var isActive: Bool { self == .preparing || self == .copying }
-        var isOver: Bool { !isActive && self != .waiting }
-    }
-
-    typealias Run = @MainActor (FileTransfer, TransferProgress) async throws -> Void
-
-    let id = UUID()
-    let direction: Direction
-    let hostID: RemoteHost.ID
-    let title: String
-    let destination: String
-    var phase: Phase = .waiting
-    private(set) var totalBytes: Int64 = 0
-    private(set) var copiedBytes: Int64 = 0
-    private(set) var fileCount = 0
-    private(set) var currentFile: String?
-    var failures: [SFTPTransferFailure] = []
-    /// Items left out (special files, links to folders inside folders), with the reason.
-    private(set) var skipped: [String] = []
-    var started: Date?
-    var ended: Date?
-
-    @ObservationIgnored var task: Task<Void, Never>?
-    @ObservationIgnored let run: Run
-    @ObservationIgnored let completion: @MainActor () -> Void
-
-    init(
-        direction: Direction,
-        hostID: RemoteHost.ID,
-        title: String,
-        destination: String,
-        run: @escaping Run,
-        completion: @escaping @MainActor () -> Void
-    ) {
-        self.direction = direction
-        self.hostID = hostID
-        self.title = title
-        self.destination = destination
-        self.run = run
-        self.completion = completion
-    }
-
-    /// Fraction copied, once the size is known.
-    var fraction: Double? {
-        guard phase == .copying || phase == .finished, totalBytes > 0 else { return nil }
-        return min(1, Double(copiedBytes) / Double(totalBytes))
-    }
-
-    /// Bytes per second since the copy started.
-    var speed: Double? {
-        guard let started, copiedBytes > 0 else { return nil }
-        let elapsed = (ended ?? .now).timeIntervalSince(started)
-        return elapsed > 0.5 ? Double(copiedBytes) / elapsed : nil
-    }
-
-    func begin(totalBytes: Int64, files: Int, skipped: [String]) {
-        self.totalBytes = totalBytes
-        fileCount = files
-        self.skipped = skipped
-        // Speed counts from here, not from connecting and walking folders.
-        started = .now
-        phase = .copying
-    }
-
-    func update(_ progress: TransferProgress) {
-        let snapshot = progress.snapshot
-        if copiedBytes != snapshot.bytes { copiedBytes = snapshot.bytes }
-        if currentFile != snapshot.file { currentFile = snapshot.file }
-    }
-}
-
-/// Progress reported by SSHKit from its own tasks, read by the UI a few times a second.
-final class TransferProgress: Sendable {
-    private let state = Mutex<(bytes: Int64, file: String?)>((0, nil))
-
-    func record(_ event: SFTPTransferEvent) {
-        state.withLock { state in
-            switch event {
-            case .file(let path): state.file = path
-            case .bytes(let count): state.bytes += count
-            }
-        }
-    }
-
-    var snapshot: (bytes: Int64, file: String?) {
-        state.withLock { $0 }
+        queue.clearFinished()
     }
 }

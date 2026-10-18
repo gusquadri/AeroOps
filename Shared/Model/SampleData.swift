@@ -1,11 +1,13 @@
 import AeroCore
 import Collectors
 import Foundation
+import SSHKit
 
 /// Sample hosts and states for SwiftUI previews and the DEBUG demo launch options.
 /// Never written to the user's real inventory.
 enum SampleData {
-    /// Six hosts covering every ``HostStatus`` (see ``statuses``), with and without tags.
+    /// Seven hosts covering every ``HostStatus`` (see ``statuses``), with and without tags. The
+    /// last has monitoring off.
     static let hosts: [RemoteHost] = [
         RemoteHost(
             id: uuid(1), name: "web-01", address: "10.0.0.12", user: "deploy",
@@ -24,10 +26,13 @@ enum SampleData {
         RemoteHost(
             id: uuid(6), name: "nas", address: "nas.local", user: "admin",
             tags: ["home"]),
+        RemoteHost(
+            id: uuid(7), name: "backup", address: "backup.example.com", user: "backup",
+            tags: ["home"], monitored: false),
     ]
 
     /// One status per sample host, in order, covering every case.
-    static let statuses: [HostStatus] = [.online, .stale, .offline, .loading, .online, .unsupported]
+    static let statuses: [HostStatus] = [.online, .stale, .offline, .loading, .online, .unsupported, .unmonitored]
 
     /// A plausible snapshot for an online host, for previews of filled gauges.
     static func metrics(cpu: Double = 37, memory: Double = 0.62, disk: Double = 0.48) -> MetricsSnapshot {
@@ -68,11 +73,12 @@ enum SampleData {
         )
     }
 
-    /// Monitor updates for the six sample hosts, one per card state the dashboard draws:
+    /// Monitor updates for the sample hosts, one per card state the dashboard draws:
     /// online, stale (numbers dimmed), changed host key (blocked), first-contact key not trusted,
-    /// offline with old numbers, and unsupported OS.
+    /// offline with old numbers, and unsupported OS. Hosts with monitoring off get none.
     static func liveUpdates(for hosts: [RemoteHost], now: Date = .now) -> [HostMonitorUpdate] {
-        hosts.enumerated().map { index, host in
+        hosts.enumerated().compactMap { index, host in
+            guard host.monitored else { return nil }
             let id = host.id
             switch index % 6 {
             case 0:
@@ -106,42 +112,24 @@ enum SampleData {
     }
 }
 
-extension AppModel {
-    /// A model over a throwaway store in the temporary directory, filled with `hosts`.
-    /// With `statuses`, host *i* gets `statuses[i % count]`; with `withMetrics`, online hosts get
-    /// a sample snapshot. For previews only.
-    static func preview(
-        hosts: [RemoteHost] = SampleData.hosts,
-        statuses: [HostStatus] = SampleData.statuses,
-        withMetrics: Bool = false
-    ) -> AppModel {
-        let directory = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
-        let model = AppModel(hostStore: HostStore(directory: directory), connectionTester: SimulatedConnectionTester(delay: .seconds(1)))
-        for host in hosts {
-            try? model.addHost(host)
-        }
-        model.selection = nil
-        model.applySampleStatuses(statuses, withMetrics: withMetrics)
-        return model
+/// Well-formed but meaningless host keys for previews and demo snapshots.
+enum SampleHostKeys {
+    static func ed25519(seed: UInt8) -> HostKey {
+        make(type: "ssh-ed25519", body: [Data(repeating: seed, count: 32)])
     }
 
-    /// Gives the hosts ``SampleData/liveUpdates(for:now:)``, as if their monitors had reported:
-    /// every card state with numbers. Used by previews and the DEBUG demo option.
-    func applySampleLiveStates() {
-        for update in SampleData.liveUpdates(for: hosts) {
-            displayStates[update.hostID]?.apply(update)
-        }
+    static func ecdsa(seed: UInt8) -> HostKey {
+        make(type: "ecdsa-sha2-nistp256", body: [Data("nistp256".utf8), Data([0x04]) + Data(repeating: seed, count: 64)])
     }
 
-    /// Gives host *i* status `statuses[i % count]`. Used by previews and the DEBUG demo option.
-    func applySampleStatuses(_ statuses: [HostStatus] = SampleData.statuses, withMetrics: Bool = false) {
-        guard !statuses.isEmpty else { return }
-        for (index, host) in hosts.enumerated() {
-            let status = statuses[index % statuses.count]
-            let metrics = withMetrics && status == .online
-                ? SampleData.metrics(cpu: Double(15 + index * 17), memory: 0.35 + Double(index) * 0.1, disk: 0.3 + Double(index) * 0.12)
-                : nil
-            updateState(of: host.id, status: status, metrics: metrics, message: nil)
+    private static func make(type: String, body: [Data]) -> HostKey {
+        var blob = Data()
+        for field in [Data(type.utf8)] + body {
+            var length = UInt32(field.count).bigEndian
+            blob.append(Data(bytes: &length, count: 4))
+            blob.append(field)
         }
+        // The blob is built above with a valid type prefix, so parsing cannot fail.
+        return try! HostKey(type: type, base64: blob.base64EncodedString())
     }
 }

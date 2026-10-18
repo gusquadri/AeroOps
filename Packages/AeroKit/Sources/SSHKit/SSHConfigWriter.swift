@@ -250,16 +250,16 @@ public enum SSHConfigError: Error, Sendable, Hashable, LocalizedError {
 }
 
 /// Character rules for user-supplied host fields. Shared with ``HostKeyScanner``.
-enum HostValidation {
+package enum HostValidation {
     /// DNS names, IPv4, and IPv6 (unbracketed, optional `%zone`). No leading `-` or `.`.
-    static func isValidAddress(_ value: String) -> Bool {
+    package static func isValidAddress(_ value: String) -> Bool {
         guard let first = value.utf8.first, value.utf8.count <= 255,
               first != UInt8(ascii: "-"), first != UInt8(ascii: ".") else { return false }
         return value.utf8.allSatisfy { isAlphanumeric($0) || "._-:%".utf8.contains($0) }
     }
 
     /// POSIX-ish user names plus `@` (directory users). No leading `-`.
-    static func isValidUser(_ value: String) -> Bool {
+    package static func isValidUser(_ value: String) -> Bool {
         guard let first = value.utf8.first, value.utf8.count <= 256, first != UInt8(ascii: "-") else { return false }
         return value.utf8.allSatisfy { isAlphanumeric($0) || "._-@".utf8.contains($0) }
     }

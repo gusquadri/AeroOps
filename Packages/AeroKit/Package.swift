@@ -6,12 +6,14 @@ import PackageDescription
 
 let package = Package(
     name: "AeroKit",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("26.0"), .iOS("26.0")],
     products: [
         .library(name: "AeroCore", targets: ["AeroCore"]),
         .library(name: "SSHKit", targets: ["SSHKit"]),
         .library(name: "KeyAgent", targets: ["KeyAgent"]),
         .library(name: "Collectors", targets: ["Collectors"]),
+        .library(name: "EmbeddedSSH", targets: ["EmbeddedSSH"]),
+        .library(name: "EmbeddedTerminal", targets: ["EmbeddedTerminal"]),
         .library(name: "TerminalKit", targets: ["TerminalKit"]),
         .library(name: "AgentBridge", targets: ["AgentBridge"]),
         // Shared by the app (through AgentBridge) and the `aeroops-mcp` CLI (project.yml).
@@ -21,9 +23,14 @@ let package = Package(
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
     ],
     dependencies: [
-        // libghostty wrapper, pinned exactly.
-        // Only TerminalKit links it; the app gets it transitively through the TerminalKit product.
+        // libghostty wrapper, pinned exactly. Linked by TerminalStyle, TerminalKit and
+        // EmbeddedTerminal; the apps get it transitively through the TerminalKit product (Mac) and
+        // the EmbeddedTerminal product (iOS).
         .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "2.2.2026101003"),
+        // SSH in Swift for iOS, which has no /usr/bin/ssh. Pinned exactly. Only EmbeddedSSH links it.
+        .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
+        // swift-nio-ssh's own dependency; declared for the NIOCore/NIOPosix products.
+        .package(url: "https://github.com/apple/swift-nio", from: "2.81.0"),
     ],
     targets: [
         // Models, parsers, ShellQuote, HostStore, runtime paths. Depends on nothing.
@@ -44,11 +51,45 @@ let package = Package(
         // Metrics script + parser, Docker, Kubernetes, one polling actor per host.
         .target(name: "Collectors", dependencies: ["SSHKit", "AeroCore"]),
 
+        // In-process SSH client for iOS (swift-nio-ssh): the same `HostCommandRunning` /
+        // `HostCommandStreaming` the collectors use with SSHRunner, host keys pinned in SSHKit's
+        // HostKeyStore, keys from KeyAgent's KeyStore, passwords from its HostPasswordVault.
+        // Also long-lived sessions: terminals (pty + shell) and subsystems, which SSHKit's
+        // SFTPClient runs over as a `RemoteByteChannel`.
+        .target(
+            name: "EmbeddedSSH",
+            dependencies: [
+                "SSHKit", "KeyAgent", "Collectors", "AeroCore",
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+            ]
+        ),
+
+        // The terminal look both apps share: TerminalAppearance (font, colours) and the
+        // libghostty settings and key bindings built from it. No AppKit or UIKit.
+        .target(
+            name: "TerminalStyle",
+            dependencies: [.product(name: "GhosttyTerminal", package: "libghostty-spm")]
+        ),
+
         // libghostty surface wrapper and tab model. Takes a generic launch spec (executable +
         // arguments), so it does not depend on SSHKit; the app builds the ssh command line.
+        // Mac only (AppKit, forkpty).
         .target(
             name: "TerminalKit",
-            dependencies: ["AeroCore", "CTerminalPTY", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+            dependencies: ["AeroCore", "CTerminalPTY", "TerminalStyle", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+        ),
+
+        // The iOS terminal: a libghostty surface over an EmbeddedSSH terminal channel (keys,
+        // window size and output bridged through an in-memory session). Never linked by the Mac
+        // app, which runs terminals through TerminalKit and /usr/bin/ssh.
+        .target(
+            name: "EmbeddedTerminal",
+            dependencies: [
+                "EmbeddedSSH", "SSHKit", "AeroCore", "TerminalStyle",
+                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+            ]
         ),
 
         // Pseudo-terminal spawn for TerminalKit (fork + exec needs C: Swift cannot call
@@ -98,8 +139,17 @@ let package = Package(
         .testTarget(name: "AskpassProtocolTests", dependencies: ["AskpassProtocol"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
         .testTarget(
+            name: "EmbeddedSSHTests",
+            dependencies: [
+                "EmbeddedSSH", "EmbeddedTerminal", "SSHKit", "KeyAgent", "Collectors", "AeroCore", "AeroTestSupport",
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+            ]
+        ),
+        .testTarget(
             name: "TerminalKitTests",
-            dependencies: ["TerminalKit", "AeroCore", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
+            dependencies: ["TerminalKit", "TerminalStyle", "AeroCore", .product(name: "GhosttyTerminal", package: "libghostty-spm")]
         ),
         .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),
         .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit", "AeroTestSupport"]),
