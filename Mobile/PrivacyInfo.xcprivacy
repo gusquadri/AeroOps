@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The iOS app's privacy manifest. AeroOps collects nothing and tracks nobody; it only declares the
+  required-reason APIs linked into its binary (swift-nio and swift-crypto ship their own manifests).
+  Re-check after adding a dependency: nm -u on the Release-iphoneos binary.
+    FileTimestamp (stat, lstat, fstat, fstatat, NSFileModificationDate, NSURLContentModificationDateKey):
+      C617.1  files inside the app container (hosts, known_hosts, downloads)
+      3B52.1  files the user picks in the document picker to upload
+    SystemBootTime (ProcessInfo.systemUptime, in libghostty-spm's GhosttyTerminal):
+      35F9.1  elapsed time between events inside the app
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

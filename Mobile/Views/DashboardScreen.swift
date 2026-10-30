@@ -13,6 +13,7 @@ enum MobileRoute: Hashable {
 /// poll every host now.
 struct DashboardScreen: View {
     @Environment(MobileModel.self) private var model
+    @Environment(\.showSampleServers) private var showSampleServers
     @State private var path: [MobileRoute] = []
     @State private var editor: HostEditorScreen.Request?
     /// Why turning a host's monitoring on or off could not be saved.
@@ -23,8 +24,13 @@ struct DashboardScreen: View {
         NavigationStack(path: $path) {
             content
                 .background { SkyBackground() }
-                .navigationTitle("Servers")
+                .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
                 .toolbar {
+                    if isShowingSamples, let showSampleServers {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Exit Samples") { showSampleServers(false) }
+                        }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Add Host", systemImage: "plus") { editor = .new }
                     }
@@ -79,6 +85,10 @@ struct DashboardScreen: View {
             ) {
                 Button("Add Host", systemImage: "plus") { editor = .new }
                     .buttonStyle(.aqua)
+                if let showSampleServers {
+                    Button("Try Sample Servers", systemImage: "sparkles") { showSampleServers(true) }
+                        .buttonStyle(.aquaSecondary)
+                }
             }
         } else {
             ScrollView {
@@ -95,6 +105,11 @@ struct DashboardScreen: View {
             }
             .refreshable { model.refreshAll() }
         }
+    }
+
+    /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews).
+    private var isShowingSamples: Bool {
+        model.isPreview && showSampleServers != nil
     }
 
     private func openDebugScreen() {
@@ -155,4 +170,5 @@ struct DashboardScreen: View {
 #Preview("Dashboard · empty") {
     DashboardScreen()
         .environment(MobileModel.preview(hosts: []))
+        .environment(\.showSampleServers) { _ in }
 }

@@ -3,7 +3,7 @@ import Collectors
 import Foundation
 import SSHKit
 
-/// Sample hosts and states for SwiftUI previews and the DEBUG demo launch options.
+/// Sample hosts and states for SwiftUI previews, the iOS app's sample servers and the demo launch options.
 /// Never written to the user's real inventory.
 enum SampleData {
     /// Seven hosts covering every ``HostStatus`` (see ``statuses``), with and without tags. The

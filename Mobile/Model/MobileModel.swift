@@ -68,7 +68,7 @@ final class MobileModel {
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
     @ObservationIgnored private var isStarted = false
-    /// Sample data (previews, `-AeroOpsDemo`): terminals and files are canned too.
+    /// Sample data (previews, "Try Sample Servers", `-AeroOpsDemo`): terminals and files are canned too.
     @ObservationIgnored private(set) var isPreview = false
     @ObservationIgnored private var terminals: [RemoteHost.ID: EmbeddedTerminalSession] = [:]
     @ObservationIgnored private var fileBrowsers: [RemoteHost.ID: MobileFileBrowser<RemoteFileBackend>] = [:]
@@ -433,7 +433,7 @@ enum MobileModelError: LocalizedError {
 
 extension MobileModel {
     /// A model over throwaway files and in-memory secrets, with the sample hosts in every card
-    /// state. For previews and the `-AeroOpsDemo` launch argument; never monitors.
+    /// state. For previews, "Try Sample Servers" and `-AeroOpsDemo`; never monitors.
     static func preview(hosts: [RemoteHost] = SampleData.hosts) -> MobileModel {
         let root = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
         let paths = AeroPaths(
