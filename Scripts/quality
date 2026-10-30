@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+cd "$(dirname "$0")/.." || exit 1
+
+SRC_DIRS="App Mobile Shared MCP Askpass Packages/AeroKit/Sources Packages/AeroKit/Tests Scripts"
+MAC_BUILD="xcodebuild -scheme AeroOps -destination 'platform=macOS' -allowProvisioningUpdates -derivedDataPath build/DerivedData-quality -quiet build"
+IOS_BUILD="xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/DerivedData-quality-ios -quiet build"
+
+changed_files() {
+  { git diff --name-only --diff-filter=d HEAD; git ls-files -o --exclude-standard; } 2>/dev/null | sort -u
+}
+
+if [ "${1:-}" = --all ]; then
+  ADDED=""
+  FILES="$SRC_DIRS"
+else
+  ADDED="--added"
+  FILES="$(changed_files | while IFS= read -r file; do printf '%q ' "$file"; done)"
+fi
+
+if [ -z "$FILES" ]; then
+  echo "quality: PASS (no changed files)"
+  exit 0
+fi
+
+export NO_COLOR=1 FORCE_COLOR=0 PYTHONDONTWRITEBYTECODE=1
+LOG="$(git rev-parse --git-path quality.log 2>/dev/null || echo "${TMPDIR:-/tmp}/quality.log")"
+: > "$LOG"
+
+steps=(
+  "complexity|python3 Scripts/complexity.py $ADDED $FILES"
+  "comments|python3 Scripts/no_comments.py $ADDED $FILES"
+  "build|xcodegen generate --quiet && $MAC_BUILD && $IOS_BUILD"
+  "tests|[[ \" $FILES \" != *' Packages/AeroKit/'* ]] || swift test --package-path Packages/AeroKit --quiet"
+  "usage|Scripts/run_usage.sh"
+)
+
+failed=()
+
+brief() {
+  grep -E '^ *(FAIL|×|✗|✘) |error:' <<<"$1" | head -n 10
+  tail -n 8 <<<"$1"
+}
+
+run_step() {
+  local name="${1%%|*}"
+  local cmd="${1#*|}"
+  local out status
+  out="$(bash -c "$cmd" 2>&1)"
+  status=$?
+  printf '── %s: %s\n%s\n' "$name" "$cmd" "$out" >> "$LOG"
+  if [ "$status" -eq 0 ]; then
+    echo "✓ $name"
+    return
+  fi
+  echo "✗ $name"
+  brief "$out" | awk '!seen[$0]++' | cut -c1-240 | sed 's/^/    /'
+  failed+=("$name")
+}
+
+for step in "${steps[@]}"; do
+  run_step "$step"
+done
+
+echo
+if [ ${#failed[@]} -eq 0 ]; then
+  echo "quality: PASS"
+  exit 0
+fi
+echo "quality: FAIL (${failed[*]}) — full log: $LOG"
+exit 1
