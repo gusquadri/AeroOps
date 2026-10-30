@@ -66,16 +66,16 @@ private struct HostDeletionConfirmation: ViewModifier {
     }
 }
 
-/// Shown above the content when `hosts.json` could not be loaded, with a Reload button.
+/// Shown above the content when the hosts or pinned host keys could not be loaded, with a Reload button.
 struct HostLoadErrorBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let error = model.hostStore.loadError {
+        if let error = model.hostStore.loadError?.localizedDescription ?? model.ssh.hostKeyError {
             AeroCard(padding: 12) {
                 HStack(spacing: 10) {
                     StatusOrb(tone: .warning)
-                    Text(error.localizedDescription)
+                    Text(error)
                         .font(Aero.font(.callout))
                         .lineLimit(3)
                     Spacer(minLength: 8)

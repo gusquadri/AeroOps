@@ -135,7 +135,7 @@ let package = Package(
 
         .testTarget(name: "AeroCoreTests", dependencies: ["AeroCore", "AeroTestSupport"]),
         .testTarget(name: "SSHKitTests", dependencies: ["SSHKit", "AskpassProtocol", "AeroTestSupport"]),
-        .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AskpassProtocol", "AeroTestSupport"]),
+        .testTarget(name: "KeyAgentTests", dependencies: ["KeyAgent", "AeroCore", "AskpassProtocol", "AeroTestSupport"]),
         .testTarget(name: "AskpassProtocolTests", dependencies: ["AskpassProtocol"]),
         .testTarget(name: "CollectorsTests", dependencies: ["Collectors", "AeroTestSupport"]),
         .testTarget(

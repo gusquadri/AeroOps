@@ -34,7 +34,6 @@ import UniformTypeIdentifiers
 @MainActor
 struct Phase5SelfTest {
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase5" }
     static var snapshotDirectory: URL? {
         defaults.string(forKey: "AeroSelfTestSnapshots").map { URL(filePath: $0, directoryHint: .isDirectory) }
     }
@@ -151,26 +150,28 @@ struct Phase5SelfTest {
         r.report.staleRunsSwept = await sweepStaleRuns()
 
         // 1. Key in the Keychain, authorized for dev@ and nodocker@ on the VM.
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: Self.keyName, policy: .always)
-        } catch {
-            r.step("generate key", false, error.localizedDescription)
+        guard let key = await Phase2SelfTest.generateKey(name: Self.keyName, ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
-        r.step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
-        let pubURL = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
+        if await authorize(key, r) { await checkHosts(key, r) }
+        return await finish(r, key: key)
+    }
+
+    private func authorize(_ key: SSHKeyRecord, _ r: Recorder) async -> Bool {
+        let pubURL = model.ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
         guard let script = Phase2SelfTest.authorizeScript else {
             r.step("authorize key", false, "pass -AeroSelfTestAuthorizeScript dev/add-key.sh")
-            return await finish(r, key: key)
+            return false
         }
         let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pubURL.path(percentEncoded: false)])
         let vmAuthorized = status == 0 && output.split(whereSeparator: \.isNewline).contains {
             $0.hasPrefix("aeroops-vm") && $0.contains("authorized")
         }
         r.step("authorize key", vmAuthorized, output.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " | "))
-        guard vmAuthorized else { return await finish(r, key: key) }
+        return vmAuthorized
+    }
 
+    private func checkHosts(_ key: SSHKeyRecord, _ r: Recorder) async {
         // 2. Hosts: dev (docker group; k3s through sudo -n) and nodocker.
         let dev = RemoteHost(
             name: "VM dev", address: Self.vmAddress, user: "dev", keyId: key.id.uuidString, kubectlPrefix: Self.k3sPrefix
@@ -181,12 +182,12 @@ struct Phase5SelfTest {
             try model.addHost(nodocker)
         } catch {
             r.step("add hosts", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return
         }
 
         // 3. Trust the host keys (self-test only) and sign in once. No retry on failure.
         for host in [dev, nodocker] {
-            guard await trustAndConnect(host, r) else { return await finish(r, key: key) }
+            guard await trustAndConnect(host, r) else { return }
         }
 
         model.selection = dev.id
@@ -201,7 +202,6 @@ struct Phase5SelfTest {
         await checkInspect(containers, r)
         await checkPods(containers, dev: dev, r)
         await checkNodocker(nodocker, r)
-        return await finish(r, key: key)
     }
 
     /// Test connection: first contact offers keys, which are trusted; then one real login.
@@ -403,14 +403,41 @@ struct Phase5SelfTest {
         containers.section = .kubernetes
         containers.namespace = nil
 
+        let crasher = await waitForCrasher(containers)
+        recordCrasher(crasher, containers, r)
+        if let pod = containers.pods.first {
+            r.report.terminalCommands.append(
+                (try? KubectlCommands(host: dev).logs(pod: pod.name, namespace: pod.namespace, tail: LogViewerModel.tail, follow: true)) ?? "?"
+            )
+        }
+        await pause(1.0)
+        await snapshotMain("pod-table", r, between: containers)
+
+        await checkRestartSort(containers, crasher: crasher, r)
+        if let crasher {
+            await checkPreviousLogs(crasher, containers, r)
+        }
+        await checkPendingPod(containers, r)
+        await checkPodFollow(containers, dev: dev, r)
+        containers.section = .docker
+    }
+
+    /// Dead pods from earlier runs keep the crasher's name, so it is the one with the most restarts.
+    private func waitForCrasher(_ containers: HostContainersModel) async -> PodInfo? {
         // The crasher is red with its restart count; between restarts it can look healthy briefly.
         var crasher: PodInfo?
         for attempt in 0..<8 {
             if attempt > 0 { await pause(5) }
             await containers.refresh()
-            crasher = containers.pods.first { $0.namespace == "demo" && $0.name.hasPrefix("crasher-") }
+            crasher = containers.pods
+                .filter { $0.namespace == "demo" && $0.name.hasPrefix("crasher-") }
+                .max { $0.restarts < $1.restarts }
             if let crasher, crasher.isCrashLooping, crasher.health == .failing { break }
         }
+        return crasher
+    }
+
+    private func recordCrasher(_ crasher: PodInfo?, _ containers: HostContainersModel, _ r: Recorder) {
         r.report.crasher = crasher?.id
         r.report.crasherStatus = crasher?.displayStatus
         r.report.crasherRestarts = crasher?.restarts
@@ -421,14 +448,9 @@ struct Phase5SelfTest {
             crasher.map { "\($0.id): \($0.displayStatus), \($0.restarts) restarts, \($0.health.rawValue)" }
                 ?? "no crasher pod" + (containers.podsIssue.map { " (\($0.title))" } ?? "")
         )
-        if let pod = containers.pods.first {
-            r.report.terminalCommands.append(
-                (try? KubectlCommands(host: dev).logs(pod: pod.name, namespace: pod.namespace, tail: LogViewerModel.tail, follow: true)) ?? "?"
-            )
-        }
-        await pause(1.0)
-        await snapshotMain("pod-table", r, between: containers)
+    }
 
+    private func checkRestartSort(_ containers: HostContainersModel, crasher: PodInfo?, _ r: Recorder) async {
         // The Restarts header sorts the most restarts first, so the crasher leads.
         containers.podSortOrder = [KeyPathComparator(\.restarts, order: .reverse)]
         let sorted = containers.filteredPods
@@ -441,94 +463,102 @@ struct Phase5SelfTest {
         await pause(1.0)
         await snapshotMain("pod-table-sorted", r, between: containers)
         containers.podSortOrder = []
+    }
 
+    private func checkPreviousLogs(_ crasher: PodInfo, _ containers: HostContainersModel, _ r: Recorder) async {
         // One click: the crashed instance's logs.
-        if let crasher {
-            progress("opening previous logs")
-            containers.showPreviousLogs(crasher)
-            if let viewer = containers.logs {
-                await waitUntil(seconds: 2) { viewer.status != .idle }
-                if viewer.status == .idle { viewer.start() }
-                await waitUntil(seconds: 30) { viewer.status != .loading && viewer.status != .idle }
-                let info = viewer.text.lines.first(where: \.isInfo)?.text
-                r.report.previousLogsLines = viewer.lineCount
-                r.report.previousLogsInfoLine = info.map { String($0.prefix(160)) }
-                r.step(
-                    "previous logs (one click)", viewer.previous && viewer.issue == nil && viewer.lineCount > 0,
-                    "container \(viewer.container ?? "?"), \(viewer.lineCount) lines, status \(viewer.status)"
-                        + (info.map { "; info line: \($0.prefix(100))" } ?? "")
-                        + (viewer.issue.map { "; issue: \($0.title)" } ?? "")
-                )
-                await snapshotSheet("previous-logs", r)
-                containers.logs = nil
-                await pause(0.6)
-            } else {
-                r.step("previous logs (one click)", false, "no sheet")
-            }
+        progress("opening previous logs")
+        containers.showPreviousLogs(crasher)
+        guard let viewer = containers.logs else {
+            return r.step("previous logs (one click)", false, "no sheet")
         }
+        await waitUntil(seconds: 2) { viewer.status != .idle }
+        if viewer.status == .idle { viewer.start() }
+        await waitUntil(seconds: 30) { viewer.status != .loading && viewer.status != .idle }
+        let info = viewer.text.lines.first(where: \.isInfo)?.text
+        r.report.previousLogsLines = viewer.lineCount
+        r.report.previousLogsInfoLine = info.map { String($0.prefix(160)) }
+        r.step(
+            "previous logs (one click)", viewer.previous && viewer.issue == nil && viewer.lineCount > 0,
+            "container \(viewer.container ?? "?"), \(viewer.lineCount) lines, status \(viewer.status)"
+                + (info.map { "; info line: \($0.prefix(100))" } ?? "")
+                + (viewer.issue.map { "; issue: \($0.title)" } ?? "")
+        )
+        await snapshotSheet("previous-logs", r)
+        containers.logs = nil
+        await pause(0.6)
+    }
 
+    private func checkPendingPod(_ containers: HostContainersModel, _ r: Recorder) async {
         // Pending pod: events include FailedScheduling, in the inspector.
         let pending = containers.pods.first { $0.namespace == "demo" && $0.name.hasPrefix("pending-") }
             ?? containers.pods.first { $0.phase == .pending }
         r.report.pendingPod = pending?.id
-        if let pending {
-            progress("opening inspector for \(pending.id)")
-            containers.showDetail(pending)
-            containers.inspectorTab = .events
-            var reasons: [String] = []
-            for attempt in 0..<3 {
-                if attempt > 0 {
-                    containers.reloadPodDetail()
-                }
-                await waitUntil(seconds: 20) { containers.podDetail?.isLoading == false }
-                reasons = containers.podDetail?.events.map(\.reason) ?? []
-                if reasons.contains("FailedScheduling") { break }
-                await pause(2)
-            }
-            r.report.pendingEventReasons = Array(Set(reasons)).sorted()
-            r.step(
-                "pending pod events", reasons.contains("FailedScheduling"),
-                "\(pending.id): \(r.report.pendingEventReasons.joined(separator: ", "))"
-                    + (containers.podDetail?.eventsIssue.map { "; issue: \($0.title)" } ?? "")
-            )
-            await pause(1.0)
-            await snapshotMain("pod-events", r, between: containers)
-            containers.inspectorTab = .describe
-            await pause(0.8)
-            await snapshotMain("pod-describe", r, between: containers)
-            containers.inspectorTab = .events
-            containers.inspectorPresented = false
-            progress("inspector closed")
-            await pause(1.5)
-            progress("inspector settled")
-        } else {
-            r.step("pending pod events", false, "no Pending pod")
+        guard let pending else {
+            return r.step("pending pod events", false, "no Pending pod")
         }
+        progress("opening inspector for \(pending.id)")
+        containers.showDetail(pending)
+        containers.inspectorTab = .events
+        var reasons: [String] = []
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                containers.reloadPodDetail()
+            }
+            await waitUntil(seconds: 20) { containers.podDetail?.isLoading == false }
+            reasons = containers.podDetail?.events.map(\.reason) ?? []
+            if reasons.contains("FailedScheduling") { break }
+            await pause(2)
+        }
+        r.report.pendingEventReasons = Array(Set(reasons)).sorted()
+        r.step(
+            "pending pod events", reasons.contains("FailedScheduling"),
+            "\(pending.id): \(r.report.pendingEventReasons.joined(separator: ", "))"
+                + (containers.podDetail?.eventsIssue.map { "; issue: \($0.title)" } ?? "")
+        )
+        await pause(1.0)
+        await snapshotMain("pod-events", r, between: containers)
+        containers.inspectorTab = .describe
+        await pause(0.8)
+        await snapshotMain("pod-describe", r, between: containers)
+        containers.inspectorTab = .events
+        containers.inspectorPresented = false
+        progress("inspector closed")
+        await pause(1.5)
+        progress("inspector settled")
+    }
 
+    private func checkPodFollow(_ containers: HostContainersModel, dev: RemoteHost, _ r: Recorder) async {
         // kubectl follow ends remotely when the sheet closes.
-        if let web = containers.pods.first(where: { $0.namespace == "demo" && $0.name.hasPrefix("web-") && $0.phase == .running }) {
-            progress("opening logs for \(web.id)")
-            containers.showLogs(web)
-            if let viewer = containers.logs {
-                await waitUntil(seconds: 2) { viewer.status != .idle }
-                if viewer.status == .idle { viewer.start() }
-                await waitUntil(seconds: 20) { viewer.status == .following }
-                progress("pod follow status \(viewer.status), \(viewer.lineCount) lines")
-                var remote = 0
-                for _ in 0..<5 where remote == 0 {
-                    remote = await remoteProcessCount("[k]ubectl logs -f ", on: dev)
-                    if remote == 0 { await pause(1) }
-                }
-                r.step("remote kubectl follow running", viewer.status == .following && remote > 0, "\(web.id): status \(viewer.status), \(remote) process(es)")
-                containers.logs = nil
-                let gone = await waitForRemoteExit("[k]ubectl logs -f ", on: dev)
-                r.report.kubectlFollowGoneAfterSeconds = gone
-                r.step("kubectl follow cleaned up", gone != nil, gone.map { String(format: "no remote kubectl logs -f after %.1f s", $0) } ?? "still running after 30 s")
-            }
-        } else {
-            r.step("kubectl follow", false, "no running web pod")
+        guard let web = runningWebPod(containers) else {
+            return r.step("kubectl follow", false, "no running web pod")
         }
-        containers.section = .docker
+        progress("opening logs for \(web.id)")
+        containers.showLogs(web)
+        guard let viewer = containers.logs else { return }
+        await waitUntil(seconds: 2) { viewer.status != .idle }
+        if viewer.status == .idle { viewer.start() }
+        await waitUntil(seconds: 20) { viewer.status == .following }
+        progress("pod follow status \(viewer.status), \(viewer.lineCount) lines")
+        let remote = await remoteFollowCount(on: dev)
+        r.step("remote kubectl follow running", viewer.status == .following && remote > 0, "\(web.id): status \(viewer.status), \(remote) process(es)")
+        containers.logs = nil
+        let gone = await waitForRemoteExit("[k]ubectl logs -f ", on: dev)
+        r.report.kubectlFollowGoneAfterSeconds = gone
+        r.step("kubectl follow cleaned up", gone != nil, gone.map { String(format: "no remote kubectl logs -f after %.1f s", $0) } ?? "still running after 30 s")
+    }
+
+    private func runningWebPod(_ containers: HostContainersModel) -> PodInfo? {
+        containers.pods.first { $0.namespace == "demo" && $0.name.hasPrefix("web-") && $0.phase == .running }
+    }
+
+    private func remoteFollowCount(on dev: RemoteHost) async -> Int {
+        var remote = 0
+        for _ in 0..<5 where remote == 0 {
+            remote = await remoteProcessCount("[k]ubectl logs -f ", on: dev)
+            if remote == 0 { await pause(1) }
+        }
+        return remote
     }
 
     // MARK: - nodocker
@@ -590,7 +620,7 @@ struct Phase5SelfTest {
             )
             do {
                 try await model.ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
+                let remaining = try KeyStore.systemKeychain(service: Phase2SelfTest.keychainService).secret(for: key.id.uuidString)
                 r.step("delete key", remaining == nil, "Keychain item removed \(remaining == nil)")
             } catch {
                 r.step("delete key", false, error.localizedDescription)
@@ -630,7 +660,7 @@ struct Phase5SelfTest {
                    line.hasPrefix("ssh-") {
                     _ = await Self.stripAuthorizedKey(line)
                 }
-                try? KeychainSecretStore(service: Phase2SelfTest.keychainService).delete(for: key.id)
+                try? KeyStore.systemKeychain(service: Phase2SelfTest.keychainService).delete(key.id.uuidString)
             }
             try? FileManager.default.removeItem(at: root)
             swept.append(root.lastPathComponent)

@@ -41,7 +41,6 @@ import UniformTypeIdentifiers
 @MainActor
 final class Phase4SelfTest {
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase4" }
     /// `-AeroSelfTestSnapshots`, as in Phase 5 (`-AeroSelfTestScreenshots`, the old name, still works).
     static var screenshotDirectory: URL? {
         (defaults.string(forKey: "AeroSelfTestSnapshots") ?? defaults.string(forKey: "AeroSelfTestScreenshots"))
@@ -131,29 +130,32 @@ final class Phase4SelfTest {
         step("agent running", true, ssh.paths.agentSocket.path(percentEncoded: false))
 
         // 1. A fresh key, authorized on every dev server.
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps phase 4 self-test", policy: .always)
-        } catch {
-            return step("generate key", false, error.localizedDescription)
-        }
+        guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 4 self-test", ssh: ssh, step: step) else { return }
         self.key = key
-        let publicKeyPath = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub").path(percentEncoded: false)
-        self.publicKeyPath = publicKeyPath
-        step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
+        guard await authorize(key), let (hosts, down) = await addHosts(keyID: key.id.uuidString) else { return }
 
+        checkLaunchSpecs(hosts[0])
+        guard let window = await openMainWindow(showing: hosts[0]) else { return }
+        await checkTerminals(hosts: hosts, down: down, window: window)
+    }
+
+    private func authorize(_ key: SSHKeyRecord) async -> Bool {
+        let publicKeyPath = model.ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub").path(percentEncoded: false)
+        self.publicKeyPath = publicKeyPath
         guard let script = Phase2SelfTest.authorizeScript else {
-            return step("authorize key", false, "-AeroSelfTestAuthorizeScript dev/add-key.sh is required")
+            step("authorize key", false, "-AeroSelfTestAuthorizeScript dev/add-key.sh is required")
+            return false
         }
         authorizeRan = true
         let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [publicKeyPath])
         let authorized = output.components(separatedBy: "authorized:").count - 1
         step("authorize key", status == 0 && authorized == 3, "\(authorized) of 3 servers: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
         // Never connect to a server that did not take the key (PerSourcePenalties).
-        guard status == 0, authorized == 3 else { return }
+        return status == 0 && authorized == 3
+    }
 
+    private func addHosts(keyID: String) async -> (hosts: [RemoteHost], down: RemoteHost)? {
         // 2. Hosts.
-        let keyID = key.id.uuidString
         let hosts = [
             RemoteHost(name: "dev-ssh", address: "localhost", port: 2222, user: "dev", keyId: keyID),
             RemoteHost(name: "dev-alpine", address: "localhost", port: 2223, user: "dev", keyId: keyID),
@@ -167,7 +169,8 @@ final class Phase4SelfTest {
                 try model.addHost(host)
             }
         } catch {
-            return step("add hosts", false, error.localizedDescription)
+            step("add hosts", false, error.localizedDescription)
+            return nil
         }
         let openable = await wait(5) { (hosts + [down]).allSatisfy { self.model.canOpenSSH($0.id) } }
         let keylessReason = terminals.unavailableReason(keyless) ?? ""
@@ -175,49 +178,66 @@ final class Phase4SelfTest {
             "canOpenSSH", openable && !model.canOpenSSH(keyless.id) && !keylessReason.isEmpty,
             "hosts with the key \(openable); keyless host refused: \(keylessReason)"
         )
-        guard openable else { return }
+        return openable ? (hosts, down) : nil
+    }
 
-        checkLaunchSpecs(hosts[0])
-
+    private func openMainWindow(showing host: RemoteHost) async -> NSWindow? {
         // 3. The real main window, Terminals tab.
         guard let window = await mainWindow() else {
-            return step("main window", false, "no main window")
+            step("main window", false, "no main window")
+            return nil
         }
         self.window = window
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.setContentSize(NSSize(width: 1180, height: 760))
-        model.selection = hosts[0].id
+        model.selection = host.id
         model.selectedTab = .terminals
         watchSelectedTab()
         await pause(1.0)
         await capture("terminals-empty")
-        let windowSize = window.frame.size
+        return window
+    }
 
+    private func openShellTabs(_ hosts: [RemoteHost], window: NSWindow) async -> [TerminalSession]? {
         // 4. Five shell tabs: each host once (first contact), then two repeats.
         var shells: [TerminalSession] = []
         var lineages: [(ok: Bool, detail: String)] = []
-        // A tab's ssh signs through the agent whenever no ControlMaster for its host is up yet,
-        // so the agent must see it as started by AeroOps (ssh is a direct child of the app).
-        func lineageStep() {
-            report.tabLineages = lineages.map(\.detail)
-            step("agent sees tabs as started by AeroOps", !lineages.isEmpty && lineages.allSatisfy(\.ok), lineages.map(\.detail).joined(separator: " | "))
-        }
         for (index, host) in (hosts + hosts.prefix(2)).enumerated() {
-            guard let session = await openShell(host, firstContact: index < 3, connectingShot: index == 2 ? "tabs-connecting" : nil) else { return }
+            guard let session = await openShell(host, firstContact: index < 3, connectingShot: index == 2 ? "tabs-connecting" : nil) else { return nil }
             let ready = await wait(25) { session.state == .running && self.hasPrompt(session) }
             lineages.append(lineage(session))
-            let title = terminals.tab(for: session.id)?.title ?? "?"
-            step(
-                "tab \(index + 1) \(title)", ready,
-                ready ? "remote prompt" : "state \(session.state); screen \(lines(session).filter { !$0.isEmpty }.suffix(4)); "
-                    + "surface \(session.screenText() != nil), selected \(terminals.selectedSession?.id == session.id), "
-                    + "app tab \(model.selectedTab), window visible \(window.occlusionState.contains(.visible)), active \(NSApp.isActive)"
-            )
-            guard ready else { return lineageStep() }
+            recordTab(session, number: index + 1, ready: ready, window: window)
+            guard ready else {
+                recordLineages(lineages)
+                return nil
+            }
             shells.append(session)
         }
-        lineageStep()
+        recordLineages(lineages)
+        return shells
+    }
+
+    private func recordTab(_ session: TerminalSession, number: Int, ready: Bool, window: NSWindow) {
+        let title = terminals.tab(for: session.id)?.title ?? "?"
+        step(
+            "tab \(number) \(title)", ready,
+            ready ? "remote prompt" : "state \(session.state); screen \(lines(session).filter { !$0.isEmpty }.suffix(4)); "
+                + "surface \(session.screenText() != nil), selected \(terminals.selectedSession?.id == session.id), "
+                + "app tab \(model.selectedTab), window visible \(window.occlusionState.contains(.visible)), active \(NSApp.isActive)"
+        )
+    }
+
+    /// A tab's ssh signs through the agent whenever no ControlMaster for its host is up yet,
+    /// so the agent must see it as started by AeroOps (ssh is a direct child of the app).
+    private func recordLineages(_ lineages: [(ok: Bool, detail: String)]) {
+        report.tabLineages = lineages.map(\.detail)
+        step("agent sees tabs as started by AeroOps", !lineages.isEmpty && lineages.allSatisfy(\.ok), lineages.map(\.detail).joined(separator: " | "))
+    }
+
+    private func checkTerminals(hosts: [RemoteHost], down: RemoteHost, window: NSWindow) async {
+        let windowSize = window.frame.size
+        guard let shells = await openShellTabs(hosts, window: window) else { return }
         let rootPIDs = shells.map(\.processRootPID)
 
         // 5. A remote-command tab.
@@ -235,6 +255,11 @@ final class Phase4SelfTest {
         await capture("tabs")
         step("window keeps its size", window.frame.size == windowSize, "\(windowSize) -> \(window.frame.size) with \(terminals.sessions.count) tabs")
 
+        await checkSizes(shells, rootPIDs: rootPIDs)
+        await checkInteractiveUse(shells, hosts: hosts, window: window, windowSize: windowSize)
+    }
+
+    private func checkSizes(_ shells: [TerminalSession], rootPIDs: [pid_t?]) async {
         // 6. stty size and tput cols in every shell tab, against the surface grid.
         for (index, session) in shells.enumerated() {
             await checkSize(session, label: "SZ_\(index + 1)")
@@ -243,7 +268,9 @@ final class Phase4SelfTest {
             session.state == .running && pid != nil && session.processRootPID == pid && kill(pid!, 0) == 0
         }
         step("hidden tabs keep running", alive, "all \(shells.count) shells still on their first process after switching tabs")
+    }
 
+    private func checkInteractiveUse(_ shells: [TerminalSession], hosts: [RemoteHost], window: NSWindow, windowSize: NSSize) async {
         // 7. Full-screen programs.
         await checkVi(shells[2])
         await checkTop(shells[0])
@@ -670,8 +697,26 @@ final class Phase4SelfTest {
     // MARK: - Cleanup
 
     private func finish() async {
-        let ssh = model.ssh
-        report.agentPeers = ssh.agentEvents.compactMap { event in
+        checkAgentActivity()
+        if !quitPathRan {
+            terminals.closeAll()
+            await model.shutdownServices()
+        }
+        if let key {
+            Phase2SelfTest.checkNoKeyMaterial(key, step: step)
+        }
+        await revokeKey()
+        if let key {
+            await Phase2SelfTest.deleteKey(key, ssh: model.ssh, step: step)
+        }
+        if !Phase2SelfTest.keepsRoot {
+            try? FileManager.default.removeItem(at: Phase2SelfTest.root)
+        }
+        report.ok = !report.steps.isEmpty && report.steps.allSatisfy(\.ok)
+    }
+
+    private func checkAgentActivity() {
+        report.agentPeers = model.ssh.agentEvents.compactMap { event in
             guard case .connected(let peer) = event.kind else { return nil }
             return "\(peer.summary), Apple ssh \(peer.isAppleSSH), ancestors \(peer.ancestorPIDs)"
         }
@@ -682,38 +727,16 @@ final class Phase4SelfTest {
                 ? "none (\(report.agentPeers.count) agent connection(s))"
                 : "\(report.touchIDRequests.count), denied: \(report.touchIDRequests)"
         )
-        if !quitPathRan {
-            terminals.closeAll()
-            await model.shutdownServices()
+    }
+
+    private func revokeKey() async {
+        guard authorizeRan, let publicKeyPath else { return }
+        guard let script = Self.deauthorizeScript else {
+            return step("revoke key", false, "no executable remove-key.sh next to the authorize script")
         }
-        if let key {
-            let secret = try? KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-            let found = [Phase2SelfTest.root, AeroPaths.standard.dotDirectory]
-                .flatMap { Phase2SelfTest.filesContainingKeyMaterial(under: $0, secret: secret) }
-            step("no private key on disk", found.isEmpty && secret != nil, found.isEmpty ? "none under the root or ~/.aeroops" : "found: \(found)")
-        }
-        if authorizeRan, let publicKeyPath {
-            if let script = Self.deauthorizeScript {
-                let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [publicKeyPath])
-                let revoked = output.components(separatedBy: "revoked:").count - 1
-                step("revoke key", status == 0 && revoked == 3, "\(revoked) of 3 servers: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
-            } else {
-                step("revoke key", false, "no executable remove-key.sh next to the authorize script")
-            }
-        }
-        if let key {
-            do {
-                try await ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-                step("delete key", remaining == nil, "Keychain item removed \(remaining == nil)")
-            } catch {
-                step("delete key", false, error.localizedDescription)
-            }
-        }
-        if !Phase2SelfTest.keepsRoot {
-            try? FileManager.default.removeItem(at: Phase2SelfTest.root)
-        }
-        report.ok = !report.steps.isEmpty && report.steps.allSatisfy(\.ok)
+        let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [publicKeyPath])
+        let revoked = output.components(separatedBy: "revoked:").count - 1
+        step("revoke key", status == 0 && revoked == 3, "\(revoked) of 3 servers: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
 
     // MARK: - Helpers

@@ -12,7 +12,7 @@ import Foundation
 ///   IdentityAgent /Users/me/.aeroops/agent.sock
 ///   IdentityFile /Users/me/.aeroops/pub/<key-id>.pub
 ///   IdentitiesOnly yes
-///   UserKnownHostsFile /Users/me/.aeroops/known_hosts
+///   UserKnownHostsFile /Users/me/.aeroops/synced_known_hosts
 ///   StrictHostKeyChecking yes
 ///   ControlMaster auto
 ///   ControlPath /Users/me/.aeroops/cm/<16-hex hash>
@@ -133,12 +133,13 @@ public struct SSHConfigWriter: Sendable {
         }
     }
 
-    private func block(for host: RemoteHost) throws(SSHConfigError) -> String {
+    private func validateFields(of host: RemoteHost) throws(SSHConfigError) {
         guard HostValidation.isValidAddress(host.address) else { throw .invalidAddress(host.address) }
         guard HostValidation.isValidUser(host.user) else { throw .invalidUser(host.user) }
         guard (1...65535).contains(host.port) else { throw .invalidPort(host.port) }
+    }
 
-        let paths = context.paths
+    private func identityLines(for host: RemoteHost) throws(SSHConfigError) -> [(String, String)] {
         let identityAgent: String
         let identityFile: String
         var identitiesOnly = "yes"
@@ -147,30 +148,38 @@ public struct SSHConfigWriter: Sendable {
             identityAgent = "none"
             identityFile = "none"
         case .agent where context.agent == .system:
-            if let keyId = host.keyId, !HostValidation.isValidKeyID(keyId) { throw .invalidKeyID(keyId) }
+            _ = try validKeyID(of: host)
             identityAgent = "SSH_AUTH_SOCK"
             identityFile = "none"
             identitiesOnly = "no"
         case .agent:
             identityAgent = try ConfigValue.path(context.agentSocket)
-            if let keyId = host.keyId {
-                guard HostValidation.isValidKeyID(keyId) else { throw .invalidKeyID(keyId) }
-                identityFile = try ConfigValue.path(paths.publicKeysDirectory.appending(path: "\(keyId).pub"))
-            } else {
-                identityFile = "none"
-            }
+            identityFile = try agentIdentityFile(for: host)
         case .privateKeyFileForTesting(let key):
             identityAgent = "none"
             identityFile = try ConfigValue.path(key)
         }
+        return [("IdentityAgent", identityAgent), ("IdentityFile", identityFile), ("IdentitiesOnly", identitiesOnly)]
+    }
+
+    private func agentIdentityFile(for host: RemoteHost) throws(SSHConfigError) -> String {
+        guard let keyId = try validKeyID(of: host) else { return "none" }
+        return try ConfigValue.path(context.paths.publicKeysDirectory.appending(path: "\(keyId).pub"))
+    }
+
+    private func validKeyID(of host: RemoteHost) throws(SSHConfigError) -> String? {
+        guard let keyId = host.keyId, !HostValidation.isValidKeyID(keyId) else { return host.keyId }
+        throw .invalidKeyID(keyId)
+    }
+
+    private func block(for host: RemoteHost) throws(SSHConfigError) -> String {
+        try validateFields(of: host)
         var lines: [(String, String)] = [
             ("HostName", try ConfigValue.render(host.address, expandsTokens: true)),
             ("User", try ConfigValue.render(host.user, expandsTokens: false)),
             ("Port", String(host.port)),
-            ("IdentityAgent", identityAgent),
-            ("IdentityFile", identityFile),
-            ("IdentitiesOnly", identitiesOnly),
         ]
+        lines += try identityLines(for: host)
         if host.auth == .password {
             lines += [
                 ("PubkeyAuthentication", "no"),
@@ -181,7 +190,7 @@ public struct SSHConfigWriter: Sendable {
         let controlDirectory = try ConfigValue.path(context.controlMasterDirectory, trimmingTrailingSlash: true)
         let controlPath = ConfigValue.appendingUnquoted(controlDirectory, "/" + Self.controlSocketName(lines))
         lines += [
-            ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile)),
+            ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile) + " " + ConfigValue.path(context.legacyKnownHostsFile)),
             ("StrictHostKeyChecking", "yes"),
             ("ControlMaster", "auto"),
             ("ControlPath", controlPath),

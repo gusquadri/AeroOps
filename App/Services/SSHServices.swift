@@ -45,11 +45,16 @@ final class SSHServices {
 
     /// All keys, oldest first.
     private(set) var keys: [SSHKeyRecord] = []
-    /// Why the key store could not be opened or refreshed, if it could not.
-    private(set) var keyStoreError: String?
+    /// Why the key store could not be opened, or an older AeroOps's keys moved.
+    private var keySetupError: String?
+    /// Why the last reload of the keys failed.
+    private var keyReloadError: String?
+    var keyStoreError: String? { keySetupError ?? keyReloadError }
     private(set) var agentStatus: AgentStatus = .stopped
     /// Peer and signing events (connected, rejected, signed, sign failed), at most ``eventLimit``.
     private(set) var agentEvents: [AgentEvent] = []
+    /// Why the pinned host keys could not be read from the Keychain or copied for ssh, if they could not.
+    private(set) var hostKeyError: String?
     /// Hosts whose key changed, keyed by known_hosts name. Connections to them are refused.
     private(set) var hostKeyBlocks: [String: HostKeyBlock] = [:]
     /// Hosts left out of `ssh_config`, with the reason.
@@ -69,12 +74,12 @@ final class SSHServices {
     private(set) var askpassRefusals: [RemoteHost.ID: String] = [:]
 
     @ObservationIgnored let keyStore: KeyStore?
-    @ObservationIgnored let secretStore: any SecretStore
     @ObservationIgnored let hostKeys: HostKeyStore
     @ObservationIgnored let authorizer: PolicySigningAuthorizer
     @ObservationIgnored let passwords: HostPasswordVault
     @ObservationIgnored let passwordGate: PasswordAttemptGate
     @ObservationIgnored private let defaults: UserDefaults?
+    @ObservationIgnored private let importsLegacyItems: Bool
     @ObservationIgnored private var agent: SSHAgentServer?
     @ObservationIgnored private var eventPump: Task<Void, Never>?
     @ObservationIgnored private var askpassServer: AskpassServer?
@@ -90,28 +95,33 @@ final class SSHServices {
 
     /// - Parameters:
     ///   - defaults: Where the agent toggle is persisted; `nil` keeps it in memory (self-test, previews).
-    ///   - passwordStore: Where host passwords are kept; `nil` keeps them in memory (self-test, previews).
+    ///   - passwordKeychain: Where host passwords are kept; `nil` keeps them in memory (self-test, previews).
+    ///   - hostKeyKeychain: Where pinned host keys are kept; `nil` keeps them in memory (self-test, previews).
+    ///   - importsLegacyItems: Whether ``start()`` moves the keys, passwords and pins an older
+    ///     AeroOps kept on this Mac only into `keychain`, `passwordKeychain` and `hostKeyKeychain`.
     init(
         paths: AeroPaths,
-        secretStore: any SecretStore,
-        passwordStore: (any SecretStore)? = nil,
+        keychain: any KeychainStore,
+        passwordKeychain: (any KeychainStore)? = nil,
+        hostKeyKeychain: (any KeychainStore)? = nil,
+        importsLegacyItems: Bool = false,
         defaults: UserDefaults?,
         authorizer: PolicySigningAuthorizer = .localAuthentication()
     ) {
         self.paths = paths
-        self.secretStore = secretStore
         self.defaults = defaults
+        self.importsLegacyItems = importsLegacyItems
         self.authorizer = authorizer
-        let passwords = HostPasswordVault(store: passwordStore ?? InMemorySecretStore())
+        let passwords = HostPasswordVault(keychain: passwordKeychain ?? InMemoryKeychain())
         self.passwords = passwords
         passwordGate = PasswordAttemptGate { passwords.hasPassword(for: $0) }
         agentChoice = defaults?.bool(forKey: Self.systemAgentDefaultsKey) == true ? .system : .inApp
-        hostKeys = HostKeyStore(context: SSHContext(paths: paths))
+        hostKeys = HostKeyStore(context: SSHContext(paths: paths), keychain: hostKeyKeychain ?? InMemoryKeychain())
         do {
-            keyStore = try KeyStore(secretStore: secretStore, paths: paths)
+            keyStore = try KeyStore(keychain: keychain, paths: paths)
         } catch {
             keyStore = nil
-            keyStoreError = error.localizedDescription
+            keySetupError = error.localizedDescription
         }
     }
 
@@ -141,12 +151,53 @@ final class SSHServices {
         } catch {
             configError = error.localizedDescription
         }
+        await importLegacyItems()
+        await refreshHostKeys()
         await reloadKeys(rewritingPublicKeyFiles: true)
         await applyAgentChoice()
         startAskpass()
         writeConfig()
         await refreshHostKeyBlocks()
         observeSessionEnd()
+        observeActivation()
+    }
+
+    private func importLegacyItems() async {
+        guard importsLegacyItems, let keyStore else { return }
+        do {
+            try await keyStore.importLegacyKeys(metadataDirectory: paths.applicationSupport, secrets: KeychainSecretStore())
+        } catch {
+            keySetupError = error.localizedDescription
+        }
+        passwords.importLegacyPasswords(of: Set(hosts.map(\.id)), from: HostPasswordVault.legacyStore())
+        refreshPasswordHosts()
+    }
+
+    /// Copies the pins made on the user's other devices for ssh, after moving in the known_hosts
+    /// of an older AeroOps, and polls the hosts that were waiting on a key again.
+    func refreshHostKeys() async {
+        do {
+            if importsLegacyItems { try await hostKeys.importLegacyPins(from: paths.legacyKnownHosts) }
+            let changed = try await hostKeys.refreshKnownHostsFile()
+            hostKeyError = nil
+            await refreshHostKeyBlocks()
+            if changed { for host in hosts { hostKeysDidChange?(host) } }
+        } catch {
+            hostKeyError = error.localizedDescription
+        }
+    }
+
+    /// Keys and passwords synced from the user's other devices show up when the app comes forward.
+    private func observeActivation() {
+        let activations = NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification)
+        sessionObservers.append(Task { [weak self] in
+            for await _ in activations { await self?.keychainMayHaveChanged() }
+        })
+    }
+
+    private func keychainMayHaveChanged() async {
+        if await reloadKeys(), isStarted { writeConfig() }
+        refreshPasswordHosts()
     }
 
     /// Closes every ControlMaster connection and stops the agent (removing its socket). Returns
@@ -363,33 +414,43 @@ final class SSHServices {
         return keys.first { $0.id.uuidString == keyId }
     }
 
-    /// Re-reads the key list (and optionally rewrites every `.pub` file).
-    func reloadKeys(rewritingPublicKeyFiles: Bool = false) async {
-        guard let keyStore else { return }
-        if rewritingPublicKeyFiles {
-            do {
-                try await keyStore.writePublicKeyFiles()
-            } catch {
-                keyStoreError = error.localizedDescription
-            }
+    /// Re-reads the keys from the Keychain, including ones synced from the user's other devices
+    /// (and optionally rewrites every `.pub` file). Returns whether the keys changed.
+    @discardableResult
+    func reloadKeys(rewritingPublicKeyFiles: Bool = false) async -> Bool {
+        guard let keyStore else { return false }
+        var changed = false
+        do {
+            changed = try await keyStore.reload()
+            if rewritingPublicKeyFiles { try await keyStore.writePublicKeyFiles() }
+            keyReloadError = nil
+        } catch {
+            keyReloadError = error.localizedDescription
         }
         keys = await keyStore.keys
+        return changed
     }
 
-    func generateKey(_ type: KeyGenerationType, name: String, policy: SigningPolicy) async throws -> SSHKeyRecord {
-        let record = try await requireKeyStore().generate(type, name: name, policy: policy)
+    func generateKey(_ type: KeyGenerationType, name: String, policy: SigningPolicy, syncs: Bool = true) async throws -> SSHKeyRecord {
+        let record = try await requireKeyStore().generate(type, name: name, policy: policy, syncs: syncs)
         await keysDidChange()
         return record
     }
 
     /// Imports an unencrypted OpenSSH private key file. The text is read into memory only; the
     /// file is left alone (the UI then offers to move it to the Trash).
-    func importKey(contentsOf url: URL, policy: SigningPolicy) async throws -> SSHKeyRecord {
+    func importKey(contentsOf url: URL, policy: SigningPolicy, syncs: Bool = true) async throws -> SSHKeyRecord {
         let store = try requireKeyStore()
         let text = try Self.readPrivateKeyText(url)
-        let record = try await store.importOpenSSHPrivateKey(text, policy: policy)
+        let record = try await store.importOpenSSHPrivateKey(text, policy: policy, syncs: syncs)
         await keysDidChange()
         return record
+    }
+
+    /// Turns iCloud Keychain sync on or off for a key.
+    func setSyncs(_ syncs: Bool, forKey id: UUID) async throws {
+        try await requireKeyStore().setSyncs(id: id, syncs)
+        await keysDidChange()
     }
 
     func renameKey(_ id: UUID, to name: String) async throws {
@@ -448,6 +509,10 @@ final class SSHServices {
     /// Saves `password` for the host `id` in the Keychain, then lets ssh try it again.
     func setPassword(_ password: String, for id: RemoteHost.ID) throws(HostPasswordError) {
         try passwords.save(password, for: id)
+        passwordDidChange(id)
+    }
+
+    private func passwordDidChange(_ id: RemoteHost.ID) {
         askpassRefusals[id] = nil
         let gate = passwordGate
         Task { [weak self] in
@@ -458,7 +523,7 @@ final class SSHServices {
 
     /// Deletes the saved password of the host `id`, e.g. when the host is deleted or switched to
     /// key authentication.
-    func deletePassword(for id: RemoteHost.ID) throws(SecretStoreError) {
+    func deletePassword(for id: RemoteHost.ID) throws(KeychainError) {
         try passwords.delete(for: id)
         askpassRefusals[id] = nil
         let gate = passwordGate
@@ -512,8 +577,13 @@ extension SSHServices: HostInventoryObserver {
     func hostsDidChange(_ hosts: [RemoteHost]) {
         let previous = Dictionary(self.hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.hosts = hosts
-        passwords.setPasswordHosts(Set(hosts.lazy.filter { $0.auth == .password }.map(\.id)))
-        // New connection settings deserve a fresh attempt with the saved password.
+        refreshPasswordHosts()
+        resetPasswordAttempts(since: previous)
+        if isStarted { writeConfig() }
+    }
+
+    /// New connection settings deserve a fresh attempt with the saved password.
+    private func resetPasswordAttempts(since previous: [RemoteHost.ID: RemoteHost]) {
         for host in hosts where host.auth == .password {
             guard let old = previous[host.id],
                   old.address != host.address || old.port != host.port || old.user != host.user || old.auth != host.auth
@@ -522,7 +592,11 @@ extension SSHServices: HostInventoryObserver {
             let gate = passwordGate
             Task { await gate.reset(host.id) }
         }
-        if isStarted { writeConfig() }
+    }
+
+    private func refreshPasswordHosts() {
+        let replaced = passwords.setPasswordHosts(Set(hosts.lazy.filter { $0.auth == .password }.map(\.id)))
+        for id in replaced { passwordDidChange(id) }
     }
 }
 
@@ -534,7 +608,7 @@ extension SSHServices {
             dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory),
             applicationSupport: root.appending(path: "support", directoryHint: .isDirectory)
         )
-        return SSHServices(paths: paths, secretStore: InMemorySecretStore(), defaults: nil)
+        return SSHServices(paths: paths, keychain: InMemoryKeychain(), defaults: nil)
     }
 
     /// Adds sample keys and a blocked host, for previews and the DEBUG demo options.

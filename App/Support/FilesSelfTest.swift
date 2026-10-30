@@ -27,8 +27,6 @@ import SSHKit
 /// quits.
 @MainActor
 struct FilesSelfTest {
-    static var isRequested: Bool { UserDefaults.standard.string(forKey: "AeroSelfTest") == "files" }
-
     /// Size of the large file, enough for many SFTP read/write requests in flight.
     nonisolated static let largeFileBytes = 3 * 1024 * 1024 + 123
 
@@ -77,22 +75,11 @@ struct FilesSelfTest {
         let ssh = model.ssh
         r.report.root = Phase2SelfTest.root.path(percentEncoded: false)
 
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps files self-test", policy: .always)
-            r.report.keyFingerprint = key.fingerprint
-            r.step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
-        } catch {
-            r.step("generate key", false, error.localizedDescription)
+        guard let key = await Phase2SelfTest.generateKey(name: "AeroOps files self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil, hosts: [])
         }
-        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-        if let script = Phase2SelfTest.authorizeScript {
-            let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-            r.step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-        } else {
-            r.step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
-        }
+        r.report.keyFingerprint = key.fingerprint
+        await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step)
 
         let source: URL
         do {

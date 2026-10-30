@@ -116,15 +116,15 @@ private struct WireReader {
     }
 }
 
-/// Host-key and known_hosts failures.
+/// Host-key, pin and known_hosts failures.
 public enum HostKeyError: Error, Sendable, Hashable, LocalizedError {
     /// A key that does not parse.
     case invalidKey(String)
     /// The host's address or port cannot be scanned.
     case invalidHost(String)
-    /// known_hosts exists but cannot be read.
+    /// The pins could not be read from the Keychain, or a known_hosts file could not be read.
     case knownHostsUnreadable(String)
-    /// known_hosts could not be written.
+    /// The pins could not be saved, or ssh's known_hosts copy could not be written.
     case knownHostsWriteFailed(String)
     /// ``HostKeyStore/trust(_:for:replacingPinned:)`` would add a key of a type that already has
     /// a different pinned key. Pass `replacingPinned: true` after the user confirmed the change.
@@ -134,8 +134,8 @@ public enum HostKeyError: Error, Sendable, Hashable, LocalizedError {
         switch self {
         case .invalidKey(let reason): "Invalid host key: \(reason)."
         case .invalidHost(let reason): "Invalid host: \(reason)."
-        case .knownHostsUnreadable(let reason): "Could not read known_hosts: \(reason)"
-        case .knownHostsWriteFailed(let reason): "Could not write known_hosts: \(reason)"
+        case .knownHostsUnreadable(let reason): "Could not read the pinned host keys: \(reason)"
+        case .knownHostsWriteFailed(let reason): "Could not save the pinned host keys: \(reason)"
         case .conflictsWithPinnedKey(let pinned):
             "A different key is already trusted for this host (\(pinned.map(\.description).joined(separator: ", ")))."
         }

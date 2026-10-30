@@ -53,11 +53,9 @@ struct TestEnvironment {
 
     init(approve: Bool = true) throws {
         scratch = try ScratchDirectory()
-        keyStore = try KeyStore(
-            secretStore: InMemorySecretStore(), metadataDirectory: scratch.file("keys"), publicKeysDirectory: scratch.file("pub")
-        )
-        vault = HostPasswordVault(store: InMemorySecretStore())
-        hostKeys = HostKeyStore(knownHostsFile: scratch.file("known_hosts"), scanner: EmbeddedHostKeyScanner())
+        keyStore = try KeyStore(keychain: InMemoryKeychain(), publicKeysDirectory: scratch.file("pub"))
+        vault = HostPasswordVault(keychain: InMemoryKeychain())
+        hostKeys = HostKeyStore(keychain: InMemoryKeychain(), knownHostsFile: scratch.file("known_hosts"), scanner: EmbeddedHostKeyScanner())
         verifier = ScriptedVerifier(answer: approve)
     }
 

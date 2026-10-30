@@ -35,7 +35,6 @@ import SSHKit
 @MainActor
 struct Phase3SelfTest {
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase3" }
     static var revokeScript: URL? {
         if let path = defaults.string(forKey: "AeroSelfTestRevokeScript") { return URL(filePath: path) }
         return Phase2SelfTest.authorizeScript?.deletingLastPathComponent().appending(path: "remove-key.sh")
@@ -210,25 +209,18 @@ struct Phase3SelfTest {
         r.step("services", true, "agent running, monitoring started")
 
         // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps phase 3 self-test", policy: .always)
-        } catch {
-            r.step("generate key", false, error.localizedDescription)
+        guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 3 self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
-        r.step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
 
         // 2. Authorize it on every dev server.
-        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-        if let script = Phase2SelfTest.authorizeScript {
-            let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-            r.step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            guard status == 0 else { return await finish(r, key: key) }
-        } else {
-            r.step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
+        if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
+            await checkHosts(key, launchedAt: launchedAt, r)
         }
+        return await finish(r, key: key)
+    }
 
+    private func checkHosts(_ key: SSHKeyRecord, launchedAt: Date?, _ r: Recorder) async {
         // 3. Hosts. The closed port gets a made-up pinned key: otherwise its monitor would hold it
         //    for first contact (ssh-keyscan fails) and never try to connect.
         let keyID = key.id.uuidString
@@ -240,15 +232,25 @@ struct Phase3SelfTest {
         ]
         let closed = hosts[3].0
         do {
-            try await ssh.trust([SampleHostKeys.ed25519(seed: 31)], for: closed, replacingPinned: false)
+            try await model.ssh.trust([SampleHostKeys.ed25519(seed: 31)], for: closed, replacingPinned: false)
         } catch {
             r.step("pin closed-port key", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return
         }
 
         // 4. Activity: the main window in front and the app active means 5 s polls.
         await bringMainWindowForward(r)
 
+        let tracker = makeTracker(hosts)
+        let monitoring = model.monitoring
+        monitoring.didApplyUpdates = { tracker.receive($0) }
+        defer { monitoring.didApplyUpdates = nil }
+
+        guard addHosts(hosts, tracker: tracker, launchedAt: launchedAt, r) else { return }
+        await checkPolling(hosts, closed: closed, tracker: tracker, launchedAt: launchedAt, r)
+    }
+
+    private func makeTracker(_ hosts: [(RemoteHost, Bool)]) -> Tracker {
         // 5. Watch the dashboard's batches; trust first-contact keys as the sheet's Trust would.
         let tracker = Tracker()
         for (host, expectsNumbers) in hosts {
@@ -268,9 +270,10 @@ struct Phase3SelfTest {
                 }
             }
         }
-        monitoring.didApplyUpdates = { tracker.receive($0) }
-        defer { monitoring.didApplyUpdates = nil }
+        return tracker
+    }
 
+    private func addHosts(_ hosts: [(RemoteHost, Bool)], tracker: Tracker, launchedAt: Date?, _ r: Recorder) -> Bool {
         let addedAt = Date.now
         do {
             for (host, _) in hosts {
@@ -280,12 +283,15 @@ struct Phase3SelfTest {
             model.selection = nil
         } catch {
             r.step("add hosts", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return false
         }
         r.report.hostsAddedAfterLaunch = launchedAt.map { Self.rounded(addedAt.timeIntervalSince($0)) }
-        let rejected = hosts.compactMap { ssh.configRejections[$0.0.id].map { "\($0)" } }
+        let rejected = hosts.compactMap { model.ssh.configRejections[$0.0.id].map { "\($0)" } }
         r.step("add hosts", rejected.isEmpty, rejected.isEmpty ? "\(hosts.count) hosts monitored" : "rejected: \(rejected)")
+        return true
+    }
 
+    private func checkPolling(_ hosts: [(RemoteHost, Bool)], closed: RemoteHost, tracker: Tracker, launchedAt: Date?, _ r: Recorder) async {
         // 6. Wait for numbers, CPU and offline (or an auth failure, which ends the run at once).
         let real = hosts.filter(\.1).map(\.0)
         await waitUntil(seconds: Self.waitLimit) {
@@ -296,23 +302,15 @@ struct Phase3SelfTest {
         if let failure = tracker.authFailure {
             r.report.authFailed = true
             r.step("authentication", false, "\(failure); stopping now (sshd PerSourcePenalties)")
-            return await finish(r, key: key)
+            return
         }
         checkTimings(r, tracker: tracker, real: real, closed: closed, launchedAt: launchedAt)
         checkDisplayStates(r, hosts: hosts.map(\.0))
 
         let online = real.filter { tracker.entries[$0.id]?.firstNumbersAt != nil }
-        guard !online.isEmpty else { return await finish(r, key: key) }
+        guard !online.isEmpty else { return }
 
-        // 7. Refresh (⌘R): every online host samples again at once.
-        try? await Task.sleep(for: .seconds(1))
-        let refreshStart = (Date.now, online.map { tracker.samples($0.id) })
-        model.refreshAll()
-        let refreshed = await waitUntil(seconds: 4) {
-            zip(online, refreshStart.1).allSatisfy { tracker.samples($0.id) > $1 }
-        }
-        r.report.refreshAllSeconds = Self.rounded(Date.now.timeIntervalSince(refreshStart.0))
-        r.step("refresh all", refreshed, "new samples from \(online.count) hosts in \(r.report.refreshAllSeconds ?? 0) s")
+        await checkRefresh(online, tracker: tracker, r)
 
         // 8. Sleep pauses polling; wake polls at once.
         await checkSleepAndWake(r, tracker: tracker, online: online)
@@ -325,7 +323,18 @@ struct Phase3SelfTest {
         }
 
         r.report.hosts = hosts.map { result(for: $0.0, tracker: tracker, launchedAt: launchedAt) }
-        return await finish(r, key: key)
+    }
+
+    /// Refresh (⌘R): every online host samples again at once.
+    private func checkRefresh(_ online: [RemoteHost], tracker: Tracker, _ r: Recorder) async {
+        try? await Task.sleep(for: .seconds(1))
+        let refreshStart = (Date.now, online.map { tracker.samples($0.id) })
+        model.refreshAll()
+        let refreshed = await waitUntil(seconds: 4) {
+            zip(online, refreshStart.1).allSatisfy { tracker.samples($0.id) > $1 }
+        }
+        r.report.refreshAllSeconds = Self.rounded(Date.now.timeIntervalSince(refreshStart.0))
+        r.step("refresh all", refreshed, "new samples from \(online.count) hosts in \(r.report.refreshAllSeconds ?? 0) s")
     }
 
     // MARK: - Checks
@@ -458,11 +467,7 @@ struct Phase3SelfTest {
         let ssh = model.ssh
         let paths = ssh.paths
         if let key {
-            let secret = try? KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-            let roots = [Phase2SelfTest.root, AeroPaths.standard.dotDirectory]
-            let found = roots.flatMap { Phase2SelfTest.filesContainingKeyMaterial(under: $0, secret: secret) }
-            r.report.privateKeyMaterialFound = found
-            r.step("no private key on disk", found.isEmpty, found.isEmpty ? "checked \(roots.map { $0.path(percentEncoded: false) })" : "found: \(found)")
+            r.report.privateKeyMaterialFound = Phase2SelfTest.checkNoKeyMaterial(key, step: r.step)
         }
 
         let closed = await model.shutdownServices()
@@ -470,19 +475,8 @@ struct Phase3SelfTest {
         r.step("shutdown", socketGone && !model.monitoring.isRunning, "monitoring stopped, masters closed \(closed), agent socket removed \(socketGone)")
 
         if let key {
-            let pub = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-            // Revoke before deleting: the script reads the .pub.
-            if let script = Self.revokeScript, Phase2SelfTest.authorizeScript != nil {
-                let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-                r.step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            do {
-                try await ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-                r.step("delete key", remaining == nil, "Keychain item removed \(remaining == nil)")
-            } catch {
-                r.step("delete key", false, error.localizedDescription)
-            }
+            await Phase2SelfTest.revokeKey(key, ssh: ssh, step: r.step)
+            await Phase2SelfTest.deleteKey(key, ssh: ssh, step: r.step)
         }
         if !Phase2SelfTest.keepsRoot {
             try? FileManager.default.removeItem(at: Phase2SelfTest.root)

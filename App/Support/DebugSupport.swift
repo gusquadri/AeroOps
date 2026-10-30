@@ -14,9 +14,9 @@ import UniformTypeIdentifiers
 ///
 /// ```sh
 /// AeroOps.app/Contents/MacOS/AeroOps \
-///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # hosts.json, keys.json and the ~/.aeroops files
-///                                                # (in <dir>/dot) live here; keys stay in memory
-///   -AeroOpsDemoHosts YES \                      # an empty data directory gets the seven sample hosts
+///   -AeroOpsDataDirectory /tmp/aeroops-demo \   # the ~/.aeroops files (in <dir>/dot) live here;
+///                                                # hosts, keys and pins stay in memory
+///   -AeroOpsDemoHosts YES \                      # start with the seven sample hosts
 ///   -AeroOpsDemoStatuses YES \                   # every card state: online, stale, host-key issues, offline, unsupported,
 ///                                                # monitoring off
 ///   -AeroOpsDemoKeys YES \                       # sample keys, and a changed host key on the third host
@@ -47,6 +47,8 @@ import UniformTypeIdentifiers
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest files -AeroSelfTestOutput /tmp/aeroops-files.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # Files tab over SFTP, see FilesSelfTest
+///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest sync -AeroSelfTestOutput /tmp/aeroops-sync.json  # iCloud Keychain, see SyncSelfTest
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest perf -AeroSelfTestOutput /tmp/aeroops-perf.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # 20 hosts: app and ssh CPU, memory; see PerfSelfTest
@@ -96,13 +98,11 @@ enum DebugLaunchOptions {
     /// A model for a debug launch, or `nil` for the real one.
     ///
     /// - `-AeroSelfTest`: a fresh temporary root (see ``Phase2SelfTest`` and ``Phase3SelfTest``).
-    /// - `-AeroOpsDataDirectory`: everything under that directory, keys in memory, so demo and
+    /// - `-AeroOpsDataDirectory`: files under that directory, hosts and keys in memory, so demo and
     ///   snapshot runs never touch `~/.aeroops`, the real hosts or the Keychain.
     @MainActor
     static func makeModel() -> AppModel? {
-        if Phase2SelfTest.isRequested || Phase3SelfTest.isRequested || Phase4SelfTest.isRequested
-            || Phase5SelfTest.isRequested || Phase7SelfTest.isRequested || PerfSelfTest.isRequested
-            || FilesSelfTest.isRequested {
+        if requestedSelfTest != nil {
             let model = Phase2SelfTest.makeModel()
             model.onboarding.suppressesAutomaticPresentation = true
             return model
@@ -112,8 +112,8 @@ enum DebugLaunchOptions {
             dotDirectory: dataDirectory.appending(path: "dot", directoryHint: .isDirectory),
             applicationSupport: dataDirectory
         )
-        let ssh = SSHServices(paths: paths, secretStore: InMemorySecretStore(), defaults: nil)
-        return AppModel(hostStore: HostStore(directory: dataDirectory), ssh: ssh)
+        let ssh = SSHServices(paths: paths, keychain: InMemoryKeychain(), defaults: nil)
+        return AppModel(hostStore: .inMemory(), ssh: ssh)
     }
 
     @MainActor
@@ -144,35 +144,40 @@ enum DebugLaunchOptions {
     @MainActor
     static func servicesDidStart(_ model: AppModel) async {
         if demoKeys, dataDirectory != nil {
-            await model.ssh.loadSampleData(blocking: model.hosts.dropFirst(2).first)
-            // Give hosts without a key one of the sample keys, so the editor and Keys pane show usage.
-            let keys = model.ssh.keys
-            for (index, host) in model.hosts.enumerated() where host.keyId == nil && !keys.isEmpty {
-                var host = host
-                host.keyId = keys[index % keys.count].id.uuidString
-                try? model.updateHost(host)
-            }
+            await loadDemoKeys(into: model)
         }
-        if Phase2SelfTest.isRequested {
-            await Phase2SelfTest(model: model).runAndQuit()
-        } else if Phase5SelfTest.isRequested {
-            await Phase5SelfTest(model: model).runAndQuit()
+        await requestedSelfTest?(model)
+    }
+
+    /// Loads the sample keys and gives hosts without a key one of them, so the editor and Keys
+    /// pane show usage.
+    @MainActor
+    private static func loadDemoKeys(into model: AppModel) async {
+        await model.ssh.loadSampleData(blocking: model.hosts.dropFirst(2).first)
+        let keys = model.ssh.keys
+        for (index, host) in model.hosts.enumerated() where host.keyId == nil && !keys.isEmpty {
+            var host = host
+            host.keyId = keys[index % keys.count].id.uuidString
+            try? model.updateHost(host)
         }
-        if Phase3SelfTest.isRequested {
-            await Phase3SelfTest(model: model).runAndQuit()
-        }
-        if Phase4SelfTest.isRequested {
-            await Phase4SelfTest(model: model).runAndQuit()
-        }
-        if Phase7SelfTest.isRequested {
-            await Phase7SelfTest(model: model).runAndQuit()
-        }
-        if PerfSelfTest.isRequested {
-            await PerfSelfTest(model: model).runAndQuit()
-        }
-        if FilesSelfTest.isRequested {
-            await FilesSelfTest(model: model).runAndQuit()
-        }
+    }
+
+    /// The self-test `-AeroSelfTest` names, each of which runs and quits.
+    @MainActor
+    private static let selfTests: [String: @MainActor (AppModel) async -> Void] = [
+        "phase2": { await Phase2SelfTest(model: $0).runAndQuit() },
+        "phase3": { await Phase3SelfTest(model: $0).runAndQuit() },
+        "phase4": { await Phase4SelfTest(model: $0).runAndQuit() },
+        "phase5": { await Phase5SelfTest(model: $0).runAndQuit() },
+        "phase7": { await Phase7SelfTest(model: $0).runAndQuit() },
+        "perf": { await PerfSelfTest(model: $0).runAndQuit() },
+        "files": { await FilesSelfTest(model: $0).runAndQuit() },
+        "sync": { _ in await SyncSelfTest().runAndQuit() },
+    ]
+
+    @MainActor
+    private static var requestedSelfTest: (@MainActor (AppModel) async -> Void)? {
+        defaults.string(forKey: "AeroSelfTest").flatMap { selfTests[$0] }
     }
 }
 

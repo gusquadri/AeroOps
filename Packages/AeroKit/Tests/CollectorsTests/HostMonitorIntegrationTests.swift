@@ -28,6 +28,30 @@ struct HostMonitorIntegrationTests {
         var host: RemoteHost
     }
 
+    private struct Observations {
+        var firstSnapshot: [RemoteHost.ID: Duration] = [:]
+        var firstCPU: [RemoteHost.ID: (Duration, MetricsSnapshot)] = [:]
+        var offlineAfter: Duration?
+        var closedStatuses: [HostStatus] = []
+
+        /// Whether the first phase is over: every server has a CPU %, or 12 s have passed.
+        mutating func recordOnline(_ update: HostMonitorUpdate, elapsed: Duration, serverCount: Int) -> Bool {
+            guard let snapshot = update.snapshot, update.status == .online else { return false }
+            if firstSnapshot[update.hostID] == nil { firstSnapshot[update.hostID] = elapsed }
+            if snapshot.cpuPercent != nil, firstCPU[update.hostID] == nil { firstCPU[update.hostID] = (elapsed, snapshot) }
+            return firstCPU.count == serverCount || elapsed > .seconds(12)
+        }
+
+        /// Whether the wait is over: the closed port went offline, or 35 s have passed.
+        mutating func recordClosed(_ update: HostMonitorUpdate, elapsed: Duration) -> Bool {
+            closedStatuses.append(update.status)
+            guard update.status == .offline else { return elapsed > .seconds(35) }
+            #expect(update.lastError == .connectionRefused, "\(update.message ?? "-")")
+            offlineAfter = elapsed
+            return true
+        }
+    }
+
     private let servers = [
         Server(label: "dev@localhost:2222", container: "aeroops-ssh",
                host: RemoteHost(name: "dev", address: "localhost", port: 2222, user: "dev")),
@@ -74,13 +98,26 @@ struct HostMonitorIntegrationTests {
 
         // Pin each server's Ed25519 key (one keyscan connection each). Nothing listens on the
         // closed port, so any pin lets it past the monitor's unknown-key check.
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         for server in servers {
             try await store.trust(try await scanEd25519(server.host), for: server.host)
         }
         try await store.trust(try HostKey(type: "ssh-ed25519", base64: "AAAAC3NzaC1lZDI1NTE5AAAAIPfVoGPvXD/pnZyxb+hG6xVPXZ4tyYudnqH3H3ZcLQ1B"), for: closed)
 
         let coordinator = MonitorCoordinator(runner: SSHRunner(context: context, hostKeys: store), hostKeys: store)
+        let seen = await watch(coordinator, closed: closed)
+
+        for server in servers {
+            try expectPlausibleMetrics(server, seen)
+        }
+        let offline = try #require(seen.offlineAfter, "closed port never went offline: \(seen.closedStatuses)")
+        #expect(offline <= .seconds(30))
+        #expect(seen.closedStatuses.prefix(3) == [.loading, .stale, .stale])
+        print(String(format: "HostMonitor integration: 127.0.0.1:1 offline after %.2f s (%@)", Self.seconds(offline), seen.closedStatuses.map(\.rawValue).joined(separator: " → ")))
+    }
+
+    @MainActor
+    private func watch(_ coordinator: MonitorCoordinator, closed: RemoteHost) async -> Observations {
         let updates = coordinator.updates
         let watchdog = Task { @MainActor in
             try? await Task.sleep(for: .seconds(50))
@@ -90,71 +127,59 @@ struct HostMonitorIntegrationTests {
 
         // Phase 1: the three servers, visible (5 s cadence).
         var started = ContinuousClock.now
-        var firstSnapshot: [RemoteHost.ID: Duration] = [:]
-        var firstCPU: [RemoteHost.ID: (Duration, MetricsSnapshot)] = [:]
-        var offlineAfter: Duration?
-        var closedStatuses: [HostStatus] = []
+        var seen = Observations()
         var phase = 1
         coordinator.setHosts(servers.map(\.host))
 
         for await update in updates {
             let elapsed = started.duration(to: .now)
-            if update.lastError == .authFailed || update.hostKeyIssue != nil {
-                Issue.record("Aborting on \(update.hostID): \(update.message ?? "-")")
-                break
-            }
+            if abortsRun(update) { break }
             if phase == 1 {
-                guard let snapshot = update.snapshot, update.status == .online else { continue }
-                if firstSnapshot[update.hostID] == nil { firstSnapshot[update.hostID] = elapsed }
-                if snapshot.cpuPercent != nil, firstCPU[update.hostID] == nil { firstCPU[update.hostID] = (elapsed, snapshot) }
-                if firstCPU.count == servers.count || elapsed > .seconds(12) {
+                if seen.recordOnline(update, elapsed: elapsed, serverCount: servers.count) {
                     // Phase 2: a host on a closed port must go offline within 30 s.
                     phase = 2
                     started = ContinuousClock.now
                     coordinator.setHosts(servers.map(\.host) + [closed])
                 }
-            } else if update.hostID == closed.id {
-                closedStatuses.append(update.status)
-                if update.status == .offline {
-                    #expect(update.lastError == .connectionRefused, "\(update.message ?? "-")")
-                    offlineAfter = elapsed
-                    break
-                }
-                if elapsed > .seconds(35) { break }
+            } else if update.hostID == closed.id, seen.recordClosed(update, elapsed: elapsed) {
+                break
             }
         }
         await coordinator.shutdown()
         watchdog.cancel()
+        return seen
+    }
 
-        for server in servers {
-            let id = server.host.id
-            let snapshotAt = try #require(firstSnapshot[id], "\(server.label): no snapshot")
-            let (cpuAt, snapshot) = try #require(firstCPU[id], "\(server.label): no CPU % by the second poll")
-            #expect(cpuAt <= .seconds(10), "\(server.label): CPU % after \(cpuAt)")
-            let cpu = try #require(snapshot.cpuPercent)
-            #expect((0...100).contains(cpu), "\(server.label): cpu \(cpu)")
-            #expect((snapshot.cpuCount ?? 0) >= 1, "\(server.label)")
-            #expect(snapshot.memTotalBytes > 64 << 20, "\(server.label): mem total \(snapshot.memTotalBytes)")
-            #expect(snapshot.memUsedBytes > 0 && snapshot.memUsedBytes <= snapshot.memTotalBytes, "\(server.label)")
-            #expect(snapshot.uptimeSeconds > 0, "\(server.label)")
-            #expect(snapshot.load1 >= 0 && snapshot.load15 >= 0, "\(server.label)")
-            #expect(!snapshot.hostname.isEmpty, "\(server.label)")
-            #expect(snapshot.kernel.hasPrefix("Linux "), "\(server.label): \(snapshot.kernel)")
-            let root = snapshot.disk(mountedAt: "/") ?? snapshot.disks.first
-            let disk = try #require(root, "\(server.label): no disks")
-            #expect(disk.totalBytes > 0 && disk.usedBytes >= 0 && disk.usedBytes <= disk.totalBytes, "\(server.label)")
-            print(String(
-                format: "HostMonitor integration: %@: first snapshot %.2f s, CPU %% at %.2f s: cpu %.1f%% of %d, mem %.2f/%.2f GiB, load %.2f, %@ %.0f%% of %.1f GiB, %@",
-                server.label, Self.seconds(snapshotAt), Self.seconds(cpuAt), cpu, snapshot.cpuCount ?? 0,
-                Double(snapshot.memUsedBytes) / 1_073_741_824, Double(snapshot.memTotalBytes) / 1_073_741_824,
-                snapshot.load1, disk.mount, (disk.usedFraction ?? 0) * 100, Double(disk.totalBytes) / 1_073_741_824,
-                snapshot.kernel
-            ))
-        }
-        let offline = try #require(offlineAfter, "closed port never went offline: \(closedStatuses)")
-        #expect(offline <= .seconds(30))
-        #expect(closedStatuses.prefix(3) == [.loading, .stale, .stale])
-        print(String(format: "HostMonitor integration: 127.0.0.1:1 offline after %.2f s (%@)", Self.seconds(offline), closedStatuses.map(\.rawValue).joined(separator: " → ")))
+    private func abortsRun(_ update: HostMonitorUpdate) -> Bool {
+        guard update.lastError == .authFailed || update.hostKeyIssue != nil else { return false }
+        Issue.record("Aborting on \(update.hostID): \(update.message ?? "-")")
+        return true
+    }
+
+    private func expectPlausibleMetrics(_ server: Server, _ seen: Observations) throws {
+        let id = server.host.id
+        let snapshotAt = try #require(seen.firstSnapshot[id], "\(server.label): no snapshot")
+        let (cpuAt, snapshot) = try #require(seen.firstCPU[id], "\(server.label): no CPU % by the second poll")
+        #expect(cpuAt <= .seconds(10), "\(server.label): CPU % after \(cpuAt)")
+        let cpu = try #require(snapshot.cpuPercent)
+        #expect((0...100).contains(cpu), "\(server.label): cpu \(cpu)")
+        #expect((snapshot.cpuCount ?? 0) >= 1, "\(server.label)")
+        #expect(snapshot.memTotalBytes > 64 << 20, "\(server.label): mem total \(snapshot.memTotalBytes)")
+        #expect(snapshot.memUsedBytes > 0 && snapshot.memUsedBytes <= snapshot.memTotalBytes, "\(server.label)")
+        #expect(snapshot.uptimeSeconds > 0, "\(server.label)")
+        #expect(snapshot.load1 >= 0 && snapshot.load15 >= 0, "\(server.label)")
+        #expect(!snapshot.hostname.isEmpty, "\(server.label)")
+        #expect(snapshot.kernel.hasPrefix("Linux "), "\(server.label): \(snapshot.kernel)")
+        let root = snapshot.disk(mountedAt: "/") ?? snapshot.disks.first
+        let disk = try #require(root, "\(server.label): no disks")
+        #expect(disk.totalBytes > 0 && disk.usedBytes >= 0 && disk.usedBytes <= disk.totalBytes, "\(server.label)")
+        print(String(
+            format: "HostMonitor integration: %@: first snapshot %.2f s, CPU %% at %.2f s: cpu %.1f%% of %d, mem %.2f/%.2f GiB, load %.2f, %@ %.0f%% of %.1f GiB, %@",
+            server.label, Self.seconds(snapshotAt), Self.seconds(cpuAt), cpu, snapshot.cpuCount ?? 0,
+            Double(snapshot.memUsedBytes) / 1_073_741_824, Double(snapshot.memTotalBytes) / 1_073_741_824,
+            snapshot.load1, disk.mount, (disk.usedFraction ?? 0) * 100, Double(disk.totalBytes) / 1_073_741_824,
+            snapshot.kernel
+        ))
     }
 
     private static func seconds(_ duration: Duration) -> Double {

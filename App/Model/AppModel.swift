@@ -1,5 +1,5 @@
 import AeroCore
-import Foundation
+import AppKit
 import Observation
 import SSHKit
 import TerminalKit
@@ -29,7 +29,7 @@ import TerminalKit
 final class AppModel {
     // MARK: Inventory
 
-    /// The persisted host inventory (`hosts.json`).
+    /// The host inventory, synced with the user's other devices through iCloud Keychain.
     let hostStore: HostStore
 
     /// All hosts, in inventory order.
@@ -79,6 +79,7 @@ final class AppModel {
     private(set) var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
 
     @ObservationIgnored private var inventoryObservers: [any HostInventoryObserver] = []
+    @ObservationIgnored private var activationObserver: Task<Void, Never>?
 
     /// - Parameters:
     ///   - ssh: The SSH services; `nil` gives in-memory preview services that are never started.
@@ -104,6 +105,18 @@ final class AppModel {
         await ssh.start()
         monitoring.start()
         agents.start()
+        observeActivation()
+    }
+
+    /// Hosts and pins changed on the user's other devices show up when the app comes forward.
+    private func observeActivation() {
+        let activations = NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification)
+        activationObserver = Task { [weak self] in
+            for await _ in activations {
+                guard let self else { return }
+                self.reloadHosts()
+            }
+        }
     }
 
     /// Closes terminal tabs and SFTP sessions, stops monitoring, the agent and shared SSH
@@ -195,10 +208,10 @@ final class AppModel {
         try updateHost(host)
     }
 
-    /// Re-reads `hosts.json` (e.g. after a load error was fixed on disk).
+    /// Re-reads the hosts and the pinned host keys, including changes from the user's other devices.
     func reloadHosts() {
-        hostStore.reload()
-        hostsDidChange()
+        if hostStore.reload() { hostsDidChange() }
+        Task { await ssh.refreshHostKeys() }
     }
 
     /// Registers `observer` and immediately tells it the current hosts.

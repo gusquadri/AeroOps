@@ -49,7 +49,6 @@ import SSHKit
 @MainActor
 struct Phase7SelfTest {
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase7" }
     static var driveScript: URL? {
         if let path = defaults.string(forKey: "AeroSelfTestDriveScript") { return URL(filePath: path) }
         return Phase2SelfTest.authorizeScript?.deletingLastPathComponent().appending(path: "selftest/phase7-drive.sh")
@@ -295,33 +294,31 @@ struct Phase7SelfTest {
         }
         r.step("services", socket.utf8.count <= 104,
                "agent running, monitoring started, bridge listening on \(socket) (\(socket.utf8.count) bytes, limit 104)")
+        guard let script = executableDriveScript(r) else { return await finish(r, key: nil) }
+
+        // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
+        guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 7 self-test", ssh: ssh, step: r.step) else {
+            return await finish(r, key: nil)
+        }
+
+        // 2. Authorize it on every dev server.
+        if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
+            await checkHosts(key, script: script, socket: socket, r)
+        }
+        return await finish(r, key: key)
+    }
+
+    private func executableDriveScript(_ r: Recorder) -> URL? {
         let fileManager = FileManager.default
         guard let script = Self.driveScript, fileManager.isExecutableFile(atPath: script.path(percentEncoded: false)),
               fileManager.isExecutableFile(atPath: r.report.mcpPath) else {
             r.step("driver", false, "need an executable -AeroSelfTestDriveScript (\(Self.driveScript?.path(percentEncoded: false) ?? "none")) and \(r.report.mcpPath)")
-            return await finish(r, key: nil)
+            return nil
         }
+        return script
+    }
 
-        // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps phase 7 self-test", policy: .always)
-        } catch {
-            r.step("generate key", false, error.localizedDescription)
-            return await finish(r, key: nil)
-        }
-        r.step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
-
-        // 2. Authorize it on every dev server.
-        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-        if let authorize = Phase2SelfTest.authorizeScript {
-            let (status, output) = await Phase2SelfTest.runProcess(authorize, arguments: [pub.path(percentEncoded: false)])
-            r.step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            guard status == 0 else { return await finish(r, key: key) }
-        } else {
-            r.step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
-        }
-
+    private func checkHosts(_ key: SSHKeyRecord, script: URL, socket: String, _ r: Recorder) async {
         // 3. Hosts, one per tier; trust first-contact keys; wait until all are online.
         let keyID = key.id.uuidString
         let devContainer = RemoteHost(name: "dev-container", address: "localhost", port: 2222, user: "dev", keyId: keyID, mcpTier: .read)
@@ -329,6 +326,15 @@ struct Phase7SelfTest {
         let staging = RemoteHost(name: "staging", address: "aeroops-vm.orb.local", port: 22, user: "dev", keyId: keyID,
                                  dockerSudo: false, mcpTier: .readExec)
         let hosts = [devContainer, alpine, staging]
+        let watch = makeWatch(hosts)
+        let monitoring = model.monitoring
+        monitoring.didApplyUpdates = { watch.receive($0) }
+        defer { monitoring.didApplyUpdates = nil }
+        guard await bringOnline(hosts, watch: watch, r) else { return }
+        await driveAndCheck(staging: staging, script: script, socket: socket, r)
+    }
+
+    private func makeWatch(_ hosts: [RemoteHost]) -> HostWatch {
         let watch = HostWatch(hosts)
         let monitoring = model.monitoring
         watch.onUnknownKey = { host in
@@ -342,14 +348,16 @@ struct Phase7SelfTest {
                 }
             }
         }
-        monitoring.didApplyUpdates = { watch.receive($0) }
-        defer { monitoring.didApplyUpdates = nil }
+        return watch
+    }
+
+    private func bringOnline(_ hosts: [RemoteHost], watch: HostWatch, _ r: Recorder) async -> Bool {
         do {
             for host in hosts { try model.addHost(host) }
             model.selection = nil
         } catch {
             r.step("add hosts", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return false
         }
         let online = await waitUntil(seconds: Self.onlineLimit) {
             watch.authFailure != nil || hosts.allSatisfy { watch.online.contains($0.id) }
@@ -357,13 +365,16 @@ struct Phase7SelfTest {
         if let failure = watch.authFailure {
             r.report.authFailed = true
             r.step("authentication", false, "\(failure); stopping now (sshd PerSourcePenalties)")
-            return await finish(r, key: key)
+            return false
         }
         r.step("hosts online", online, hosts.map { "\($0.name) [\($0.mcpTier.rawValue)]: \(watch.lastStatus[$0.id] ?? "no update")" }.joined(separator: ", "))
-        guard online else { return await finish(r, key: key) }
+        return online
+    }
 
+    private func driveAndCheck(staging: RemoteHost, script: URL, socket: String, _ r: Recorder) async {
+        let agents = model.agents
         // 4. The driver, with the cancel wired in.
-        let canceller = Canceller(agents: agents, runner: ssh.runner, host: staging)
+        let canceller = Canceller(agents: agents, runner: model.ssh.runner, host: staging)
         agents.didReceiveCommandActivity = { canceller.receive($0) }
         defer { agents.didReceiveCommandActivity = nil }
         let results = Phase2SelfTest.root.appending(path: "drive", directoryHint: .isDirectory)
@@ -384,8 +395,6 @@ struct Phase7SelfTest {
         checkRunCommand(r, byName, canceller: canceller)
         checkClaude(r, byName)
         checkActivity(r)
-
-        return await finish(r, key: key)
     }
 
     // MARK: - Driver
@@ -592,42 +601,31 @@ struct Phase7SelfTest {
 
     private func finish(_ r: Recorder, key: SSHKeyRecord?) async -> Report {
         let ssh = model.ssh
-        let paths = ssh.paths
         if let key {
-            let secret = try? KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-            let roots = [Phase2SelfTest.root, AeroPaths.standard.dotDirectory]
-            let found = roots.flatMap { Phase2SelfTest.filesContainingKeyMaterial(under: $0, secret: secret) }
-            r.report.privateKeyMaterialFound = found
-            r.step("no private key on disk", found.isEmpty, found.isEmpty ? "checked \(roots.map { $0.path(percentEncoded: false) })" : "found: \(found)")
+            r.report.privateKeyMaterialFound = Phase2SelfTest.checkNoKeyMaterial(key, step: r.step)
         }
 
-        let bridgeSocket = model.agents.socketURL
-        let closed = await model.shutdownServices()
-        let agentSocketGone = !FileManager.default.fileExists(atPath: paths.agentSocket.path(percentEncoded: false))
-        let bridgeSocketGone = !FileManager.default.fileExists(atPath: bridgeSocket.path(percentEncoded: false))
-        r.step("shutdown", agentSocketGone && bridgeSocketGone && !model.monitoring.isRunning && model.agents.status == .stopped,
-               "bridge stopped first, monitoring stopped, masters closed \(closed), agent socket removed \(agentSocketGone), bridge socket removed \(bridgeSocketGone)")
+        await checkShutdown(r)
 
         if let key {
-            let pub = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-            // Revoke before deleting: the script reads the .pub.
-            if let script = Phase3SelfTest.revokeScript, Phase2SelfTest.authorizeScript != nil {
-                let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-                r.step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            do {
-                try await ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-                r.step("delete key", remaining == nil, "Keychain item removed \(remaining == nil)")
-            } catch {
-                r.step("delete key", false, error.localizedDescription)
-            }
+            await Phase2SelfTest.revokeKey(key, ssh: ssh, step: r.step)
+            await Phase2SelfTest.deleteKey(key, ssh: ssh, step: r.step)
         }
         if !Phase2SelfTest.keepsRoot {
             try? FileManager.default.removeItem(at: Phase2SelfTest.root)
         }
         r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
         return r.report
+    }
+
+    private func checkShutdown(_ r: Recorder) async {
+        let paths = model.ssh.paths
+        let bridgeSocket = model.agents.socketURL
+        let closed = await model.shutdownServices()
+        let agentSocketGone = !FileManager.default.fileExists(atPath: paths.agentSocket.path(percentEncoded: false))
+        let bridgeSocketGone = !FileManager.default.fileExists(atPath: bridgeSocket.path(percentEncoded: false))
+        r.step("shutdown", agentSocketGone && bridgeSocketGone && !model.monitoring.isRunning && model.agents.status == .stopped,
+               "bridge stopped first, monitoring stopped, masters closed \(closed), agent socket removed \(agentSocketGone), bridge socket removed \(bridgeSocketGone)")
     }
 
     // MARK: - Helpers

@@ -1,6 +1,7 @@
 import AeroCore
 import AeroTheme
 import KeyAgent
+import SSHKit
 import SwiftUI
 
 /// App entry point. Owns the ``AppModel`` and injects it into the main window and Settings.
@@ -37,15 +38,16 @@ struct AeroOpsApp: App {
         AppDelegate.shutdownHandler = { model.beginShutdown() }
     }
 
-    /// The real app: hosts in `~/Library/Application Support/AeroOps/hosts.json`, keys in the
-    /// login Keychain, runtime files in `~/.aeroops/`.
+    /// The real app: hosts, keys, passwords and pinned host keys in the Keychain the iOS app
+    /// shares, runtime files in `~/.aeroops/`.
     @MainActor
     static func makeModel() -> AppModel {
         let paths = AeroPaths.standard
         let ssh = SSHServices(
-            paths: paths, secretStore: KeychainSecretStore(), passwordStore: HostPasswordVault.keychainStore(), defaults: .standard
+            paths: paths, keychain: KeyStore.systemKeychain(), passwordKeychain: HostPasswordVault.systemKeychain(),
+            hostKeyKeychain: HostKeyStore.systemKeychain(), importsLegacyItems: true, defaults: .standard
         )
-        let model = AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
+        let model = AppModel(hostStore: .system(legacyFile: paths.legacyHostsFile), ssh: ssh)
         model.onboarding = OnboardingState(defaults: .standard)
         return model
     }

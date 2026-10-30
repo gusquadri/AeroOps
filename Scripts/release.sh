@@ -62,6 +62,8 @@ run_logged() {
 }
 
 identity=${AEROOPS_SIGNING_IDENTITY:-}
+profile=${AEROOPS_PROVISIONING_PROFILE_PATH:-}
+bundle_id=app.aeroops.AeroOps
 notary_profile=${AEROOPS_NOTARY_PROFILE:-}
 notary_keychain=${AEROOPS_NOTARY_KEYCHAIN:-}
 version=${AEROOPS_VERSION:-}
@@ -78,6 +80,7 @@ dry_run=0
 while [ $# -gt 0 ]; do
     case $1 in
         --identity) identity=${2:?--identity needs a value}; shift 2 ;;
+        --profile) profile=${2:?--profile needs a value}; shift 2 ;;
         --notary-profile) notary_profile=${2:?--notary-profile needs a value}; shift 2 ;;
         --notary-keychain) notary_keychain=${2:?--notary-keychain needs a value}; shift 2 ;;
         --version) version=${2:?--version needs a value}; shift 2 ;;
@@ -100,6 +103,23 @@ cd "$repo"
 
 # MARK: Inputs
 
+read_profile() {
+    [ -f "$profile" ] || die "no provisioning profile at $profile"
+    local plist app_id all_devices
+    plist=$(mktemp)
+    security cms -D -i "$profile" > "$plist" 2> /dev/null || die "$profile is not a provisioning profile"
+    profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")
+    profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")
+    app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$plist" 2> /dev/null || true)
+    all_devices=$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$plist" 2> /dev/null || true)
+    rm -f "$plist"
+    [ "$app_id" = "$team.$bundle_id" ] || die "$profile is for \"$app_id\", not $team.$bundle_id"
+    [ "$all_devices" = true ] || die "$profile is not a Developer ID profile"
+    case $profile_name in
+        *[\"\\]*) die "the profile name has quotes or backslashes: $profile_name" ;;
+    esac
+}
+
 step "Checking inputs"
 if [ "$dry_run" = 1 ]; then
     # A dry run may leave out what only the release machine has.
@@ -112,6 +132,14 @@ fi
 [ -n "$notary_profile" ] || die "missing --notary-profile (see notarytool store-credentials)"
 [ -n "$feed_url" ] || die "missing --feed-url"
 [ -n "$public_key" ] || die "missing --public-key"
+if [ -n "$profile" ]; then
+    read_profile
+elif [ "$dry_run" = 1 ]; then
+    profile_name="<Developer ID profile for $bundle_id>"
+    note "dry run: placeholder provisioning profile"
+else
+    die "missing --profile (the Developer ID provisioning profile for $bundle_id) [AEROOPS_PROVISIONING_PROFILE_PATH]"
+fi
 
 printf '%s' "$team" | grep -Eq '^[A-Z0-9]{10}$' || die "team ID must be 10 letters or digits: $team"
 case $feed_url in
@@ -143,6 +171,7 @@ else
 fi
 note "version $version (build $build), team $team"
 note "identity: $identity"
+note "provisioning profile: $profile_name"
 note "notary profile: $notary_profile${notary_keychain:+ (keychain $notary_keychain)}"
 note "feed: $feed_url"
 note "downloads: $download_prefix"
@@ -183,6 +212,13 @@ run mkdir -p "$run_dir" "$updates_dir"
 step "Generating the Xcode project"
 run xcodegen generate
 
+if [ -n "$profile" ]; then
+    step "Installing the provisioning profile"
+    profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+    run mkdir -p "$profiles_dir"
+    run cp "$profile" "$profiles_dir/$profile_uuid.provisionprofile"
+fi
+
 step "Archiving (Release, Developer ID)"
 run_logged "$run_dir/archive.log" xcodebuild \
     -project AeroOps.xcodeproj -scheme AeroOps -configuration Release \
@@ -191,6 +227,7 @@ run_logged "$run_dir/archive.log" xcodebuild \
     archive \
     CODE_SIGN_STYLE=Manual \
     "CODE_SIGN_IDENTITY=$identity" \
+    "AEROOPS_PROVISIONING_PROFILE=$profile_name" \
     "DEVELOPMENT_TEAM=$team" \
     "MARKETING_VERSION=$version" \
     "CURRENT_PROJECT_VERSION=$build" \
@@ -206,6 +243,7 @@ plutil -insert method -string developer-id "$export_options"
 plutil -insert signingStyle -string manual "$export_options"
 plutil -insert signingCertificate -string "$identity" "$export_options"
 plutil -insert teamID -string "$team" "$export_options"
+plutil -insert provisioningProfiles -json "{\"$bundle_id\":\"$profile_name\"}" "$export_options"
 plutil -insert destination -string export "$export_options"
 plutil -p "$export_options" | sed 's/^/    /'
 run_logged "$run_dir/export.log" xcodebuild -exportArchive \
@@ -227,7 +265,7 @@ check_code() {
     fi
 }
 
-verify_app() {
+verify_signatures() {
     codesign --verify --deep --strict --verbose=2 "$app"
     # Every Mach-O in the bundle: the app, aeroops-mcp, aeroops-askpass, Sparkle and its helpers.
     local count=0 file
@@ -238,7 +276,16 @@ verify_app() {
     done < <(find "$app" -type f -perm -u+x)
     check_code "$app"
     note "$count Mach-O files: Developer ID, team $team, hardened runtime, timestamped, no get-task-allow"
+}
 
+verify_keychain_group() {
+    [ -f "$app/Contents/embedded.provisionprofile" ] || die "the app has no embedded provisioning profile"
+    codesign -d --entitlements - --xml "$app" 2> /dev/null | grep -q "<string>$team.app.aeroops</string>" \
+        || die "the app lacks the $team.app.aeroops keychain group, so iCloud Keychain sync would fail"
+    note "provisioning profile embedded, keychain group $team.app.aeroops"
+}
+
+verify_info_plist() {
     local plist="$app/Contents/Info.plist" value
     value=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")
     [ "$value" = "$feed_url" ] || die "SUFeedURL is \"$value\", expected $feed_url"
@@ -251,7 +298,9 @@ verify_app() {
     value=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
     [ "$value" = "$build" ] || die "the app says build $value, expected $build"
     note "Info.plist: feed, public key, automatic checks on, version $version ($build)"
+}
 
+verify_helpers() {
     # The app's bridge only accepts aeroops-mcp signed by the same team with this identifier.
     local cli="$app/Contents/MacOS/aeroops-mcp"
     codesign --verify -R="anchor apple generic and certificate leaf[subject.OU] = \"$team\" and identifier \"app.aeroops.mcp\"" "$cli" \
@@ -265,6 +314,13 @@ verify_app() {
         || die "aeroops-askpass does not satisfy the askpass server's peer requirement"
     "$askpass" --version > /dev/null || die "aeroops-askpass does not run (code signature or entitlements rejected?)"
     note "aeroops-askpass: satisfies the askpass peer requirement and runs"
+}
+
+verify_app() {
+    verify_signatures
+    verify_keychain_group
+    verify_info_plist
+    verify_helpers
 }
 
 step "Verifying the exported app"

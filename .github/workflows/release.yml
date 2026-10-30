@@ -168,10 +168,12 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          DEVELOPER_ID_PROVISIONING_PROFILE: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE }}
         run: |
           missing=()
           for name in DEVELOPER_ID_CERTIFICATE_P12 DEVELOPER_ID_CERTIFICATE_PASSWORD APPLE_API_KEY_P8 \
-                      APPLE_API_KEY_ID APPLE_API_ISSUER_ID SPARKLE_PRIVATE_KEY SPARKLE_PUBLIC_KEY; do
+                      APPLE_API_KEY_ID APPLE_API_ISSUER_ID SPARKLE_PRIVATE_KEY SPARKLE_PUBLIC_KEY \
+                      DEVELOPER_ID_PROVISIONING_PROFILE; do
             [[ -n "${!name}" ]] || missing+=("$name")
           done
           if [[ ${#missing[@]} -ne 0 ]]; then
@@ -203,8 +205,12 @@ jobs:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          DEVELOPER_ID_PROVISIONING_PROFILE: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE }}
         run: |
           set -euo pipefail
+          profile="$RUNNER_TEMP/AeroOps.provisionprofile"
+          printf '%s' "$DEVELOPER_ID_PROVISIONING_PROFILE" | base64 --decode > "$profile"
+          echo "AEROOPS_PROVISIONING_PROFILE_PATH=$profile" >> "$GITHUB_ENV"
           SIGNING_KEYCHAIN="$RUNNER_TEMP/aeroops-release.keychain-db"
           echo "SIGNING_KEYCHAIN=$SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           keychain_password="$(openssl rand -hex 24)"
@@ -240,7 +246,7 @@ jobs:
         run: |
           Scripts/release.sh \
             --version "$VERSION" --build "$BUILD" \
-            --identity "$AEROOPS_SIGNING_IDENTITY" \
+            --identity "$AEROOPS_SIGNING_IDENTITY" --profile "$AEROOPS_PROVISIONING_PROFILE_PATH" \
             --notary-profile aeroops-notary --notary-keychain "$SIGNING_KEYCHAIN" \
             --feed-url "$FEED_URL" --public-key "$SPARKLE_PUBLIC_KEY" \
             --download-url-prefix "$DOWNLOAD_URL_PREFIX" \

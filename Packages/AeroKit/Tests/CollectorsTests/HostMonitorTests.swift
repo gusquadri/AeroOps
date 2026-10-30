@@ -359,7 +359,7 @@ struct HostMonitorTests {
         let dir = FileManager.default.temporaryDirectory.appending(path: "aero-hm-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let store = HostKeyStore(knownHostsFile: dir.appending(path: "known_hosts"))
+        let store = HostKeyStore(keychain: InMemoryKeychain(), knownHostsFile: dir.appending(path: "known_hosts"))
         runner.setFallback(.output(try fixture("devcontainer-1")), for: host)
         let (monitor, updates) = makeMonitor(hostKeys: store)
         await monitor.start()
@@ -399,7 +399,7 @@ struct HostMonitorTests {
         let dir = FileManager.default.temporaryDirectory.appending(path: "aero-hm-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let store = HostKeyStore(knownHostsFile: dir.appending(path: "known_hosts"))
+        let store = HostKeyStore(keychain: InMemoryKeychain(), knownHostsFile: dir.appending(path: "known_hosts"))
         try await store.trust(MonitorTestKeys.devKey(), for: host)
         runner.enqueue(.output(try fixture("devcontainer-1")), .hostKeyChanged, for: host)
         runner.setFallback(.output(try fixture("devcontainer-2")), for: host)

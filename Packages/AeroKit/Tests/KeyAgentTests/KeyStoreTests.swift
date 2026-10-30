@@ -1,26 +1,33 @@
+import AeroCore
 import CryptoKit
 import Foundation
 import Testing
 @testable import KeyAgent
 
-/// `swift test` binaries are ad-hoc signed, which cannot use the team's Keychain items, so these
-/// tests use ``InMemorySecretStore``. ``KeychainSecretStore`` was proven with an Apple-Development
-/// signed scratch binary.
+/// `swift test` binaries are ad-hoc signed, which cannot use the team's Keychain access group, so
+/// these tests use ``InMemoryKeychain``. ``SystemKeychain`` is checked by the signed app's
+/// `-AeroSelfTest sync`.
 @Suite("KeyStore")
 struct KeyStoreTests {
-    @Test func generateEd25519WritesMetadataPublicKeyAndSecret() async throws {
+    @Test func generateEd25519StoresOneSyncingItemAndThePublicKeyFile() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let store = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
 
         let record = try await store.generate(.ed25519, name: "Laptop", policy: .always)
         #expect(record.algorithm == .ed25519)
         #expect(record.origin == .generated)
         #expect(record.comment == "Laptop")
+        #expect(record.syncs)
         #expect(record.fingerprint == SSHPublicKey.fingerprint(of: record.publicKeyBlob))
-        #expect(secrets.storedIDs == [record.id])
-        #expect(try secrets.load(for: record.id)?.count == 32)
+        let item = try #require(keyItems(keychain).first)
+        #expect(keyItems(keychain).count == 1)
+        #expect(item.account == record.id.uuidString)
+        #expect(item.syncs)
+        let secret = try #require(keychain.secret(for: item.account))
+        #expect(secret.count == 32)
+        #expect(!item.record.contains(secret))
 
         let pub = store.publicKeyFileURL(for: record.id)
         #expect(pub.lastPathComponent == "\(record.id.uuidString).pub")
@@ -28,28 +35,57 @@ struct KeyStoreTests {
         #expect(try await store.authorizedKeysLine(for: record.id) == record.authorizedKeysLine)
         let mode = try FileManager.default.attributesOfItem(atPath: dir.appending("pub").path)[.posixPermissions] as? Int
         #expect(mode == 0o700)
-
-        // Metadata is public-only: the secret never appears in keys.json.
-        let json = try String(contentsOf: store.metadataFile, encoding: .utf8)
-        let secret = try #require(try secrets.load(for: record.id))
-        #expect(!json.contains(secret.base64EncodedString()))
-        #expect(json.contains("\"version\" : 1"))
     }
 
-    @Test func reloadServesTheSameKeysFromTheSecretStore() async throws {
+    @Test func aNewStoreServesTheSameKeysFromTheKeychain() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let first = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let first = try makeKeyStore(dir, keychain: keychain)
         let ed = try await first.generate(.ed25519, name: "One", policy: .oncePerSession)
 
-        let second = try makeKeyStore(dir, secrets: secrets)
+        let second = try makeKeyStore(dir, keychain: keychain)
         #expect(await second.keys == [ed])
         let found = try #require(try await second.signingKey(forPublicKeyBlob: Array(ed.publicKeyBlob)))
         #expect(found.record == ed)
         let signature = try found.key.signature(for: [1, 2, 3], flags: 0)
         #expect(SignatureVerifier.verify(signatureBlob: signature, publicKeyBlob: Array(ed.publicKeyBlob), data: [1, 2, 3]))
         #expect(try await second.signingKey(forPublicKeyBlob: [0, 0, 0, 1, 0x41]) == nil)
+    }
+
+    @Test func keysFromAnotherDeviceArriveAndLeaveOnReload() async throws {
+        let mac = try TempDirectory()
+        let phone = try TempDirectory()
+        defer { mac.remove(); phone.remove() }
+        let keychain = InMemoryKeychain()
+        let macStore = try makeKeyStore(mac, keychain: keychain)
+        let phoneStore = try makeKeyStore(phone, keychain: keychain)
+
+        let key = try await macStore.generate(.ed25519, name: "Shared")
+        #expect(try await phoneStore.reload())
+        #expect(await phoneStore.keys == [key])
+        #expect(FileManager.default.fileExists(atPath: phoneStore.publicKeyFileURL(for: key.id).path))
+        #expect(try await phoneStore.reload() == false)
+
+        try await macStore.delete(id: key.id)
+        #expect(try await phoneStore.reload())
+        #expect(await phoneStore.keys.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: phoneStore.publicKeyFileURL(for: key.id).path))
+    }
+
+    @Test func syncCanBeTurnedOffAndOn() async throws {
+        let dir = try TempDirectory()
+        defer { dir.remove() }
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
+        let record = try await store.generate(.ed25519, name: "Mine", syncs: false)
+        #expect(!record.syncs)
+        #expect(keyItems(keychain).map(\.syncs) == [false])
+
+        try await store.setSyncs(id: record.id, true)
+        #expect(keyItems(keychain).map(\.syncs) == [true])
+        #expect(try await makeKeyStore(dir, keychain: keychain).keys.map(\.syncs) == [true])
+        #expect(keychain.secret(for: record.id.uuidString)?.count == 32)
     }
 
     @Test func importDeduplicatesAndUsesCommentAsName() async throws {
@@ -75,15 +111,67 @@ struct KeyStoreTests {
         #expect(await store.keys.count == 1)
     }
 
+    @Test func aStoreOpenedBeforeTheFirstUnlockGetsItsKeysLater() async throws {
+        let dir = try TempDirectory()
+        defer { dir.remove() }
+        let keychain = LockableKeychain()
+        let record = try await makeKeyStore(dir, keychain: keychain.inner).generate(.ed25519, name: "Mine")
+        keychain.setLocked(true)
+
+        let store = try KeyStore(keychain: keychain, publicKeysDirectory: dir.appending("pub"))
+        #expect(await store.keys.isEmpty)
+        await #expect(throws: KeyStoreError.keychain(.interactionRequired(operation: "test"))) { try await store.reload() }
+
+        keychain.setLocked(false)
+        #expect(try await store.reload())
+        #expect(await store.keys == [record])
+    }
+
+    @Test func aSigningPolicyBelongsToItsDevice() async throws {
+        let macDirectory = try TempDirectory()
+        let phoneDirectory = try TempDirectory()
+        defer {
+            macDirectory.remove()
+            phoneDirectory.remove()
+        }
+        let macKeychain = InMemoryKeychain()
+        let mac = try makeKeyStore(macDirectory, keychain: macKeychain)
+        let relaxed = try await mac.generate(.ed25519, name: "Relaxed", policy: .always)
+        let strict = try await mac.generate(.ed25519, name: "Strict", policy: .everySignature)
+
+        let phoneKeychain = InMemoryKeychain()
+        for item in macKeychain.items() where item.syncs {
+            phoneKeychain.save(item, secret: try #require(macKeychain.secret(for: item.account)))
+        }
+        let phone = try makeKeyStore(phoneDirectory, keychain: phoneKeychain)
+        #expect(await phone.key(id: relaxed.id)?.policy == .oncePerSession)
+        #expect(await phone.key(id: strict.id)?.policy == .everySignature)
+        #expect(await mac.key(id: relaxed.id)?.policy == .always)
+
+        try await phone.setPolicy(id: strict.id, .always)
+        #expect(try await phone.reload() == false)
+        #expect(await phone.key(id: strict.id)?.policy == .always)
+        #expect(await mac.key(id: strict.id)?.policy == .everySignature)
+
+        let forged = KeychainItem(account: relaxed.id.uuidString + ".policy", record: Data("always".utf8), syncs: true)
+        phoneKeychain.save(forged, secret: Data())
+        try await phone.reload()
+        #expect(await phone.key(id: relaxed.id)?.policy == .oncePerSession)
+
+        phoneKeychain.delete(strict.id.uuidString)
+        try await phone.reload()
+        #expect(phoneKeychain.secret(for: strict.id.uuidString + ".policy") == nil)
+    }
+
     @Test func renameAndPolicyPersist() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let store = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
         let record = try await store.generate(.ed25519, name: "Old", policy: .always)
         try await store.rename(id: record.id, to: "New")
         try await store.setPolicy(id: record.id, .everySignature)
-        let reloaded = try makeKeyStore(dir, secrets: secrets)
+        let reloaded = try makeKeyStore(dir, keychain: keychain)
         let key = try #require(await reloaded.key(id: record.id))
         #expect(key.name == "New")
         #expect(key.policy == .everySignature)
@@ -93,33 +181,32 @@ struct KeyStoreTests {
         }
     }
 
-    @Test func deleteRemovesSecretPublicKeyFileAndMetadata() async throws {
+    @Test func deleteRemovesTheItemAndThePublicKeyFile() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let store = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
         let keep = try await store.generate(.ed25519, name: "Keep")
         let gone = try await store.generate(.ed25519, name: "Gone")
 
         try await store.delete(id: gone.id)
-        #expect(secrets.storedIDs == [keep.id])
+        #expect(keyItems(keychain).map(\.account) == [keep.id.uuidString])
         #expect(!FileManager.default.fileExists(atPath: store.publicKeyFileURL(for: gone.id).path))
         #expect(FileManager.default.fileExists(atPath: store.publicKeyFileURL(for: keep.id).path))
         #expect(await store.keys == [keep])
-        #expect(try await makeKeyStore(dir, secrets: secrets).keys == [keep])
+        #expect(try await makeKeyStore(dir, keychain: keychain).keys == [keep])
         #expect(try await store.signingKey(forPublicKeyBlob: Array(gone.publicKeyBlob)) == nil)
     }
 
     @Test func missingSecretIsReported() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let first = try makeKeyStore(dir, secrets: secrets)
-        let record = try await first.generate(.ed25519, name: "Orphan")
-        try secrets.delete(for: record.id)
-        let reloaded = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let record = try await makeKeyStore(dir, keychain: keychain).generate(.ed25519, name: "Orphan")
+        let stale = try makeKeyStore(dir, keychain: keychain)
+        keychain.delete(record.id.uuidString)
         await #expect(throws: KeyStoreError.missingSecret(record.id)) {
-            try await reloaded.signingKey(forPublicKeyBlob: Array(record.publicKeyBlob))
+            try await stale.signingKey(forPublicKeyBlob: Array(record.publicKeyBlob))
         }
     }
 
@@ -133,33 +220,60 @@ struct KeyStoreTests {
         #expect(try String(contentsOf: store.publicKeyFileURL(for: record.id), encoding: .utf8) == record.authorizedKeysLine + "\n")
     }
 
-    @Test func corruptMetadataThrows() throws {
+    @Test func importLegacyKeysMovesThemOnce() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
+        let old = try await makeKeyStore(dir).generate(.ed25519, name: "From keys.json", syncs: false)
+        let legacySecrets = InMemorySecretStore()
+        try legacySecrets.save(Data(repeating: 3, count: 32), for: old.id)
         let support = dir.appending("support")
-        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try writeLegacyMetadata([old], to: support)
+
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
+        #expect(try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) == 1)
+        let moved = try #require(await store.keys.first)
+        #expect(moved.id == old.id && moved.name == old.name && moved.syncs)
+        #expect(keychain.secret(for: old.id.uuidString) == Data(repeating: 3, count: 32))
+        #expect(legacySecrets.storedIDs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: support.appending(path: "keys.json").path))
+        #expect(try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) == 0)
+
         try Data("{not json".utf8).write(to: support.appending(path: "keys.json"))
-        #expect(throws: KeyStoreError.self) { try makeKeyStore(dir) }
-        try Data(#"{"version": 2, "keys": []}"#.utf8).write(to: support.appending(path: "keys.json"))
-        #expect(throws: KeyStoreError.self) { try makeKeyStore(dir) }
+        await #expect(throws: KeyStoreError.self) { try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) }
     }
 
-    @Test(.enabled(if: SecureEnclave.isAvailable)) func secureEnclaveKeyStoresOnlyTheWrappedHandle() async throws {
+    @Test(.enabled(if: SecureEnclave.isAvailable)) func secureEnclaveKeyStaysOnThisDevice() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let secrets = InMemorySecretStore()
-        let store = try makeKeyStore(dir, secrets: secrets)
+        let keychain = InMemoryKeychain()
+        let store = try makeKeyStore(dir, keychain: keychain)
         let record = try await store.generate(.secureEnclaveP256, name: "Enclave", policy: .always)
         #expect(record.algorithm == .secureEnclaveP256)
         #expect(record.publicKey.keyType == "ecdsa-sha2-nistp256")
-        let handle = try #require(try secrets.load(for: record.id))
+        #expect(!record.syncs && !record.canSync)
+        #expect(keyItems(keychain).map(\.syncs) == [false])
+        let handle = try #require(keychain.secret(for: record.id.uuidString))
         #expect(handle.count > 64) // a wrapped blob, not a raw 32-byte scalar
+        await #expect(throws: KeyStoreError.deviceBound(record.id)) { try await store.setSyncs(id: record.id, true) }
 
-        let reloaded = try makeKeyStore(dir, secrets: secrets)
+        let reloaded = try makeKeyStore(dir, keychain: keychain)
         let found = try #require(try await reloaded.signingKey(forPublicKeyBlob: Array(record.publicKeyBlob)))
         let signature = try found.key.signature(for: [9, 9], flags: 0)
         #expect(SignatureVerifier.verify(signatureBlob: signature, publicKeyBlob: Array(record.publicKeyBlob), data: [9, 9]))
         try await store.delete(id: record.id)
-        #expect(secrets.storedIDs.isEmpty)
+        #expect(keychain.items().isEmpty)
     }
+}
+
+/// `keys.json` as an older AeroOps wrote it.
+private func writeLegacyMetadata(_ keys: [SSHKeyRecord], to directory: URL) throws {
+    struct File: Encodable {
+        var version = 1
+        var keys: [SSHKeyRecord]
+    }
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try encoder.encode(File(keys: keys)).write(to: directory.appending(path: "keys.json"))
 }

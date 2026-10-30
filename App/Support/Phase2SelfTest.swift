@@ -35,7 +35,6 @@ struct Phase2SelfTest {
     static let keychainService = "app.aeroops.keys.selftest"
 
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "phase2" }
     static var outputURL: URL? { defaults.string(forKey: "AeroSelfTestOutput").map { URL(filePath: $0) } }
     static var authorizeScript: URL? { defaults.string(forKey: "AeroSelfTestAuthorizeScript").map { URL(filePath: $0) } }
     static var keepsRoot: Bool { defaults.bool(forKey: "AeroSelfTestKeepRoot") }
@@ -63,10 +62,10 @@ struct Phase2SelfTest {
 
     static func makeModel() -> AppModel {
         let ssh = SSHServices(
-            paths: paths, secretStore: KeychainSecretStore(service: keychainService), defaults: nil,
+            paths: paths, keychain: KeyStore.systemKeychain(service: keychainService), defaults: nil,
             authorizer: PolicySigningAuthorizer(verifier: presenceVerifier)
         )
-        return AppModel(hostStore: HostStore(directory: paths.applicationSupport), ssh: ssh)
+        return AppModel(hostStore: .inMemory(), ssh: ssh)
     }
 
     let model: AppModel
@@ -124,31 +123,41 @@ struct Phase2SelfTest {
     func run() async -> Report {
         let r = Recorder()
         let ssh = model.ssh
-        let paths = ssh.paths
         r.report.root = Self.root.path(percentEncoded: false)
-        r.report.agentSocket = paths.agentSocket.path(percentEncoded: false)
+        r.report.agentSocket = ssh.paths.agentSocket.path(percentEncoded: false)
         r.report.agentSocketBytes = r.report.agentSocket.utf8.count
 
+        guard checkAgentRunning(r), let key = await generateKey(r) else { return await finish(r, key: nil) }
+        await Self.authorize(key, ssh: ssh, step: r.step)
+        await checkConnection(key, r)
+        return await finish(r, key: key)
+    }
+
+    private func checkAgentRunning(_ r: Recorder) -> Bool {
+        let ssh = model.ssh
         // 1. Services: agent socket up, ssh_config written.
         let socketExists = FileManager.default.fileExists(atPath: r.report.agentSocket)
         if case .running = ssh.agentStatus, socketExists, r.report.agentSocketBytes < 104 {
             r.step("agent running", true, "\(r.report.agentSocket) (\(r.report.agentSocketBytes) bytes)")
-        } else {
-            r.step("agent running", false, "status \(ssh.agentStatus), socket exists \(socketExists)")
-            return await finish(r, key: nil)
+            return true
         }
+        r.step("agent running", false, "status \(ssh.agentStatus), socket exists \(socketExists)")
+        return false
+    }
 
+    private func generateKey(_ r: Recorder) async -> SSHKeyRecord? {
+        let ssh = model.ssh
         // 2. Generate an Ed25519 key in the Keychain; the .pub is written, the secret is not.
         let key: SSHKeyRecord
         do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps self-test", policy: .always)
+            key = try await ssh.generateKey(.ed25519, name: "AeroOps self-test", policy: .always, syncs: false)
         } catch {
             r.step("generate key", false, error.localizedDescription)
-            return await finish(r, key: nil)
+            return nil
         }
-        let pubURL = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
+        let pubURL = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
         let pubText = (try? String(contentsOf: pubURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let inKeychain = (try? KeychainSecretStore(service: Self.keychainService).load(for: key.id)) != nil
+        let inKeychain = (try? KeyStore.systemKeychain(service: Self.keychainService).secret(for: key.id.uuidString)) != nil
         r.report.keyID = key.id.uuidString
         r.report.keyAlgorithm = key.algorithm.displayName
         r.report.keyFingerprint = key.fingerprint
@@ -158,81 +167,100 @@ struct Phase2SelfTest {
             "\(key.algorithm.displayName) \(key.fingerprint); .pub matches \(pubText == key.authorizedKeysLine); Keychain item \(inKeychain)"
         )
 
-        // 3. Authorize the .pub on the dev server.
-        if let script = Self.authorizeScript {
-            let (status, output) = await Self.runProcess(script, arguments: [pubURL.path(percentEncoded: false)])
-            r.step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-        } else {
-            r.step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
-        }
+        return key
+    }
 
+    private func checkConnection(_ key: SSHKeyRecord, _ r: Recorder) async {
+        guard let host = addHost(key, r),
+              let offered = await firstContact(host, r),
+              await trust(offered, for: host, r),
+              await testConnection(host, r)
+        else { return }
+        await checkControlMaster(host, r)
+        await checkAgentEvents(key, r)
+        await checkChangedKey(r, host: host, realKeys: offered)
+    }
+
+    private func addHost(_ key: SSHKeyRecord, _ r: Recorder) -> RemoteHost? {
         // 4. Add the host through the model; the inventory observer rewrites ssh_config.
         let host = RemoteHost(name: "Self-test dev", address: "localhost", port: 2222, user: "dev", keyId: key.id.uuidString)
         do {
             try model.addHost(host)
-            let config = (try? String(contentsOf: paths.sshConfig, encoding: .utf8)) ?? ""
+            let config = (try? String(contentsOf: model.ssh.paths.sshConfig, encoding: .utf8)) ?? ""
             let ok = config.contains("Host \(host.sshAlias)")
                 && config.contains("IdentityAgent \(r.report.agentSocket)")
                 && config.contains("\(key.id.uuidString).pub")
             r.step("ssh_config", ok, "alias \(host.sshAlias), IdentityAgent and IdentityFile present: \(ok)")
+            return host
         } catch {
             r.step("ssh_config", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return nil
         }
+    }
 
+    private func firstContact(_ host: RemoteHost, _ r: Recorder) async -> [HostKey]? {
         // 5. First contact: Test connection scans the host key and asks for trust.
         let first = await model.connectionTester.testConnection(to: host)
         guard case .hostKeyUnknown(let offered) = first.outcome, !offered.isEmpty else {
             r.step("first contact", false, "expected an unknown host key, got \(first.outcome): \(first.message)")
-            return await finish(r, key: key)
+            return nil
         }
         r.report.hostKeyFingerprints = offered.map(\.description)
         r.step("first contact", true, "\(offered.count) key(s) offered: \(offered.map(\.description).joined(separator: ", "))")
+        return offered
+    }
 
+    private func trust(_ offered: [HostKey], for host: RemoteHost, _ r: Recorder) async -> Bool {
+        let ssh = model.ssh
         // 6. Trust (the user's click in the sheet; automatic only in this self-test).
         do {
             try await ssh.trust(offered, for: host, replacingPinned: false)
             let pinned = (try? await ssh.hostKeys.pinnedKeys(for: host)) ?? []
             r.step("trust host key", pinned.count == offered.count, "\(pinned.count) key(s) pinned in known_hosts")
+            return true
         } catch {
             r.step("trust host key", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return false
         }
+    }
 
+    private func testConnection(_ host: RemoteHost, _ r: Recorder) async -> Bool {
         // 7. Test connection through /usr/bin/ssh and the in-app agent.
         let second = await model.connectionTester.testConnection(to: host)
         r.report.connectionMessage = second.message
         r.report.connectionMilliseconds = Int(second.elapsed.components.seconds * 1000 + second.elapsed.components.attoseconds / 1_000_000_000_000_000)
         r.step("test connection", second.succeeded, second.message)
-        guard second.succeeded else { return await finish(r, key: key) }
+        return second.succeeded
+    }
 
+    private func checkControlMaster(_ host: RemoteHost, _ r: Recorder) async {
         // 8. A regular run opens a ControlMaster; a second run reuses it.
         do {
-            let runner = ssh.runner
-            let firstRun = try await runner.run("echo aeroops", on: host)
-            let status = try await ControlMaster(context: ssh.context).check(host)
-            let secondRun = try await runner.run("true", on: host)
-            let running = if case .running = status { true } else { false }
-            r.step(
-                "control master", firstRun.succeeded && firstRun.stdoutString == "aeroops\n" && running && secondRun.succeeded,
-                "run ok \(firstRun.succeeded), master \(status), reuse ok \(secondRun.succeeded)"
-            )
+            let (ok, detail) = try await runOverMaster(host)
+            r.step("control master", ok, detail)
         } catch {
             r.step("control master", false, error.localizedDescription)
         }
+    }
 
+    private func runOverMaster(_ host: RemoteHost) async throws -> (ok: Bool, detail: String) {
+        let ssh = model.ssh
+        let firstRun = try await ssh.runner.run("echo aeroops", on: host)
+        let status = try await ControlMaster(context: ssh.context).check(host)
+        let secondRun = try await ssh.runner.run("true", on: host)
+        let running = if case .running = status { true } else { false }
+        let ok = firstRun.succeeded && firstRun.stdoutString == "aeroops\n" && running && secondRun.succeeded
+        return (ok, "run ok \(firstRun.succeeded), master \(status), reuse ok \(secondRun.succeeded)")
+    }
+
+    private func checkAgentEvents(_ key: SSHKeyRecord, _ r: Recorder) async {
+        let ssh = model.ssh
         // 9. Agent events: the trusted /usr/bin/ssh connected and the key signed.
         try? await Task.sleep(for: .milliseconds(300))
         r.report.agentEvents = ssh.agentEvents.map(Self.describe)
         let trustedPeer = ssh.agentEvents.contains { if case .connected(let peer) = $0.kind { peer.isTrustedAppSSH } else { false } }
         let signed = ssh.agentEvents.contains { if case .signed(let id, _, _, _, _) = $0.kind { id == key.id } else { false } }
         r.step("agent events", trustedPeer && signed, "trusted app ssh connected \(trustedPeer), signed with the key \(signed)")
-
-        // 10. Changed host key: pin a different key, then Test connection must block the host
-        //     and the runner must refuse it. The real keys are restored afterwards.
-        await checkChangedKey(r, host: host, realKeys: offered)
-
-        return await finish(r, key: key)
     }
 
     /// A host whose pinned key no longer matches is blocked, and blocked hosts are never contacted.
@@ -274,11 +302,7 @@ struct Phase2SelfTest {
         // No private key on disk: no PEM/OpenSSH private key files, and the raw secret bytes
         // (compared in memory only) appear in no file under the root or ~/.aeroops.
         if let key {
-            let secret = try? KeychainSecretStore(service: Self.keychainService).load(for: key.id)
-            let roots = [Self.root, AeroPaths.standard.dotDirectory]
-            let found = roots.flatMap { Self.filesContainingKeyMaterial(under: $0, secret: secret) }
-            r.report.privateKeyMaterialFound = found
-            r.step("no private key on disk", found.isEmpty && secret != nil, found.isEmpty ? "checked \(roots.map { $0.path(percentEncoded: false) })" : "found: \(found)")
+            r.report.privateKeyMaterialFound = Self.checkNoKeyMaterial(key, step: r.step)
         }
 
         // Shutdown: masters closed, agent stopped, socket removed.
@@ -290,20 +314,8 @@ struct Phase2SelfTest {
 
         // Cleanup: authorized_keys line, Keychain item and root.
         if let key {
-            // Revoke before deleting: the script reads the .pub.
-            if let script = Phase3SelfTest.revokeScript, Self.authorizeScript != nil {
-                let pub = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-                let (status, output) = await Self.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-                r.step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            do {
-                try await ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Self.keychainService).load(for: key.id)
-                let pubGone = !FileManager.default.fileExists(atPath: paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub").path(percentEncoded: false))
-                r.step("delete key", remaining == nil && pubGone, "Keychain item removed \(remaining == nil), .pub removed \(pubGone)")
-            } catch {
-                r.step("delete key", false, error.localizedDescription)
-            }
+            await Self.revokeKey(key, ssh: ssh, step: r.step)
+            await Self.deleteKey(key, ssh: ssh, step: r.step)
         }
         if !Self.keepsRoot {
             try? FileManager.default.removeItem(at: Self.root)
@@ -313,6 +325,61 @@ struct Phase2SelfTest {
     }
 
     // MARK: - Helpers
+
+    typealias RecordStep = (String, Bool, String) -> Void
+
+    static func generateKey(name: String, ssh: SSHServices, step: RecordStep) async -> SSHKeyRecord? {
+        do {
+            let key = try await ssh.generateKey(.ed25519, name: name, policy: .always, syncs: false)
+            step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
+            return key
+        } catch {
+            step("generate key", false, error.localizedDescription)
+            return nil
+        }
+    }
+
+    /// False only when the script fails. With no script, the key must already be authorized.
+    @discardableResult
+    static func authorize(_ key: SSHKeyRecord, ssh: SSHServices, step: RecordStep) async -> Bool {
+        guard let script = authorizeScript else {
+            step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
+            return true
+        }
+        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
+        let (status, output) = await runProcess(script, arguments: [pub.path(percentEncoded: false)])
+        step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
+        return status == 0
+    }
+
+    /// The raw secret is compared in memory only.
+    @discardableResult
+    static func checkNoKeyMaterial(_ key: SSHKeyRecord, step: RecordStep) -> [String] {
+        let secret = try? KeyStore.systemKeychain(service: keychainService).secret(for: key.id.uuidString)
+        let roots = [root, AeroPaths.standard.dotDirectory]
+        let found = roots.flatMap { filesContainingKeyMaterial(under: $0, secret: secret) }
+        step("no private key on disk", found.isEmpty && secret != nil, found.isEmpty ? "checked \(roots.map { $0.path(percentEncoded: false) })" : "found: \(found)")
+        return found
+    }
+
+    /// Call before ``deleteKey(_:ssh:step:)``: the script reads the .pub.
+    static func revokeKey(_ key: SSHKeyRecord, ssh: SSHServices, step: RecordStep) async {
+        guard let script = Phase3SelfTest.revokeScript, authorizeScript != nil else { return }
+        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
+        let (status, output) = await runProcess(script, arguments: [pub.path(percentEncoded: false)])
+        step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func deleteKey(_ key: SSHKeyRecord, ssh: SSHServices, step: RecordStep) async {
+        do {
+            try await ssh.deleteKey(key.id)
+            let remaining = try KeyStore.systemKeychain(service: keychainService).secret(for: key.id.uuidString)
+            let pubGone = !FileManager.default.fileExists(atPath: ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub").path(percentEncoded: false))
+            step("delete key", remaining == nil && pubGone, "Keychain item removed \(remaining == nil), .pub removed \(pubGone)")
+        } catch {
+            step("delete key", false, error.localizedDescription)
+        }
+    }
 
     static func describe(_ event: AgentEvent) -> String {
         switch event.kind {

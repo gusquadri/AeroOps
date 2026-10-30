@@ -3,15 +3,18 @@ import LocalAuthentication
 import Security
 import Synchronization
 
-/// A ``SecretStore`` backed by Keychain generic-password items (service `app.aeroops.keys`,
-/// account = key id; password hosts use service `app.aeroops.passwords`, account = host id).
+/// Where AeroOps kept private keys and passwords before both apps shared ``AeroCore/SystemKeychain``:
+/// Keychain generic-password items (service `app.aeroops.keys`, account = key id; password hosts
+/// use service `app.aeroops.passwords`, account = host id). The apps only read it to move the
+/// items (``KeyStore/importLegacyKeys(metadataDirectory:secrets:)``,
+/// ``HostPasswordVault/importLegacyPasswords(of:from:)``).
 ///
 /// ## Backend
 ///
-/// Today every build is signed with the Apple Development identity of team `VUDQQS32NW` and uses
-/// the **legacy file-based login keychain** (``Backend/legacyFileKeychain``). Items created by
-/// such a build carry the partition list `teamid:VUDQQS32NW`, so rebuilt binaries read and update
-/// them without a prompt. Two quirks are handled here:
+/// The Mac app used the **legacy file-based login keychain** (``Backend/legacyFileKeychain``).
+/// Items created by an Apple Development build of team `VUDQQS32NW` carry the partition list
+/// `teamid:VUDQQS32NW`, so later builds of the team read them without a prompt. Two quirks are
+/// handled here:
 ///
 /// - Deleting an item from a *different* build than the one that created it fails with
 ///   `errSecInvalidOwnerEdit` (-25244), whatever `SecAccess`/partition list the item was created
@@ -20,14 +23,8 @@ import Synchronization
 ///   access dialog, so with `allowsUserInteraction == false` each operation also turns off
 ///   keychain user interaction process-wide for its duration (restoring the previous state).
 ///
-/// ## SWITCH POINT: data protection keychain
-///
-/// ``Backend/dataProtection(accessGroup:)`` stores items in the data protection keychain
-/// (`kSecUseDataProtectionKeychain`, `WhenUnlockedThisDeviceOnly`, never synchronized). That
-/// keychain needs the `keychain-access-groups` entitlement, which a macOS app may only carry with
-/// a provisioning profile; the team has none yet. Once it does: add the entitlement in project.yml,
-/// switch the app to `.dataProtection(accessGroup: "VUDQQS32NW.app.aeroops")`, and migrate items
-/// (load from `.legacyFileKeychain`, save to `.dataProtection`, delete the legacy item).
+/// The iOS app used the data protection keychain (``Backend/dataProtection(accessGroup:)``,
+/// `WhenUnlockedThisDeviceOnly`, never synchronized) in its own access group.
 public struct KeychainSecretStore: SecretStore {
     /// Which keychain holds the items.
     public enum Backend: Sendable, Hashable {
@@ -35,17 +32,16 @@ public struct KeychainSecretStore: SecretStore {
         /// The legacy file-based login keychain. Works for any consistently signed build.
         case legacyFileKeychain
         #endif
-        /// SWITCH POINT (macOS): the data protection keychain. Requires the `keychain-access-groups`
-        /// entitlement and a provisioning profile; see the type documentation. iOS has only this
-        /// keychain, and with `accessGroup: nil` it needs no entitlement.
+        /// The data protection keychain, in `accessGroup` (`nil`: every group the app has).
         case dataProtection(accessGroup: String?)
 
-        /// What the app uses: the legacy keychain on macOS, the app's own access group on iOS.
+        /// What an older AeroOps used: the legacy keychain on macOS, the iOS app's own access group
+        /// (its application identifier) on iOS.
         public static var platformDefault: Backend {
             #if os(macOS)
             .legacyFileKeychain
             #else
-            .dataProtection(accessGroup: nil)
+            .dataProtection(accessGroup: "VUDQQS32NW.app.aeroops.AeroOpsMobile")
             #endif
         }
 

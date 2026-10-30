@@ -79,7 +79,7 @@ struct DockerKubernetesIntegrationTests {
         let parts = hostKeyLine.stdout.split(separator: " ")
         try #require(parts.count >= 2, "\(hostKeyLine.stderr)")
         let hostKey = try HostKey(type: String(parts[0]), base64: String(parts[1]))
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         for host in hosts { try await store.trust(hostKey, for: host) }
         let runner = SSHRunner(context: context, hostKeys: store)
 
@@ -189,17 +189,28 @@ struct DockerKubernetesIntegrationTests {
     private func kubernetes(runner: SSHRunner, dev: RemoteHost, devPlain: RemoteHost, nodocker: RemoteHost) async throws {
         let collector = KubernetesCollector(runner: runner)
         let pods = try await collector.pods(on: dev)
-        let crasher = try #require(pods.first { $0.namespace == "demo" && $0.name.hasPrefix("crasher-") })
+        let crasher = try #require(pods.filter { $0.namespace == "demo" && $0.name.hasPrefix("crasher-") }.max { $0.restarts < $1.restarts })
         #expect(crasher.restarts > 0)
         let pending = try #require(pods.first { $0.namespace == "demo" && $0.name.hasPrefix("pending-") })
         #expect(pending.phase == .pending)
-        let web = try #require(pods.first { $0.namespace == "demo" && $0.name.hasPrefix("web-") })
+        let web = try #require(pods.first { $0.namespace == "demo" && $0.name.hasPrefix("web-") && $0.phase == .running })
         #expect(Set(web.containers.map(\.name)) == ["nginx", "log-sidecar"])
         #expect(pods.contains { $0.namespace == "kube-system" })
         let demoOnly = try await collector.pods(on: dev, namespace: "demo")
         #expect(!demoOnly.isEmpty && demoOnly.allSatisfy { $0.namespace == "demo" })
         print("Collectors integration: \(pods.count) pods; crasher restarts \(crasher.restarts)")
 
+        try await kubernetesLogs(runner: runner, collector: collector, dev: dev, crasher: crasher, web: web)
+
+        let events = try await collector.events(pod: pending.name, namespace: "demo", on: dev)
+        #expect(events.contains { $0.reason == "FailedScheduling" }, "\(events.map(\.reason))")
+        let describe = try await collector.describe(pod: crasher.name, namespace: "demo", on: dev)
+        #expect(describe.text.contains(crasher.name))
+
+        await kubernetesErrors(collector, devPlain: devPlain, nodocker: nodocker)
+    }
+
+    private func kubernetesLogs(runner: SSHRunner, collector: KubernetesCollector, dev: RemoteHost, crasher: PodInfo, web: PodInfo) async throws {
         let logs = LogCollector(runner: runner)
         var previous = try await logs.fetch(
             LogRequest(hostId: dev.id, kind: .pod, name: crasher.name, namespace: "demo", previous: true), on: dev
@@ -220,12 +231,9 @@ struct DockerKubernetesIntegrationTests {
         await #expect(throws: KubectlError.noPreviousContainer(container: "nginx", pod: web.name)) {
             try await collector.logs(pod: web.name, namespace: "demo", container: "nginx", previous: true, on: dev)
         }
+    }
 
-        let events = try await collector.events(pod: pending.name, namespace: "demo", on: dev)
-        #expect(events.contains { $0.reason == "FailedScheduling" }, "\(events.map(\.reason))")
-        let describe = try await collector.describe(pod: crasher.name, namespace: "demo", on: dev)
-        #expect(describe.text.contains(crasher.name))
-
+    private func kubernetesErrors(_ collector: KubernetesCollector, devPlain: RemoteHost, nodocker: RemoteHost) async {
         // Error paths with hints.
         let unreadable = await #expect(throws: KubectlError.self) { try await collector.pods(on: devPlain) }
         if case .kubeconfigUnreadable = unreadable {} else {
@@ -236,7 +244,7 @@ struct DockerKubernetesIntegrationTests {
 
     private func kubernetesFollow(runner: SSHRunner, dev: RemoteHost) async throws {
         let collector = KubernetesCollector(runner: runner)
-        let web = try #require(try await collector.pods(on: dev, namespace: "demo").first { $0.name.hasPrefix("web-") })
+        let web = try #require(try await collector.pods(on: dev, namespace: "demo").first { $0.name.hasPrefix("web-") && $0.phase == .running })
         let lines = try await VMIntegration.followThenCancel(count: 3, within: .seconds(15)) {
             try await collector.followLogs(pod: web.name, namespace: "demo", container: "log-sidecar", tail: 3, on: dev)
         }

@@ -43,6 +43,7 @@ struct KeysSettingsPane: View {
                             hostNames: hostNames(using: key),
                             isUnused: ssh.agentChoice == .system,
                             onPolicy: { policy in perform { try await ssh.setPolicy(policy, forKey: key.id) } },
+                            onSyncs: { syncs in perform { try await ssh.setSyncs(syncs, forKey: key.id) } },
                             onRename: {
                                 newName = key.name
                                 renaming = key
@@ -139,7 +140,7 @@ struct KeysSettingsPane: View {
             : "Used by \(hosts.formatted(.list(type: .and))). These hosts can't connect until you choose another key."
         let loss = key.algorithm == .secureEnclaveP256
             ? "The Secure Enclave key is destroyed and cannot be recovered."
-            : "The private key is removed from the Keychain and cannot be recovered."
+            : "The private key is removed from the Keychain\(key.syncs ? " on all your devices" : "") and cannot be recovered."
         return "\(usage) \(loss)"
     }
 
@@ -177,6 +178,8 @@ private struct KeyCard: View {
     let isUnused: Bool
     /// Main-actor isolated (and so Sendable): it becomes the Touch ID picker binding's setter.
     let onPolicy: @MainActor (SigningPolicy) -> Void
+    /// The iCloud Keychain toggle binding's setter.
+    let onSyncs: @MainActor (Bool) -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
@@ -235,6 +238,11 @@ private struct KeyCard: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .help(key.policy.explanation)
+                    if key.canSync {
+                        Toggle("iCloud Keychain", isOn: Binding(get: { key.syncs }, set: onSyncs))
+                            .toggleStyle(.checkbox)
+                            .help("Sync this key to your other devices with iCloud Keychain")
+                    }
                     Spacer(minLength: 8)
                     CopyAuthorizedKeysButton(key: key)
                 }
@@ -248,6 +256,7 @@ private struct KeyCard: View {
     private var details: String {
         var parts = ["Created \(key.createdAt.formatted(date: .abbreviated, time: .omitted))"]
         parts.append(hostNames.isEmpty ? "Not used by any host" : "Used by \(hostNames.formatted(.list(type: .and)))")
+        if !key.canSync { parts.append("Stays on this Mac") }
         if isUnused { parts.append("Not offered while the system ssh-agent is in use") }
         return parts.joined(separator: " · ")
     }

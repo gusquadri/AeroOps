@@ -117,6 +117,47 @@ public struct KnownHostsFile: Sendable, Hashable {
         return changed
     }
 
+    /// The names unmarked entries list literally.
+    var plainNames: [String] {
+        let listed = lines.flatMap { line -> [String] in
+            guard case .entry(let entry) = line, entry.marker == nil else { return [] }
+            return entry.hosts.lowercased().split(separator: ",").map(String.init)
+        }
+        return Set(listed.filter(Self.isPlainName)).sorted()
+    }
+
+    /// The file without ``plainNames``, comments or blank lines: what only ssh can use (markers,
+    /// patterns, hashed names, key types SSHKit does not know).
+    var withoutPlainNames: KnownHostsFile {
+        var rest = KnownHostsFile()
+        rest.lines = lines.compactMap { line in
+            switch line {
+            case .other(let text): Self.isNote(text) ? nil : line
+            case .entry(let entry): Self.withoutPlainNames(entry).map(Line.entry)
+            }
+        }
+        return rest
+    }
+
+    private static func isNote(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty || trimmed.hasPrefix("#")
+    }
+
+    private static func withoutPlainNames(_ entry: Entry) -> Entry? {
+        guard entry.marker == nil else { return entry }
+        let rest = entry.hosts.split(separator: ",").map(String.init).filter { !isPlainName($0) }
+        guard !rest.isEmpty else { return nil }
+        var kept = entry
+        kept.hosts = rest.joined(separator: ",")
+        return kept
+    }
+
+    /// Whether `name` is one literal host: no wildcards, negations, hashing, lists or field breaks.
+    static func isPlainName(_ name: String) -> Bool {
+        !name.isEmpty && !name.contains { "*?!,|#@".contains($0) || $0.isWhitespace }
+    }
+
     // MARK: - Parsing and matching
 
     static func parse(_ line: String) -> Entry? {

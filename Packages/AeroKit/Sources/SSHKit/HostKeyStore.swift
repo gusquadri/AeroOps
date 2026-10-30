@@ -133,25 +133,37 @@ public struct HostKeyBlock: Sendable, Hashable {
     }
 }
 
-/// Trust-on-first-use host keys in `~/.aeroops/known_hosts`.
+/// Trust-on-first-use host keys, pinned in the Keychain the Mac and iOS apps share, so a key
+/// trusted on one of the user's devices is trusted on the others.
 ///
-/// ssh enforces the pins itself (`StrictHostKeyChecking yes`); this actor manages the file and
+/// ssh enforces the pins itself (`StrictHostKeyChecking yes`) from ``knownHostsFile``, a copy of
+/// the Keychain's pins that every read brings up to date; this actor manages the pins and
 /// remembers hosts whose key changed. A blocked host stays blocked (``SSHRunner`` refuses to
-/// connect) until the user trusts a key with `replacingPinned: true`, forgets the host, or
-/// calls ``unblock(_:)``. Blocks are in memory: after a relaunch ssh detects the change again.
+/// connect) until the user trusts a key with `replacingPinned: true`, forgets the host, or calls
+/// ``unblock(_:)``. Blocks are in memory, on this device only: after a relaunch ssh detects the
+/// change again.
 public actor HostKeyStore {
+    /// ssh's copy of the pins (`UserKnownHostsFile`), mode 0600.
     public nonisolated let knownHostsFile: URL
+    /// The pins: one synced item per known_hosts name.
+    public nonisolated let keychain: any KeychainStore
     public nonisolated let scanner: any HostKeyScanning
     private var blocks: [String: HostKeyBlock] = [:]
 
-    public init(knownHostsFile: URL, scanner: any HostKeyScanning = HostKeyScanner()) {
+    public init(keychain: any KeychainStore, knownHostsFile: URL, scanner: any HostKeyScanning = HostKeyScanner()) {
+        self.keychain = keychain
         self.knownHostsFile = knownHostsFile
         self.scanner = scanner
     }
 
     /// The store for `context.knownHostsFile`, scanning with `context.keyscanExecutable`.
-    public init(context: SSHContext = .standard) {
-        self.init(knownHostsFile: context.knownHostsFile, scanner: HostKeyScanner(executable: context.keyscanExecutable))
+    public init(context: SSHContext = .standard, keychain: any KeychainStore) {
+        self.init(keychain: keychain, knownHostsFile: context.knownHostsFile, scanner: HostKeyScanner(executable: context.keyscanExecutable))
+    }
+
+    /// The apps' pins, in ``SystemKeychain``.
+    public static func systemKeychain(service: String = "app.aeroops.host-keys") -> SystemKeychain {
+        SystemKeychain(service: service, label: "AeroOps host key")
     }
 
     /// Keys pinned for `host`.
@@ -162,7 +174,7 @@ public actor HostKeyStore {
     /// Scans the server and compares with the pins. A mismatch blocks the host.
     ///
     /// Conservative: if any key is pinned, the server must present one of the pinned keys.
-    /// Throws ``SSHError`` when the scan fails, ``HostKeyError`` for file problems.
+    /// Throws ``SSHError`` when the scan fails, ``HostKeyError`` for Keychain and file problems.
     public func verify(_ host: RemoteHost) async throws -> HostKeyVerification {
         let offered = try await scanner.scan(host)
         let pinned = try pinnedKeys(for: host)
@@ -174,7 +186,7 @@ public actor HostKeyStore {
         return .changed(pinned: pinned, offered: offered)
     }
 
-    /// Pins `key` for `host` (atomic rewrite, mode 0600) and lifts any block.
+    /// Pins `key` for `host` and lifts any block.
     ///
     /// Adding a key of a type that already has a different pin throws
     /// ``HostKeyError/conflictsWithPinnedKey(pinned:)`` unless `replacingPinned` is `true`,
@@ -182,23 +194,22 @@ public actor HostKeyStore {
     /// user explicitly accepted the new key.
     public func trust(_ key: HostKey, for host: RemoteHost, replacingPinned: Bool = false) throws(HostKeyError) {
         let name = host.knownHostsName
-        var file = try load()
-        if replacingPinned {
-            file.remove(name: name)
-        } else {
-            let pinned = file.keys(for: name)
-            if pinned.contains(where: { $0.type == key.type && $0 != key }) || blocks[name] != nil {
-                throw .conflictsWithPinnedKey(pinned: pinned)
-            }
+        let pinned = try load().keys(for: name)
+        if !replacingPinned, isConflict(key, with: pinned, name: name) {
+            throw .conflictsWithPinnedKey(pinned: pinned)
         }
-        if file.add(key, for: name) { try save(file) }
+        let kept = replacingPinned ? [] : pinned
+        if !kept.contains(key) { try store(kept + [key], for: name) }
         blocks[name] = nil
+    }
+
+    private func isConflict(_ key: HostKey, with pinned: [HostKey], name: String) -> Bool {
+        blocks[name] != nil || pinned.contains { $0.type == key.type && $0 != key }
     }
 
     /// Removes every pin for `host` and lifts any block. The next connection needs TOFU again.
     public func forget(_ host: RemoteHost) throws(HostKeyError) {
-        var file = try load()
-        if file.remove(name: host.knownHostsName) > 0 { try save(file) }
+        try store([], for: host.knownHostsName)
         blocks[host.knownHostsName] = nil
     }
 
@@ -228,20 +239,97 @@ public actor HostKeyStore {
         blocks[host.knownHostsName] = nil
     }
 
-    // MARK: - File
+    /// Brings ``knownHostsFile`` up to date with pins made on the user's other devices, and lifts
+    /// the blocks of hosts whose pins they changed: the next connection checks the new pins.
+    /// Returns whether anything changed.
+    @discardableResult
+    public func refreshKnownHostsFile() throws(HostKeyError) -> Bool {
+        let file = try pins()
+        let blockCount = blocks.count
+        blocks = blocks.filter { Set(file.keys(for: $0.key)) == Set($0.value.pinned) }
+        let mirrored = try mirror(file)
+        return mirrored || blocks.count != blockCount
+    }
 
-    private func load() throws(HostKeyError) -> KnownHostsFile {
+    /// Moves the pins an older AeroOps kept only in `file` (its known_hosts) into the Keychain.
+    /// Hosts that already have pins keep them. What only ssh can use stays in `file`, which it
+    /// reads beside ``knownHostsFile``; a file with nothing left is deleted. Returns how many
+    /// hosts moved.
+    @discardableResult
+    public func importLegacyPins(from file: URL) throws(HostKeyError) -> Int {
+        let text: String?
         do {
-            return try FileSystem.readText(knownHostsFile).map(KnownHostsFile.init(text:)) ?? KnownHostsFile()
+            text = try FileSystem.readText(file)
         } catch {
             throw .knownHostsUnreadable(error.description)
         }
+        guard let text else { return 0 }
+        let legacy = KnownHostsFile(text: text)
+        let pinned = try pins()
+        let names = legacy.plainNames.filter { pinned.keys(for: $0).isEmpty }
+        for name in names { try store(legacy.keys(for: name), for: name) }
+        try keepOnly(legacy.withoutPlainNames, in: file, replacing: text)
+        return names.count
     }
 
-    private func save(_ file: KnownHostsFile) throws(HostKeyError) {
+    private func keepOnly(_ rest: KnownHostsFile, in file: URL, replacing text: String) throws(HostKeyError) {
         do {
+            if rest.lines.isEmpty {
+                try FileManager.default.removeItem(at: file)
+            } else if rest.text != text {
+                try FileSystem.writeAtomically(Data(rest.text.utf8), to: file, permissions: 0o600)
+            }
+        } catch {
+            throw .knownHostsWriteFailed(error.localizedDescription)
+        }
+    }
+
+    private func load() throws(HostKeyError) -> KnownHostsFile {
+        let file = try pins()
+        try mirror(file)
+        return file
+    }
+
+    /// Each item's keys, for its own name only. An item from another device whose name is not one
+    /// literal host never reaches ssh, so it cannot pin a key for other hosts.
+    private func pins() throws(HostKeyError) -> KnownHostsFile {
+        let items: [KeychainItem]
+        do {
+            items = try keychain.items().sorted { $0.account < $1.account }
+        } catch {
+            throw .knownHostsUnreadable(error.localizedDescription)
+        }
+        var file = KnownHostsFile()
+        for item in items where KnownHostsFile.isPlainName(item.account) {
+            let keys = KnownHostsFile(text: String(decoding: item.record, as: UTF8.self)).keys(for: item.account)
+            for key in keys { file.add(key, for: item.account) }
+        }
+        return file
+    }
+
+    private func store(_ keys: [HostKey], for name: String) throws(HostKeyError) {
+        var record = KnownHostsFile()
+        for key in keys { record.add(key, for: name) }
+        do {
+            if keys.isEmpty {
+                try keychain.delete(name)
+            } else {
+                try keychain.save(KeychainItem(account: name, record: Data(record.text.utf8), syncs: true), secret: Data())
+            }
+        } catch {
+            throw .knownHostsWriteFailed(error.localizedDescription)
+        }
+        try mirror(pins())
+    }
+
+    @discardableResult
+    private func mirror(_ file: KnownHostsFile) throws(HostKeyError) -> Bool {
+        let text = file.text
+        do {
+            guard try FileSystem.readText(knownHostsFile) != text else { return false }
             try FileSystem.ensureDirectory(knownHostsFile.deletingLastPathComponent(), permissions: 0o700)
-            try FileSystem.writeAtomically(Data(file.text.utf8), to: knownHostsFile, permissions: 0o600)
+            try FileSystem.writeAtomically(Data(text.utf8), to: knownHostsFile, permissions: 0o600)
+            return true
         } catch {
             throw .knownHostsWriteFailed(error.description)
         }

@@ -152,7 +152,7 @@ final class SSHConfigImportModel {
     // MARK: - Import
 
     /// Adds the checked hosts to `model`, in config order, and returns their ids. Stops at the
-    /// first store error (a blocked or unwritable `hosts.json`); hosts whose name was taken
+    /// first store error (the Keychain refused the write); hosts whose name was taken
     /// since the sheet opened are skipped. Either way ``importError`` says what happened.
     @discardableResult
     func importSelected(into model: AppModel) -> [RemoteHost.ID] {

@@ -9,7 +9,7 @@ private let integrationEnabled = ProcessInfo.processInfo.environment["AEROOPS_IN
 /// (`docker compose -f dev/compose.yml up -d`). Run with
 /// `AEROOPS_INTEGRATION=1 swift test --package-path Packages/AeroKit --filter KeyAgentTests`.
 ///
-/// Keys live in an ``InMemorySecretStore``; keys authorized on the dev server are tagged with a
+/// Keys live in an ``InMemoryKeychain``; keys authorized on the dev server are tagged with a
 /// unique comment and removed afterwards.
 @Suite("Integration (AEROOPS_INTEGRATION=1)", .enabled(if: integrationEnabled), .serialized)
 struct IntegrationTests {

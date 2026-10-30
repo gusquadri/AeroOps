@@ -3,7 +3,7 @@ import Collectors
 import Foundation
 
 extension AppModel {
-    /// A model over a throwaway store in the temporary directory, filled with `hosts`.
+    /// A model over a store in memory, filled with `hosts`.
     /// With `statuses`, host *i* gets `statuses[i % count]`; with `withMetrics`, online hosts get
     /// a sample snapshot. For previews only.
     static func preview(
@@ -11,8 +11,7 @@ extension AppModel {
         statuses: [HostStatus] = SampleData.statuses,
         withMetrics: Bool = false
     ) -> AppModel {
-        let directory = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
-        let model = AppModel(hostStore: HostStore(directory: directory), connectionTester: SimulatedConnectionTester(delay: .seconds(1)))
+        let model = AppModel(hostStore: .inMemory(), connectionTester: SimulatedConnectionTester(delay: .seconds(1)))
         for host in hosts {
             try? model.addHost(host)
         }

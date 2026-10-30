@@ -5,9 +5,9 @@ import Foundation
 /// Unix socket paths on macOS are capped at 104 bytes, so sockets live under the short
 /// `~/.aeroops/` directory. Use ``standard`` in the app and a temporary root in tests.
 public struct AeroPaths: Sendable, Hashable {
-    /// `~/.aeroops/`: sockets, generated ssh_config, known_hosts, public keys.
+    /// `~/.aeroops/`: sockets, generated ssh_config, the copy of the pinned host keys, public keys.
     public var dotDirectory: URL
-    /// `~/Library/Application Support/AeroOps/`: `hosts.json`.
+    /// `~/Library/Application Support/AeroOps/`: where an older AeroOps kept `hosts.json`.
     public var applicationSupport: URL
 
     /// Paths rooted at `home`: the real home directory on macOS (the app is not sandboxed), the
@@ -36,10 +36,12 @@ public struct AeroPaths: Sendable, Hashable {
     public var controlMasterDirectory: URL { dotDirectory.appending(path: "cm", directoryHint: .isDirectory) }
     /// `~/.aeroops/ssh_config`: generated, one block per host.
     public var sshConfig: URL { dotDirectory.appending(path: "ssh_config") }
-    /// `~/.aeroops/known_hosts`: pinned host keys.
-    public var knownHosts: URL { dotDirectory.appending(path: "known_hosts") }
+    /// `~/.aeroops/synced_known_hosts`: ssh's copy of the host keys pinned in the Keychain.
+    public var knownHosts: URL { dotDirectory.appending(path: "synced_known_hosts") }
+    /// `~/.aeroops/known_hosts`: where an older AeroOps pinned host keys.
+    public var legacyKnownHosts: URL { dotDirectory.appending(path: "known_hosts") }
     /// `~/.aeroops/pub/`: public keys referenced by `IdentityFile`.
     public var publicKeysDirectory: URL { dotDirectory.appending(path: "pub", directoryHint: .isDirectory) }
-    /// `~/Library/Application Support/AeroOps/hosts.json`.
-    public var hostsFile: URL { applicationSupport.appending(path: HostStore.fileName) }
+    /// `~/Library/Application Support/AeroOps/hosts.json`: where an older AeroOps kept the hosts.
+    public var legacyHostsFile: URL { applicationSupport.appending(path: HostStore.legacyFileName) }
 }

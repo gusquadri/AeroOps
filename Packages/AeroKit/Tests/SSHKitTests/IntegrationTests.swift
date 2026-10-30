@@ -55,10 +55,20 @@ struct IntegrationTests {
         let rendering = try writer.write([dev, refused, unresolvable])
         #expect(rendering.rejected.isEmpty)
 
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         let runner = SSHRunner(context: context, hostKeys: store)
         let control = ControlMaster(context: context)
 
+        guard try await checkFirstContact(dev, store: store, runner: runner),
+              try await checkMultiplexing(dev, runner: runner, control: control)
+        else { return }
+        try await checkCommands(dev, runner: runner)
+        try await checkStreaming(dev, runner: runner, marker: marker)
+        try await checkTransportFailures(refused: refused, unresolvable: unresolvable, store: store, runner: runner)
+        try await checkClosingMasters(dev, runner: runner, control: control, context: context)
+    }
+
+    private func checkFirstContact(_ dev: RemoteHost, store: HostKeyStore, runner: SSHRunner) async throws -> Bool {
         // Before trust: ssh refuses the unknown key.
         let untrusted = try await runner.run("true", on: dev)
         #expect(untrusted.transportError == .hostKeyUnknown, "\(untrusted.stderrString)")
@@ -66,7 +76,7 @@ struct IntegrationTests {
         // TOFU via ssh-keyscan; the fingerprint must match the server's own key file.
         guard case .unknown(let offered) = try await store.verify(dev) else {
             Issue.record("expected an unknown host key")
-            return
+            return false
         }
         #expect(Set(offered.map(\.displayType)) == ["RSA", "ECDSA", "ED25519"])
         let ed = try #require(offered.first { $0.type == "ssh-ed25519" })
@@ -76,21 +86,27 @@ struct IntegrationTests {
         #expect(serverKey.stdout.hasPrefix("256 \(ed.fingerprint) "), "\(serverKey.stdout)")
         try await store.trust(ed, for: dev)
         #expect(try await store.verify(dev) == .trusted(ed))
+        return true
+    }
 
+    private func checkMultiplexing(_ dev: RemoteHost, runner: SSHRunner, control: ControlMaster) async throws -> Bool {
         // First command opens the master; the second multiplexes over it.
         let first = try await runner.run("uname -a", on: dev)
         #expect(first.succeeded, "\(first.stderrString)")
         #expect(first.stdoutString.hasPrefix("Linux "))
         guard case .running(let pid) = try await control.check(dev) else {
             Issue.record("expected a running master")
-            return
+            return false
         }
         #expect(pid != nil)
         let second = try await runner.run("echo $((6 * 7))", on: dev)
         #expect(second.stdoutString == "42\n")
         #expect(second.duration < .milliseconds(500), "mux command took \(second.duration)")
         print("SSHKit integration: first \(first.duration), multiplexed \(second.duration)")
+        return true
+    }
 
+    private func checkCommands(_ dev: RemoteHost, runner: SSHRunner) async throws {
         // stdin, remote exit status, output caps.
         let echoed = try await runner.run("cat", on: dev, stdin: Data("hello from stdin\n".utf8))
         #expect(echoed.stdoutString == "hello from stdin\n")
@@ -103,7 +119,9 @@ struct IntegrationTests {
         // Timeout kills ssh; the remote side goes away with the channel.
         let slow = try await runner.run("sleep 20", on: dev, timeout: .milliseconds(500))
         #expect(slow.timedOut && slow.transportError == .timeout)
+    }
 
+    private func checkStreaming(_ dev: RemoteHost, runner: SSHRunner, marker: String) async throws {
         // Streaming: consume three lines, drop the stream, local and remote processes end.
         let tick = "tick-\(marker)"
         do {
@@ -128,7 +146,9 @@ struct IntegrationTests {
             return result?.succeeded == true && result?.stdoutString.isEmpty == true
         }
         #expect(remoteGone, "remote loop still running")
+    }
 
+    private func checkTransportFailures(refused: RemoteHost, unresolvable: RemoteHost, store: HostKeyStore, runner: SSHRunner) async throws {
         // Real transport failures, classified from real stderr.
         let refusedResult = try await runner.run("true", on: refused)
         #expect(refusedResult.transportError == .connectionRefused, "\(refusedResult.stderrString)")
@@ -136,7 +156,9 @@ struct IntegrationTests {
         #expect(dns.transportError == .nameResolutionFailed, "\(dns.stderrString)")
         await #expect(throws: SSHError.connectionRefused) { try await store.verify(refused) }
         await #expect(throws: SSHError.nameResolutionFailed) { try await store.verify(unresolvable) }
+    }
 
+    private func checkClosingMasters(_ dev: RemoteHost, runner: SSHRunner, control: ControlMaster, context: SSHContext) async throws {
         // -O exit closes the master.
         let exited = try await control.exit(dev)
         #expect(exited)
@@ -160,7 +182,8 @@ struct IntegrationTests {
         try writer.write([dev])
         let impostor = TestKeys.ed25519()
 
-        let store = HostKeyStore(context: context)
+        let pins = InMemoryKeychain()
+        let store = HostKeyStore(context: context, keychain: pins)
         try await store.trust(impostor, for: dev)
         guard case .changed(let pinned, let offered) = try await store.verify(dev) else {
             Issue.record("expected a changed host key")
@@ -171,7 +194,7 @@ struct IntegrationTests {
         #expect(await store.isBlocked(dev))
 
         // A fresh store learns about the change from ssh itself.
-        let freshStore = HostKeyStore(context: context)
+        let freshStore = HostKeyStore(context: context, keychain: pins)
         let runner = SSHRunner(context: context, hostKeys: freshStore)
         let result = try await runner.run("true", on: dev)
         #expect(result.transportError == .hostKeyChanged, "\(result.stderrString)")
@@ -194,7 +217,7 @@ struct IntegrationTests {
     private func keylessScenario(context: SSHContext) async throws {
         let dev = RemoteHost.test()
         try SSHConfigWriter(context: context).write([dev])
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         try await store.trust(DevServerKeys.ed25519Key, for: dev)
         let runner = SSHRunner(context: context, hostKeys: store)
         let result = try await runner.run("true", on: dev)

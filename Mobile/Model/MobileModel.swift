@@ -11,12 +11,12 @@ import SSHKit
 /// The iOS app's state and services: the Mac app's AeroKit stack, with AeroKit's in-process
 /// ``EmbeddedSSHClient`` in place of `/usr/bin/ssh` (iOS cannot spawn processes).
 ///
-/// - Hosts: ``HostStore`` (`hosts.json` in the app container's Application Support).
+/// - Hosts: ``HostStore`` in the Keychain the Mac app shares; each device keeps its own MCP tiers.
 /// - Keys: ``KeyStore`` over the Keychain (Ed25519; Secure Enclave P-256 on devices). Private keys
 ///   never leave the Keychain or the enclave; EmbeddedSSH signs with them in this process.
 /// - Passwords: ``HostPasswordVault`` in the Keychain, read only by EmbeddedSSH at login.
-/// - Host keys: ``HostKeyStore`` (`~/.aeroops/known_hosts` in the container), first-contact trust
-///   and changed-key blocks exactly as on the Mac.
+/// - Host keys: ``HostKeyStore`` pins in the Keychain, first-contact trust and changed-key blocks
+///   exactly as on the Mac.
 /// - Monitoring: Collectors' ``MonitorCoordinator`` with the embedded client as its runner; each
 ///   update goes into the host's ``HostDisplayState``, which the shared ``HostCard`` draws. Hosts
 ///   with monitoring off (``RemoteHost/monitored``) are not polled and show ``HostStatus/unmonitored``.
@@ -37,13 +37,20 @@ final class MobileModel {
         var id: RemoteHost.ID { host.id }
     }
 
-    /// The inventory, in `hosts.json` order.
+    /// The inventory, oldest first.
     var hosts: [RemoteHost] { hostStore.hosts }
-    /// Why `hosts.json` could not be read.
+    /// Why the hosts could not be read.
     var hostsError: String? { hostStore.loadError?.localizedDescription }
+    /// Why the pins of an older AeroOps could not be moved into the Keychain.
+    private(set) var hostKeyError: String?
     private(set) var keys: [SSHKeyRecord] = []
-    /// Why the key store could not be opened; monitoring needs it.
-    private(set) var keyStoreError: String?
+    /// Why the key store could not be opened, or an older AeroOps's keys moved.
+    private var keySetupError: String?
+    /// Why the last reload of the keys failed.
+    private var keyReloadError: String?
+    var keyStoreError: String? { keySetupError ?? keyReloadError }
+    /// Whether keys can be used at all; monitoring needs it.
+    var hasKeyStore: Bool { keyStore != nil }
     /// Hosts whose key changed, by known_hosts name; mirrors ``HostKeyStore/blockedHosts``.
     private(set) var hostKeyBlocks: [String: HostKeyBlock] = [:]
     /// The trust sheet to show; set by ``requestHostKeyTrust(for:)``.
@@ -68,23 +75,32 @@ final class MobileModel {
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
     @ObservationIgnored private var isStarted = false
+    @ObservationIgnored private let paths: AeroPaths
+    @ObservationIgnored private let importsLegacyItems: Bool
     /// Sample data (previews, "Try Sample Servers", `-AeroOpsDemo`): terminals and files are canned too.
     @ObservationIgnored private(set) var isPreview = false
     @ObservationIgnored private var terminals: [RemoteHost.ID: EmbeddedTerminalSession] = [:]
     @ObservationIgnored private var fileBrowsers: [RemoteHost.ID: MobileFileBrowser<RemoteFileBackend>] = [:]
     @ObservationIgnored private var demoFileBrowsers: [RemoteHost.ID: MobileFileBrowser<DemoFileBackend>] = [:]
 
-    /// `paths` roots every file; `secrets` and `passwordSecrets` hold the private keys and
-    /// passwords (the Keychain in the app, memory in previews).
-    init(paths: AeroPaths = .standard, secrets: any SecretStore, passwordSecrets: any SecretStore) {
-        hostStore = HostStore(directory: paths.applicationSupport)
-        let passwords = HostPasswordVault(store: passwordSecrets)
+    /// `paths` roots every file; `keychain`, `passwordKeychain` and `hostKeyKeychain` hold the
+    /// keys, passwords and pins (the Keychain the Mac app shares in the app, memory in previews).
+    /// `importsLegacyItems`: whether ``start()`` moves the keys, passwords and pins an older
+    /// AeroOps kept on this device only.
+    init(
+        paths: AeroPaths = .standard, hostStore: HostStore, keychain: any KeychainStore,
+        passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore, importsLegacyItems: Bool = false
+    ) {
+        self.hostStore = hostStore
+        self.paths = paths
+        self.importsLegacyItems = importsLegacyItems
+        let passwords = HostPasswordVault(keychain: passwordKeychain)
         self.passwords = passwords
-        hostKeys = HostKeyStore(knownHostsFile: paths.knownHosts, scanner: EmbeddedHostKeyScanner())
+        hostKeys = HostKeyStore(keychain: hostKeyKeychain, knownHostsFile: paths.knownHosts, scanner: EmbeddedHostKeyScanner())
         gate = PasswordAttemptGate { passwords.hasPassword(for: $0) }
         authorizer = .localAuthentication()
         do {
-            let keyStore = try KeyStore(secretStore: secrets, paths: paths)
+            let keyStore = try KeyStore(keychain: keychain, paths: paths)
             self.keyStore = keyStore
             client = EmbeddedSSHClient(
                 hostKeys: hostKeys,
@@ -94,14 +110,18 @@ final class MobileModel {
         } catch {
             keyStore = nil
             client = nil
-            keyStoreError = error.localizedDescription
+            keySetupError = error.localizedDescription
         }
         passwords.setPasswordHosts(passwordHostIDs)
     }
 
-    /// The app's model: Keychain-backed secrets under the app container.
+    /// The app's model: hosts, keys, passwords and pins in the Keychain, files under the app container.
     static func live() -> MobileModel {
-        MobileModel(secrets: KeychainSecretStore(), passwordSecrets: HostPasswordVault.keychainStore())
+        MobileModel(
+            hostStore: .system(legacyFile: AeroPaths.standard.legacyHostsFile), keychain: KeyStore.systemKeychain(),
+            passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain(),
+            importsLegacyItems: true
+        )
     }
 
     // MARK: - Lifecycle
@@ -112,8 +132,9 @@ final class MobileModel {
         isStarted = true
         // Downloads left from the last run.
         MobileFileBrowser<RemoteFileBackend>.removeAllDownloads()
+        await importLegacyItems()
         await reloadKeys()
-        await refreshHostKeyBlocks()
+        await refreshHostKeys()
         guard let client else { return }
         let coordinator = MonitorCoordinator(runner: client, hostKeys: hostKeys, activity: activity)
         self.coordinator = coordinator
@@ -136,6 +157,7 @@ final class MobileModel {
         coordinator?.setActivity(next)
         if active {
             coordinator?.refreshAll()
+            Task { await keychainMayHaveChanged() }
         } else if let client {
             Task { await client.disconnectAll() }
         }
@@ -209,11 +231,16 @@ final class MobileModel {
     func deleteHost(id: RemoteHost.ID) throws {
         try hostStore.delete(id: id)
         try? passwords.delete(for: id)
+        forgetHost(id)
+        hostsDidChange()
+    }
+
+    /// Ends what is still open for a host that is gone, deleted here or on another device.
+    private func forgetHost(_ id: RemoteHost.ID) {
         displayStates[id] = nil
         scanErrors[id] = nil
         closeTerminal(id)
         fileBrowsers.removeValue(forKey: id)?.close()
-        hostsDidChange()
         if let client { Task { await client.disconnect(id) } }
     }
 
@@ -235,17 +262,31 @@ final class MobileModel {
         Set(hosts.lazy.filter { $0.auth == .password }.map(\.id))
     }
 
+    /// A password saved on another device gets a fresh attempt.
+    private func refreshPasswordHosts() {
+        let gate = gate
+        for id in passwords.setPasswordHosts(passwordHostIDs) {
+            Task { [weak self] in
+                await gate.reset(id)
+                self?.coordinator?.refresh(id)
+            }
+        }
+    }
+
     private func hostsDidChange() {
-        passwords.setPasswordHosts(passwordHostIDs)
+        refreshPasswordHosts()
         // The coordinator skips hosts with monitoring off.
         coordinator?.setHosts(hosts)
-        // A host that left monitoring keeps no stale numbers; turned back on, it waits for its
-        // first poll.
-        let ids = Set(hosts.map(\.id))
-        for id in displayStates.keys where !ids.contains(id) { displayStates[id] = nil }
         for host in hosts {
             fileBrowsers[host.id]?.hostDidChange(host)
         }
+        updateDisplayStates()
+    }
+
+    /// A host that left monitoring keeps no stale numbers; turned back on, it waits for its first poll.
+    private func updateDisplayStates() {
+        let ids = Set(hosts.map(\.id))
+        for id in displayStates.keys where !ids.contains(id) { displayStates[id] = nil }
         for host in hosts {
             guard let state = displayStates[host.id] else { continue }
             if !host.monitored {
@@ -377,9 +418,51 @@ final class MobileModel {
 
     // MARK: - Keys
 
+    /// Re-reads the keys from the Keychain, including ones synced from the user's other devices.
     func reloadKeys() async {
         guard let keyStore else { return }
+        do {
+            try await keyStore.reload()
+            keyReloadError = nil
+        } catch {
+            keyReloadError = error.localizedDescription
+        }
         keys = await keyStore.keys
+    }
+
+    private func importLegacyItems() async {
+        guard importsLegacyItems, let keyStore else { return }
+        do {
+            try await keyStore.importLegacyKeys(metadataDirectory: paths.applicationSupport, secrets: KeychainSecretStore())
+        } catch {
+            keySetupError = error.localizedDescription
+        }
+        passwords.importLegacyPasswords(of: Set(hosts.map(\.id)), from: HostPasswordVault.legacyStore())
+        refreshPasswordHosts()
+    }
+
+    /// Takes in the pins of an older AeroOps and the pins made on the user's other devices, and
+    /// polls again when that changed anything.
+    private func refreshHostKeys() async {
+        do {
+            if importsLegacyItems { try await hostKeys.importLegacyPins(from: paths.legacyKnownHosts) }
+            let changed = try await hostKeys.refreshKnownHostsFile()
+            hostKeyError = nil
+            await refreshHostKeyBlocks()
+            if changed { coordinator?.refreshAll() }
+        } catch {
+            hostKeyError = error.localizedDescription
+        }
+    }
+
+    /// Hosts, keys and passwords synced from the user's other devices show up when the app comes forward.
+    private func keychainMayHaveChanged() async {
+        let previous = Set(hosts.map(\.id))
+        if hostStore.reload() { hostsDidChange() }
+        for id in previous.subtracting(hosts.map(\.id)) { forgetHost(id) }
+        refreshPasswordHosts()
+        await refreshHostKeys()
+        await keysDidChange()
     }
 
     func key(id: String?) -> SSHKeyRecord? {
@@ -388,10 +471,16 @@ final class MobileModel {
     }
 
     @discardableResult
-    func generateKey(_ type: KeyGenerationType, name: String, policy: SigningPolicy) async throws -> SSHKeyRecord {
-        let record = try await requireKeyStore().generate(type, name: name, policy: policy)
+    func generateKey(_ type: KeyGenerationType, name: String, policy: SigningPolicy, syncs: Bool = true) async throws -> SSHKeyRecord {
+        let record = try await requireKeyStore().generate(type, name: name, policy: policy, syncs: syncs)
         await keysDidChange()
         return record
+    }
+
+    /// Turns iCloud Keychain sync on or off for a key.
+    func setSyncs(_ syncs: Bool, for id: UUID) async throws {
+        try await requireKeyStore().setSyncs(id: id, syncs)
+        await keysDidChange()
     }
 
     func setPolicy(_ policy: SigningPolicy, for id: UUID) async throws {
@@ -432,7 +521,7 @@ enum MobileModelError: LocalizedError {
 }
 
 extension MobileModel {
-    /// A model over throwaway files and in-memory secrets, with the sample hosts in every card
+    /// A model over throwaway files and in-memory hosts and secrets, with the sample hosts in every card
     /// state. For previews, "Try Sample Servers" and `-AeroOpsDemo`; never monitors.
     static func preview(hosts: [RemoteHost] = SampleData.hosts) -> MobileModel {
         let root = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -440,7 +529,10 @@ extension MobileModel {
             dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory),
             applicationSupport: root.appending(path: "support", directoryHint: .isDirectory)
         )
-        let model = MobileModel(paths: paths, secrets: InMemorySecretStore(), passwordSecrets: InMemorySecretStore())
+        let model = MobileModel(
+            paths: paths, hostStore: .inMemory(), keychain: InMemoryKeychain(),
+            passwordKeychain: InMemoryKeychain(), hostKeyKeychain: InMemoryKeychain()
+        )
         for host in hosts { try? model.hostStore.add(host) }
         // Hosts with monitoring off get no update.
         for update in SampleData.liveUpdates(for: model.hosts) {

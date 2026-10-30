@@ -19,7 +19,7 @@ struct KeysScreen: View {
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button("New Key", systemImage: "plus") { isCreating = true }
-                            .disabled(model.keyStoreError != nil)
+                            .disabled(!model.hasKeyStore)
                     }
                 }
                 .navigationDestination(for: SSHKeyRecord.ID.self) { id in
@@ -42,7 +42,7 @@ struct KeysScreen: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = model.keyStoreError {
+        if let error = model.keyStoreError, model.keys.isEmpty {
             AeroEmptyState(systemImage: "exclamationmark.triangle", title: "Keys are unavailable", message: error)
         } else if model.keys.isEmpty {
             AeroEmptyState(
@@ -185,43 +185,11 @@ private struct KeyDetailScreen: View {
     }
 
     private func details(_ key: SSHKeyRecord) -> some View {
-        let line = key.authorizedKeysLine
         let users = model.hosts.filter { $0.keyId == key.id.uuidString }
         return Form {
-            Section {
-                LabeledContent("Type", value: key.algorithm.displayName)
-                LabeledContent("Created", value: key.createdAt.formatted(date: .abbreviated, time: .shortened))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Fingerprint")
-                    Text(key.fingerprint)
-                        .font(Aero.monospacedFont(.caption))
-                        .foregroundStyle(Aero.text.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-            Section {
-                Text(line)
-                    .font(Aero.monospacedFont(.caption))
-                    .textSelection(.enabled)
-                Button(copied ? "Copied" : "Copy Public Key", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                    UIPasteboard.general.string = line
-                    copied = true
-                }
-                ShareLink("Share Public Key", item: line)
-            } header: {
-                Text("Public key")
-            } footer: {
-                Text("Add this line to ~/.ssh/authorized_keys on each server.")
-            }
-            Section {
-                Picker("Ask", selection: policyBinding(key)) {
-                    ForEach(SigningPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-            } header: {
-                Text("Before signing in")
-            } footer: {
-                Text(key.policy.explanation)
-            }
+            summary(key)
+            publicKey(key.authorizedKeysLine)
+            settings(key)
             if let error {
                 Section { ValidationMessage(text: error) }
             }
@@ -240,19 +208,79 @@ private struct KeyDetailScreen: View {
         .confirmationDialog("Delete “\(key.name)”?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Delete Key", role: .destructive) { delete(key) }
         } message: {
-            Text(key.algorithm == .secureEnclaveP256
-                 ? "The key is destroyed and can’t be recovered. Servers that only accept this key will refuse AeroOps."
-                 : "The private key is removed from this device’s Keychain. Servers that only accept this key will refuse AeroOps.")
+            Text(Self.deletionMessage(key))
         }
     }
 
-    private func policyBinding(_ key: SSHKeyRecord) -> Binding<SigningPolicy> {
+    private func summary(_ key: SSHKeyRecord) -> some View {
+        Section {
+            LabeledContent("Type", value: key.algorithm.displayName)
+            LabeledContent("Created", value: key.createdAt.formatted(date: .abbreviated, time: .shortened))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Fingerprint")
+                Text(key.fingerprint)
+                    .font(Aero.monospacedFont(.caption))
+                    .foregroundStyle(Aero.text.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func publicKey(_ line: String) -> some View {
+        Section {
+            Text(line)
+                .font(Aero.monospacedFont(.caption))
+                .textSelection(.enabled)
+            Button(copied ? "Copied" : "Copy Public Key", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                UIPasteboard.general.string = line
+                copied = true
+            }
+            ShareLink("Share Public Key", item: line)
+        } header: {
+            Text("Public key")
+        } footer: {
+            Text("Add this line to ~/.ssh/authorized_keys on each server.")
+        }
+    }
+
+    @ViewBuilder
+    private func settings(_ key: SSHKeyRecord) -> some View {
+        Section {
+            Picker("Ask", selection: binding(key.policy) { try await model.setPolicy($0, for: key.id) }) {
+                ForEach(SigningPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+        } header: {
+            Text("Before signing in")
+        } footer: {
+            Text(key.policy.explanation)
+        }
+        Section {
+            if key.canSync {
+                Toggle("iCloud Keychain", isOn: binding(key.syncs) { try await model.setSyncs($0, for: key.id) })
+            }
+        } footer: {
+            Text(key.canSync
+                 ? "Syncs this key to your other devices, including AeroOps on your Mac."
+                 : "Secure Enclave keys stay on this device.")
+        }
+    }
+
+    private static func deletionMessage(_ key: SSHKeyRecord) -> String {
+        let consequence = "Servers that only accept this key will refuse AeroOps."
+        if key.algorithm == .secureEnclaveP256 {
+            return "The key is destroyed and can’t be recovered. \(consequence)"
+        }
+        return "The private key is removed from \(key.syncs ? "the Keychain on all your devices" : "this device’s Keychain"). \(consequence)"
+    }
+
+    /// Shows `value`; a change runs `change` and shows its error.
+    private func binding<Value: Sendable>(_ value: Value, _ change: @escaping @MainActor (Value) async throws -> Void) -> Binding<Value> {
         Binding(
-            get: { key.policy },
-            set: { policy in
+            get: { value },
+            set: { newValue in
                 Task {
                     do {
-                        try await model.setPolicy(policy, for: key.id)
+                        try await change(newValue)
                         error = nil
                     } catch {
                         self.error = error.localizedDescription

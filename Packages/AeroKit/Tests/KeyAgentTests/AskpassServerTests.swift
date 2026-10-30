@@ -1,3 +1,4 @@
+import AeroCore
 import AskpassProtocol
 import Darwin
 import Foundation
@@ -29,8 +30,8 @@ struct HostPasswordVaultTests {
 
     @Test("answers only password hosts with a saved password")
     func answers() throws {
-        let store = InMemorySecretStore()
-        let vault = HostPasswordVault(store: store)
+        let store = InMemoryKeychain()
+        let vault = HostPasswordVault(keychain: store)
         let request = AskpassRequest(host: host, prompt: "admin@nas's password: ")
         #expect(vault.answer(request) == .failure(.notPasswordHost))
 
@@ -41,7 +42,8 @@ struct HostPasswordVaultTests {
         try vault.save("hunter2 ünïcode", for: host)
         #expect(vault.hasPassword(for: host))
         #expect(vault.isSaved(host))
-        #expect(store.storedIDs == [host])
+        #expect(store.items().map(\.account) == [host.uuidString])
+        #expect(store.items().allSatisfy { $0.syncs && !$0.record.contains(Data("hunter2".utf8)) })
         #expect(vault.answer(request) == .success("hunter2 ünïcode"))
 
         // Switched back to a key: the saved password stays but is no longer handed out.
@@ -56,19 +58,68 @@ struct HostPasswordVaultTests {
         #expect(vault.answer(request) == .failure(.noPassword))
     }
 
+    @Test("a password saved on another device is reported once")
+    func passwordReplacedElsewhere() throws {
+        let store = InMemoryKeychain()
+        let vault = HostPasswordVault(keychain: store)
+        try vault.save("first", for: host)
+        #expect(vault.setPasswordHosts([host]).isEmpty)
+
+        try HostPasswordVault(keychain: store).save("second", for: host)
+        #expect(vault.setPasswordHosts([host]) == [host])
+        #expect(vault.setPasswordHosts([host]).isEmpty)
+
+        try vault.save("third", for: host)
+        #expect(vault.setPasswordHosts([host]).isEmpty)
+    }
+
+    @Test("a Keychain that cannot be read reports no replaced passwords")
+    func lockedKeychainReportsNoChange() throws {
+        let store = LockableKeychain()
+        let vault = HostPasswordVault(keychain: store)
+        try vault.save("first", for: host)
+        vault.setPasswordHosts([host])
+
+        store.setLocked(true)
+        #expect(vault.setPasswordHosts([host]).isEmpty)
+        #expect(!vault.hasPassword(for: host))
+
+        store.setLocked(false)
+        #expect(vault.setPasswordHosts([host]).isEmpty)
+        #expect(vault.hasPassword(for: host))
+    }
+
     @Test("setPasswordHosts reads which passwords are saved from the store")
     func cacheFromStore() throws {
-        let store = InMemorySecretStore()
-        try store.save(Data("from a previous launch".utf8), for: host)
-        let vault = HostPasswordVault(store: store)
+        let store = InMemoryKeychain()
+        store.save(KeychainItem(account: host.uuidString, syncs: true), secret: Data("from a previous launch".utf8))
+        let vault = HostPasswordVault(keychain: store)
         #expect(!vault.hasPassword(for: host))
         vault.setPasswordHosts([host, UUID()])
         #expect(vault.hasPassword(for: host))
 
         // A stored value ssh cannot use is treated as no password, and the cache forgets it.
-        try store.save(Data("two\nlines".utf8), for: host)
+        store.save(KeychainItem(account: host.uuidString, syncs: true), secret: Data("two\nlines".utf8))
         #expect(vault.answer(AskpassRequest(host: host, prompt: "Password:")) == .failure(.noPassword))
         #expect(!vault.hasPassword(for: host))
+    }
+
+    @Test("moves an older AeroOps's passwords into the Keychain once; a synced one wins")
+    func importLegacy() throws {
+        let synced = UUID()
+        let legacy = InMemorySecretStore()
+        try legacy.save(Data("old".utf8), for: host)
+        try legacy.save(Data("stale".utf8), for: synced)
+        let store = InMemoryKeychain()
+        store.save(KeychainItem(account: synced.uuidString, syncs: true), secret: Data("from the iPhone".utf8))
+        let vault = HostPasswordVault(keychain: store)
+
+        vault.importLegacyPasswords(of: [host, synced, UUID()], from: legacy)
+        vault.setPasswordHosts([host, synced])
+        #expect(vault.loginPassword(for: host) == .success("old"))
+        #expect(vault.loginPassword(for: synced) == .success("from the iPhone"))
+        #expect(store.items().allSatisfy { $0.syncs })
+        #expect(legacy.storedIDs.isEmpty)
     }
 
     @Test("refuses passwords ssh cannot send", arguments: [
@@ -78,24 +129,24 @@ struct HostPasswordVaultTests {
         (String(repeating: "x", count: Askpass.maxPasswordBytes + 1), .tooLong),
     ])
     func unusable(_ password: String, _ problem: Askpass.PasswordProblem) {
-        let store = InMemorySecretStore()
-        let vault = HostPasswordVault(store: store)
+        let store = InMemoryKeychain()
+        let vault = HostPasswordVault(keychain: store)
         #expect(throws: HostPasswordError.unusable(problem)) { try vault.save(password, for: host) }
         #expect(throws: HostPasswordError.unusable(problem)) { try vault.beginTemporary(password, for: host) }
-        #expect(store.storedIDs.isEmpty)
+        #expect(store.items().isEmpty)
     }
 
     @Test("a test password works only for its host and its token, until ended")
     func temporary() throws {
-        let store = InMemorySecretStore()
-        let vault = HostPasswordVault(store: store)
+        let store = InMemoryKeychain()
+        let vault = HostPasswordVault(keychain: store)
         let token = try vault.beginTemporary("draft", for: host)
         #expect(Askpass.isValidToken(token))
         // Not a password host yet, nothing saved: the token is enough.
         #expect(vault.answer(AskpassRequest(host: host, token: token, prompt: "Password:")) == .success("draft"))
         #expect(vault.answer(AskpassRequest(host: UUID(), token: token, prompt: "Password:")) == .failure(.unknownToken))
         #expect(vault.answer(AskpassRequest(host: host, token: Askpass.makeToken(), prompt: "Password:")) == .failure(.unknownToken))
-        #expect(store.storedIDs.isEmpty)
+        #expect(store.items().isEmpty)
         #expect(!vault.hasPassword(for: host))
 
         vault.endTemporary(token)
@@ -110,7 +161,7 @@ struct AskpassServerTests {
     private func start(
         _ dir: TempDirectory, validator: any AskpassPeerValidator = FakeAskpassValidator()
     ) throws -> (AskpassServer, HostPasswordVault) {
-        let vault = HostPasswordVault(store: InMemorySecretStore())
+        let vault = HostPasswordVault(keychain: InMemoryKeychain())
         let server = AskpassServer(socketURL: dir.appending("aero/askpass.sock"), vault: vault, validator: validator)
         try server.start()
         return (server, vault)

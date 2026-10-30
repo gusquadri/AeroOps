@@ -1,9 +1,10 @@
+import AeroCore
 import AskpassProtocol
 import Foundation
 import Synchronization
 
 /// Password hosts' login passwords: Keychain items (service ``keychainService``, account = host
-/// id), plus short-lived passwords for testing an unsaved host.
+/// id) that sync with iCloud Keychain, plus short-lived passwords for testing an unsaved host.
 ///
 /// Passwords leave the vault only through ``AskpassServer``, to a verified `aeroops-askpass`, and
 /// on iOS through ``loginPassword(for:token:)`` to EmbeddedSSH, which sends them to the host.
@@ -14,7 +15,12 @@ public final class HostPasswordVault: Sendable {
     public static let keychainService = "app.aeroops.passwords"
 
     /// The Keychain store the app uses for passwords.
-    public static func keychainStore() -> KeychainSecretStore {
+    public static func systemKeychain() -> SystemKeychain {
+        SystemKeychain(service: keychainService, label: "AeroOps SSH password")
+    }
+
+    /// Where an older AeroOps kept passwords, for ``importLegacyPasswords(of:from:)``.
+    public static func legacyStore() -> KeychainSecretStore {
         KeychainSecretStore(service: keychainService, label: "AeroOps SSH password", itemDescription: "AeroOps SSH login password")
     }
 
@@ -32,24 +38,38 @@ public final class HostPasswordVault: Sendable {
         /// Hosts known to have a saved password. A cache of the store, so the attempt gate can
         /// ask on every command without touching the Keychain.
         var saved: Set<UUID> = []
+        /// Which save each password in the Keychain came from, to notice one replaced elsewhere.
+        var stamps: [UUID: Data] = [:]
         var temporary: [String: Temporary] = [:]
     }
 
-    private let store: any SecretStore
+    private let keychain: any KeychainStore
     private let state = Mutex(State())
 
-    public init(store: any SecretStore) {
-        self.store = store
+    public init(keychain: any KeychainStore) {
+        self.keychain = keychain
     }
 
-    /// The password hosts. Refreshes the saved-password cache for them from the store; a host
-    /// whose item cannot be checked counts as having none.
-    public func setPasswordHosts(_ ids: Set<UUID>) {
-        let saved = Set(ids.filter { (try? store.contains($0)) == true })
-        state.withLock {
-            $0.passwordHosts = ids
-            $0.saved = saved
+    /// The password hosts. Refreshes the saved-password cache for them from the Keychain; when
+    /// it cannot be read, no host has a password. Returns the hosts whose password was saved on
+    /// another device since the last call: ``PasswordAttemptGate`` should let them try again.
+    @discardableResult
+    public func setPasswordHosts(_ ids: Set<UUID>) -> Set<UUID> {
+        let stamps = savedStamps()
+        return state.withLock { state in
+            state.passwordHosts = ids
+            state.saved = ids.intersection((stamps ?? [:]).keys)
+            guard let stamps else { return [] }
+            let replaced = stamps.filter { state.stamps[$0.key] != $0.value }.keys
+            state.stamps = stamps
+            return Set(replaced)
         }
+    }
+
+    private func savedStamps() -> [UUID: Data]? {
+        guard let items = try? keychain.items() else { return nil }
+        let pairs = items.compactMap { item in UUID(uuidString: item.account).map { ($0, item.record) } }
+        return Dictionary(pairs) { first, _ in first }
     }
 
     /// Whether `id` is a password host with a saved password. Cached; never touches the Keychain.
@@ -57,27 +77,56 @@ public final class HostPasswordVault: Sendable {
         state.withLock { $0.passwordHosts.contains(id) && $0.saved.contains(id) }
     }
 
-    /// Whether the store holds a password for `id`, whether or not it is a password host.
-    /// Asks the store (attributes only, never the password).
+    /// Whether the Keychain holds a password for `id`, whether or not it is a password host.
+    /// Reads attributes only, never the password.
     public func isSaved(_ id: UUID) -> Bool {
-        (try? store.contains(id)) == true
+        savedHosts().contains(id)
     }
 
-    /// Saves `password` for `id`, replacing any previous one.
+    private func savedHosts() -> Set<UUID> {
+        Set(((try? keychain.items()) ?? []).compactMap { UUID(uuidString: $0.account) })
+    }
+
+    /// Saves `password` for `id` on every device that syncs, replacing any previous one.
     public func save(_ password: String, for id: UUID) throws(HostPasswordError) {
         if let problem = Askpass.passwordProblem(password) { throw .unusable(problem) }
+        let item = Self.item(id)
         do {
-            try store.save(Data(password.utf8), for: id)
+            try keychain.save(item, secret: Data(password.utf8))
         } catch {
             throw .store(error)
         }
-        state.withLock { _ = $0.saved.insert(id) }
+        state.withLock {
+            $0.saved.insert(id)
+            $0.stamps[id] = item.record
+        }
     }
 
-    /// Deletes `id`'s saved password. Succeeds when there is none.
-    public func delete(for id: UUID) throws(SecretStoreError) {
-        try store.delete(for: id)
-        state.withLock { _ = $0.saved.remove(id) }
+    /// Deletes `id`'s saved password here and on the user's other devices. Succeeds when there is none.
+    public func delete(for id: UUID) throws(KeychainError) {
+        try keychain.delete(id.uuidString)
+        state.withLock {
+            $0.saved.remove(id)
+            $0.stamps[id] = nil
+        }
+    }
+
+    /// Moves the passwords of `hosts` that an older AeroOps kept in `legacy` into the Keychain,
+    /// then deletes the old copies. A password already in the Keychain wins; one that cannot be
+    /// moved stays where it was, for the next launch.
+    public func importLegacyPasswords(of hosts: Set<UUID>, from legacy: any SecretStore) {
+        let saved = savedHosts()
+        for id in hosts {
+            guard let password = try? legacy.load(for: id) else { continue }
+            guard saved.contains(id) || (try? keychain.save(Self.item(id), secret: password)) != nil else { continue }
+            try? legacy.delete(for: id)
+        }
+    }
+
+    /// The item for a new password. Its record says nothing about the password; it only differs
+    /// from the last save's.
+    private static func item(_ id: UUID) -> KeychainItem {
+        KeychainItem(account: id.uuidString, record: Data(UUID().uuidString.utf8), syncs: true)
     }
 
     /// Makes `password` available for `id` until ``endTemporary(_:)``, without saving it.
@@ -107,18 +156,24 @@ public final class HostPasswordVault: Sendable {
     /// `package`: besides ``AskpassServer``, only AeroKit's in-process SSH client (EmbeddedSSH,
     /// used on iOS) reads passwords, and it sends them only to the host's verified server.
     package func loginPassword(for id: UUID, token: String? = nil) -> Result<String, AskpassRefusal> {
-        if let token {
-            let entry = state.withLock { state -> Temporary? in
-                guard let entry = state.temporary[token], entry.expires > .now else { return nil }
-                return entry
-            }
-            guard let entry, entry.host == id else { return .failure(.unknownToken) }
-            return .success(entry.password)
-        }
+        if let token { return temporaryPassword(token, for: id) }
         guard state.withLock({ $0.passwordHosts.contains(id) }) else { return .failure(.notPasswordHost) }
+        return savedPassword(for: id)
+    }
+
+    private func temporaryPassword(_ token: String, for id: UUID) -> Result<String, AskpassRefusal> {
+        let entry = state.withLock { state -> Temporary? in
+            guard let entry = state.temporary[token], entry.expires > .now else { return nil }
+            return entry
+        }
+        guard let entry, entry.host == id else { return .failure(.unknownToken) }
+        return .success(entry.password)
+    }
+
+    private func savedPassword(for id: UUID) -> Result<String, AskpassRefusal> {
         let data: Data?
         do {
-            data = try store.load(for: id)
+            data = try keychain.secret(for: id.uuidString)
         } catch {
             return .failure(.store(error.localizedDescription))
         }
@@ -133,7 +188,7 @@ public final class HostPasswordVault: Sendable {
 /// Why a password could not be saved or used.
 public enum HostPasswordError: Error, Equatable, Sendable, LocalizedError {
     case unusable(Askpass.PasswordProblem)
-    case store(SecretStoreError)
+    case store(KeychainError)
 
     public var errorDescription: String? {
         switch self {

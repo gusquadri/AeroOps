@@ -146,7 +146,7 @@ struct HostKeyStoreTests {
 
     @Test("TOFU: unknown, then trusted after trust(), persisted as [host]:port with 0600")
     func trustOnFirstUse() async throws {
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         guard case .unknown(let offered) = try await store.verify(host) else {
             Issue.record("expected unknown")
             return
@@ -170,7 +170,7 @@ struct HostKeyStoreTests {
 
     @Test("a changed key blocks the host until the user replaces the pin")
     func changedKeyBlocks() async throws {
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         let pinned = TestKeys.ed25519()
         try await store.trust(pinned, for: host)
 
@@ -209,13 +209,89 @@ struct HostKeyStoreTests {
         try scratch.write("banner", banner)
         let ssh = try scratch.script("ssh-changed", "cat \(ShellQuote.quote(scratch.file("banner").filePath)) >&2; exit 255")
         let context = SSHContext(paths: scratch.paths(), sshExecutable: ssh)
-        let store = HostKeyStore(context: context)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         let runner = SSHRunner(context: context, hostKeys: store)
         let result = try await runner.run("true", on: host)
         #expect(result.transportError == .hostKeyChanged)
         #expect(await store.isBlocked(host))
         await store.unblock(host)
         #expect(await !store.isBlocked(host))
+    }
+
+    @Test("a key trusted on one device reaches the other's known_hosts copy, and so does forgetting it")
+    func pinsSyncBetweenDevices() async throws {
+        let pins = InMemoryKeychain()
+        let mac = HostKeyStore(keychain: pins, knownHostsFile: scratch.file("mac_known_hosts"))
+        let phone = HostKeyStore(keychain: pins, knownHostsFile: scratch.file("phone_known_hosts"))
+        try await phone.trust(DevServerKeys.ed25519Key, for: host)
+        #expect(pins.items().map(\.syncs) == [true])
+
+        #expect(try await mac.refreshKnownHostsFile())
+        #expect(scratch.read("mac_known_hosts") == "[localhost]:2222 ssh-ed25519 \(DevServerKeys.ed25519)\n")
+        #expect(try await mac.refreshKnownHostsFile() == false)
+        try await phone.forget(host)
+        #expect(try await mac.refreshKnownHostsFile())
+        #expect(scratch.read("mac_known_hosts") == "")
+        #expect(pins.items().isEmpty)
+    }
+
+    @Test("a synced item whose name is not one literal host never reaches known_hosts")
+    func syncedPinNamesAreLiteral() async throws {
+        let pins = InMemoryKeychain()
+        let line = "ssh-ed25519 \(DevServerKeys.ed25519)"
+        for name in ["*", "a,b", "x\n* \(line)"] {
+            try pins.save(KeychainItem(account: name, record: Data("\(name) \(line)\n".utf8), syncs: true), secret: Data())
+        }
+        let store = HostKeyStore(keychain: pins, knownHostsFile: scratch.file("known_hosts"))
+        try await store.refreshKnownHostsFile()
+        #expect(scratch.read("known_hosts") == "")
+    }
+
+    @Test("an older AeroOps's known_hosts moves into the Keychain once")
+    func legacyPinsMove() async throws {
+        let legacy = try scratch.write("known_hosts", "[localhost]:2222 ssh-ed25519 \(DevServerKeys.ed25519)\n*.corp \(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)\n", mode: 0o600)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
+        #expect(try await store.importLegacyPins(from: legacy) == 1)
+        #expect(try await store.pinnedKeys(for: host) == [DevServerKeys.ed25519Key])
+        #expect(scratch.read("known_hosts") == "*.corp \(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)\n")
+        #expect(try String(contentsOf: context.knownHostsFile, encoding: .utf8) == "[localhost]:2222 ssh-ed25519 \(DevServerKeys.ed25519)\n")
+        #expect(try await store.importLegacyPins(from: legacy) == 0)
+    }
+
+    @Test("what only ssh can use stays in an older AeroOps's known_hosts")
+    func legacyLeftovers() async throws {
+        let key = "\(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)"
+        let revoked = "@revoked evil.example \(key)"
+        let hashed = "|1|c2FsdA==|aG1hYw== \(key)"
+        let text = "# a note\n\n\(revoked)\n\(hashed)\nplain.example,*.corp \(key)\n"
+        let legacy = try scratch.write("known_hosts", text, mode: 0o600)
+        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
+
+        #expect(try await store.importLegacyPins(from: legacy) == 1)
+        #expect(scratch.read("known_hosts") == "\(revoked)\n\(hashed)\n*.corp \(key)\n")
+        #expect(try await store.importLegacyPins(from: legacy) == 0)
+        #expect(scratch.read("known_hosts") == "\(revoked)\n\(hashed)\n*.corp \(key)\n")
+
+        _ = try scratch.write("known_hosts", "# a note\nplain.example \(key)\n", mode: 0o600)
+        _ = try await store.importLegacyPins(from: legacy)
+        #expect(scratch.read("known_hosts") == nil)
+    }
+
+    @Test("a key accepted on another device lifts the block here")
+    func syncedPinLiftsBlock() async throws {
+        let pins = InMemoryKeychain()
+        let mac = HostKeyStore(keychain: pins, knownHostsFile: scratch.file("mac_known_hosts"))
+        let phone = HostKeyStore(keychain: pins, knownHostsFile: scratch.file("phone_known_hosts"))
+        try await mac.trust(DevServerKeys.ed25519Key, for: host)
+        await mac.block(host)
+
+        #expect(try await mac.refreshKnownHostsFile() == false)
+        #expect(await mac.isBlocked(host))
+
+        try await phone.forget(host)
+        try await phone.trust(HostKey(type: "ecdsa-sha2-nistp256", base64: DevServerKeys.ecdsa), for: host)
+        #expect(try await mac.refreshKnownHostsFile())
+        #expect(await !mac.isBlocked(host))
     }
 
     @Test("scanner arguments and failure classification")

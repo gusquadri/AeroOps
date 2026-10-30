@@ -1,3 +1,4 @@
+import AeroCore
 import Foundation
 import Synchronization
 @testable import KeyAgent
@@ -147,9 +148,53 @@ extension SSHKeyRecord {
     }
 }
 
-/// A KeyStore over an in-memory secret store in a fresh temp directory.
-func makeKeyStore(_ directory: TempDirectory, secrets: InMemorySecretStore = InMemorySecretStore()) throws -> KeyStore {
-    try KeyStore(secretStore: secrets, metadataDirectory: directory.appending("support"), publicKeysDirectory: directory.appending("pub"))
+/// A KeyStore over an in-memory Keychain in a fresh temp directory.
+/// A Keychain that can be locked, like a device before its first unlock.
+final class LockableKeychain: KeychainStore {
+    let inner = InMemoryKeychain()
+    private let locked = Mutex(false)
+
+    func setLocked(_ isLocked: Bool) {
+        locked.withLock { $0 = isLocked }
+    }
+
+    private func checkUnlocked() throws(KeychainError) {
+        if locked.withLock({ $0 }) { throw .interactionRequired(operation: "test") }
+    }
+
+    func items() throws(KeychainError) -> [KeychainItem] {
+        try checkUnlocked()
+        return inner.items()
+    }
+
+    func secret(for account: String) throws(KeychainError) -> Data? {
+        try checkUnlocked()
+        return inner.secret(for: account)
+    }
+
+    func save(_ item: KeychainItem, secret: Data) throws(KeychainError) {
+        try checkUnlocked()
+        inner.save(item, secret: secret)
+    }
+
+    func update(_ item: KeychainItem) throws(KeychainError) {
+        try checkUnlocked()
+        try inner.update(item)
+    }
+
+    func delete(_ account: String) throws(KeychainError) {
+        try checkUnlocked()
+        inner.delete(account)
+    }
+}
+
+/// The key items in `keychain`, without this device's policy items.
+func keyItems(_ keychain: InMemoryKeychain) -> [KeychainItem] {
+    keychain.items().filter { UUID(uuidString: $0.account) != nil }
+}
+
+func makeKeyStore(_ directory: TempDirectory, keychain: InMemoryKeychain = InMemoryKeychain()) throws -> KeyStore {
+    try KeyStore(keychain: keychain, publicKeysDirectory: directory.appending("pub"))
 }
 
 /// Builds the data ssh signs for `publickey-hostbound-v00@openssh.com`.

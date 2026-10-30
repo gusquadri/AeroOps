@@ -45,7 +45,6 @@ import SSHKit
 @MainActor
 struct PerfSelfTest {
     private static var defaults: UserDefaults { .standard }
-    static var isRequested: Bool { defaults.string(forKey: "AeroSelfTest") == "perf" }
 
     static var warmupSeconds: Int { positive("AeroSelfTestPerfWarmup") ?? 30 }
     static var durationSeconds: Int { positive("AeroSelfTestPerfDuration") ?? 120 }
@@ -252,35 +251,28 @@ struct PerfSelfTest {
         r.step("services", true, "agent running, monitoring started; \(r.report.optimized ? "optimized" : "-Onone") build")
 
         // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
-        let key: SSHKeyRecord
-        do {
-            key = try await ssh.generateKey(.ed25519, name: "AeroOps perf self-test", policy: .always)
-        } catch {
-            r.step("generate key", false, error.localizedDescription)
+        guard let key = await Phase2SelfTest.generateKey(name: "AeroOps perf self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
-        r.step("generate key", true, "\(key.algorithm.displayName) \(key.fingerprint)")
 
         // 2. Authorize it on every dev server.
-        let pub = ssh.paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-        if let script = Phase2SelfTest.authorizeScript {
-            let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-            r.step("authorize key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            guard status == 0 else { return await finish(r, key: key) }
-        } else {
-            r.step("authorize key", true, "skipped: no -AeroSelfTestAuthorizeScript (key must already be authorized)")
+        if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
+            await measureHosts(key, r)
         }
+        return await finish(r, key: key)
+    }
 
+    private func measureHosts(_ key: SSHKeyRecord, _ r: Recorder) async {
         // 3. Hosts: every name of every server, round-robin, each its own alias and master.
         let keyID = key.id.uuidString
         let (hosts, serverOf, distinct) = await makeHosts(keyID: keyID)
         r.report.hostCount = hosts.count
         r.report.distinctEndpoints = distinct
         r.step("endpoints", hosts.count == Self.hostCount, "\(hosts.count) hosts over \(distinct) distinct (address, port, user)")
-        guard !hosts.isEmpty else { return await finish(r, key: key) }
+        guard !hosts.isEmpty else { return }
 
         // 4. Scan each server once, pin its keys for every name it answers to.
-        guard await pinHostKeys(r, hosts: hosts, serverOf: serverOf) else { return await finish(r, key: key) }
+        guard await pinHostKeys(r, hosts: hosts, serverOf: serverOf) else { return }
 
         // 5. Add the hosts with the window up, and wait until every card has numbers.
         let tracker = Tracker()
@@ -289,6 +281,14 @@ struct PerfSelfTest {
         monitoring.didApplyUpdates = { tracker.receive($0) }
         defer { monitoring.didApplyUpdates = nil }
 
+        guard await addHosts(hosts, r),
+              await waitUntilOnline(hosts, serverOf: serverOf, tracker: tracker, r)
+        else { return }
+        await runScenarios(hosts, serverOf: serverOf, tracker: tracker, r)
+        restoreActivity()
+    }
+
+    private func addHosts(_ hosts: [RemoteHost], _ r: Recorder) async -> Bool {
         model.selectedTab = .dashboard
         model.selection = nil
         _ = await showMainWindow()
@@ -297,11 +297,14 @@ struct PerfSelfTest {
             model.selection = nil
         } catch {
             r.step("add hosts", false, error.localizedDescription)
-            return await finish(r, key: key)
+            return false
         }
-        let rejected = hosts.compactMap { ssh.configRejections[$0.id].map { "\($0)" } }
+        let rejected = hosts.compactMap { model.ssh.configRejections[$0.id].map { "\($0)" } }
         r.step("add hosts", rejected.isEmpty, rejected.isEmpty ? "\(hosts.count) hosts monitored" : "rejected: \(rejected)")
+        return true
+    }
 
+    private func waitUntilOnline(_ hosts: [RemoteHost], serverOf: [RemoteHost.ID: Int], tracker: Tracker, _ r: Recorder) async -> Bool {
         let started = Date.now
         let allOnline = await waitUntil(seconds: Self.onlineDeadline) {
             tracker.authFailure != nil || hosts.allSatisfy { (tracker.polls[$0.id] ?? 0) >= 2 }
@@ -310,7 +313,7 @@ struct PerfSelfTest {
         if let failure = tracker.authFailure {
             r.report.authFailed = true
             r.step("authentication", false, "\(failure); stopping now (sshd PerSourcePenalties)")
-            return await finish(r, key: key)
+            return false
         }
         let offline = r.report.hosts.filter { $0.polls < 2 }.map { "\($0.name) (\($0.lastError ?? $0.status))" }
         r.step(
@@ -319,7 +322,10 @@ struct PerfSelfTest {
                 ? "\(hosts.count) hosts polled twice within \(Self.text(Date.now.timeIntervalSince(started))) s"
                 : "not polled: \(offline.joined(separator: ", "))"
         )
+        return true
+    }
 
+    private func runScenarios(_ hosts: [RemoteHost], serverOf: [RemoteHost.ID: Int], tracker: Tracker, _ r: Recorder) async {
         // 6. Scenarios.
         let containersHost = hosts.first { $0.kubectlPrefix != nil }
         for scenario in Self.scenarios {
@@ -336,13 +342,14 @@ struct PerfSelfTest {
             r.step("authentication", false, "\(failure); stopped (sshd PerSourcePenalties)")
         }
         r.report.hosts = hostResults(hosts, serverOf: serverOf, tracker: tracker)
+    }
 
+    private func restoreActivity() {
         if let window = mainWindow() {
             window.level = .normal
             if window.isMiniaturized { window.deminiaturize(nil) }
         }
-        monitoring.activityOverride = nil
-        return await finish(r, key: key)
+        model.monitoring.activityOverride = nil
     }
 
     // MARK: - Hosts
@@ -614,11 +621,7 @@ struct PerfSelfTest {
         let ssh = model.ssh
         let paths = ssh.paths
         if let key {
-            let secret = try? KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-            let roots = [Phase2SelfTest.root, AeroPaths.standard.dotDirectory]
-            let found = roots.flatMap { Phase2SelfTest.filesContainingKeyMaterial(under: $0, secret: secret) }
-            r.report.privateKeyMaterialFound = found
-            r.step("no private key on disk", found.isEmpty, found.isEmpty ? "checked \(roots.map { $0.path(percentEncoded: false) })" : "found: \(found)")
+            r.report.privateKeyMaterialFound = Phase2SelfTest.checkNoKeyMaterial(key, step: r.step)
         }
 
         let closed = await model.shutdownServices()
@@ -626,21 +629,18 @@ struct PerfSelfTest {
         r.step("shutdown", socketGone && !model.monitoring.isRunning, "monitoring stopped, masters closed \(closed), agent socket removed \(socketGone)")
 
         if let key {
-            let pub = paths.publicKeysDirectory.appending(path: "\(key.id.uuidString).pub")
-            // Revoke before deleting: the script reads the .pub.
-            if let script = Phase3SelfTest.revokeScript, Phase2SelfTest.authorizeScript != nil {
-                let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [pub.path(percentEncoded: false)])
-                r.step("revoke key", status == 0, output.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            do {
-                try await ssh.deleteKey(key.id)
-                let remaining = try KeychainSecretStore(service: Phase2SelfTest.keychainService).load(for: key.id)
-                r.step("delete key", remaining == nil, "Keychain item removed \(remaining == nil)")
-            } catch {
-                r.step("delete key", false, error.localizedDescription)
-            }
+            await Phase2SelfTest.revokeKey(key, ssh: ssh, step: r.step)
+            await Phase2SelfTest.deleteKey(key, ssh: ssh, step: r.step)
         }
+        await checkNothingLeftBehind(r)
+        if !Phase2SelfTest.keepsRoot {
+            try? FileManager.default.removeItem(at: Phase2SelfTest.root)
+        }
+        r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
+        return r.report
+    }
 
+    private func checkNothingLeftBehind(_ r: Recorder) async {
         // No ssh process (master or client) may outlive the run.
         let needle = Phase2SelfTest.root.lastPathComponent
         var leftovers: [String] = []
@@ -656,12 +656,6 @@ struct PerfSelfTest {
             "no Touch ID requests", r.report.touchIDRequests.isEmpty,
             r.report.touchIDRequests.isEmpty ? "none" : "\(r.report.touchIDRequests.count), denied: \(r.report.touchIDRequests)"
         )
-
-        if !Phase2SelfTest.keepsRoot {
-            try? FileManager.default.removeItem(at: Phase2SelfTest.root)
-        }
-        r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
-        return r.report
     }
 
     // MARK: - Helpers

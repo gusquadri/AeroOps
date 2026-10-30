@@ -132,6 +132,9 @@ struct DashboardScreen: View {
         if let error = model.hostsError {
             ValidationMessage(text: "Could not load your servers: \(error)")
         }
+        if let error = model.hostKeyError {
+            ValidationMessage(text: error)
+        }
     }
 
     private func toggleMonitoring(_ host: RemoteHost) {

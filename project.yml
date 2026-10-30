@@ -23,7 +23,6 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_HARDENED_RUNTIME: YES
-    # Apple Development signing (team VUDQQS32NW) so Keychain item ACLs survive rebuilds.
     # Scripts/release.sh overrides this with Developer ID.
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Apple Development"
@@ -60,10 +59,15 @@ targets:
       properties:
         # No App Sandbox: the app spawns /usr/bin/ssh, owns PTYs and listens on Unix sockets.
         com.apple.security.app-sandbox: false
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)app.aeroops
     settings:
       base:
         PRODUCT_NAME: AeroOps
         PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.AeroOps
+        CODE_SIGN_STYLE: Automatic
+        PROVISIONING_PROFILE_SPECIFIER: $(AEROOPS_PROVISIONING_PROFILE)
+        AEROOPS_PROVISIONING_PROFILE: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: AeroOps
@@ -120,6 +124,11 @@ targets:
     sources:
       - path: Mobile
       - path: Shared
+    entitlements:
+      path: Mobile/AeroOpsMobile.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)app.aeroops
     settings:
       base:
         PRODUCT_NAME: AeroOps

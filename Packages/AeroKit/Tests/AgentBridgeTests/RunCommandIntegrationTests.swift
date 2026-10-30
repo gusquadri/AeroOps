@@ -56,7 +56,7 @@ struct RunCommandIntegrationTests {
             var writer = SSHConfigWriter(context: context)
             writer.identity = .privateKeyFileForTesting(keyFile)
             try writer.write(Self.servers.map(\.host))
-            let store = HostKeyStore(context: context)
+            let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
             for server in Self.servers {
                 guard case .unknown(let offered) = try await store.verify(server.host) else {
                     Issue.record("\(server): expected an unknown host key")

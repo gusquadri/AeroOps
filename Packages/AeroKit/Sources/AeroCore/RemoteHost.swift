@@ -1,10 +1,10 @@
 import Foundation
 
-/// A server the app monitors, as stored in `hosts.json`.
+/// A server the app monitors, as stored by ``HostStore``.
 ///
 /// Decoding is tolerant: unknown keys are ignored, and every field except `id`, `name`,
-/// `address` and `user` falls back to its default when missing, so older or hand-edited files
-/// still load. Secrets never live here: `keyId` only names a key held by KeyAgent, and a
+/// `address` and `user` falls back to its default when missing, so records from older or newer
+/// versions still load. Secrets never live here: `keyId` only names a key held by KeyAgent, and a
 /// password host's password lives in the Keychain under the host's `id`.
 ///
 /// Named `RemoteHost` (the plan says "Host") because `Foundation.Host` (NSHost) makes a bare
@@ -31,7 +31,8 @@ public struct RemoteHost: Identifiable, Codable, Sendable, Hashable {
     public var kubectlPrefix: String?
     /// Run docker commands as `sudo -n docker`.
     public var dockerSudo: Bool
-    /// What AI agents may do on this host through MCP. Defaults to ``MCPTier/read``.
+    /// What AI agents may do on this host through MCP. Defaults to ``MCPTier/read``. Each device
+    /// keeps its own: ``HostStore`` never syncs it.
     public var mcpTier: MCPTier
     /// Poll the host's metrics for its card. `false` keeps the host for terminals, files and
     /// containers without polling it. Defaults to `true`.

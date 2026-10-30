@@ -10,7 +10,8 @@ import Foundation
 /// - No saved password: refused before ssh starts. (ssh would send an empty password when the
 ///   helper has nothing to give, which also counts as a failure.)
 /// - Rejected once: refused until ``reset(_:)``, which the app calls when the user saves a new
-///   password, a test connection succeeds, or the host's connection settings change.
+///   password (here or on another device), a test connection succeeds, or the host's connection
+///   settings change.
 /// - Not proven yet (no login since the last reset): one ssh at a time. The others wait until it
 ///   logs in, fails, or ``probeWindow`` passes, so a wrong password costs one attempt rather than
 ///   one per collector.
