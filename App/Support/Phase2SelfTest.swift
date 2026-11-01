@@ -50,10 +50,7 @@ struct Phase2SelfTest {
     }()
 
     static var paths: AeroPaths {
-        AeroPaths(
-            dotDirectory: root.appending(path: "d", directoryHint: .isDirectory),
-            applicationSupport: root.appending(path: "s", directoryHint: .isDirectory)
-        )
+        AeroPaths(dotDirectory: root.appending(path: "d", directoryHint: .isDirectory))
     }
 
     /// Self-test keys sign without asking ("Never ask"), so any request for user presence is a

@@ -160,9 +160,7 @@ struct ModelTests {
         #expect(paths.controlMasterDirectory.path == "/Users/test/.aeroops/cm")
         #expect(paths.sshConfig.path == "/Users/test/.aeroops/ssh_config")
         #expect(paths.knownHosts.path == "/Users/test/.aeroops/synced_known_hosts")
-        #expect(paths.legacyKnownHosts.path == "/Users/test/.aeroops/known_hosts")
         #expect(paths.publicKeysDirectory.path == "/Users/test/.aeroops/pub")
-        #expect(paths.legacyHostsFile.path == "/Users/test/Library/Application Support/AeroOps/hosts.json")
         // Socket paths must stay well under the 104-byte sun_path limit for typical home dirs.
         #expect(paths.bridgeSocket.path.utf8.count < 104)
     }

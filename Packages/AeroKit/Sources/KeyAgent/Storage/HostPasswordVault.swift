@@ -19,11 +19,6 @@ public final class HostPasswordVault: Sendable {
         SystemKeychain(service: keychainService, label: "AeroOps SSH password")
     }
 
-    /// Where an older AeroOps kept passwords, for ``importLegacyPasswords(of:from:)``.
-    public static func legacyStore() -> KeychainSecretStore {
-        KeychainSecretStore(service: keychainService, label: "AeroOps SSH password", itemDescription: "AeroOps SSH login password")
-    }
-
     /// How long a test password stays usable if ``endTemporary(_:)`` is never called.
     static let temporaryLifetime: Duration = .seconds(120)
 
@@ -108,18 +103,6 @@ public final class HostPasswordVault: Sendable {
         state.withLock {
             $0.saved.remove(id)
             $0.stamps[id] = nil
-        }
-    }
-
-    /// Moves the passwords of `hosts` that an older AeroOps kept in `legacy` into the Keychain,
-    /// then deletes the old copies. A password already in the Keychain wins; one that cannot be
-    /// moved stays where it was, for the next launch.
-    public func importLegacyPasswords(of hosts: Set<UUID>, from legacy: any SecretStore) {
-        let saved = savedHosts()
-        for id in hosts {
-            guard let password = try? legacy.load(for: id) else { continue }
-            guard saved.contains(id) || (try? keychain.save(Self.item(id), secret: password)) != nil else { continue }
-            try? legacy.delete(for: id)
         }
     }
 

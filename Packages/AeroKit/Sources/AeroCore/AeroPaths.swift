@@ -7,20 +7,16 @@ import Foundation
 public struct AeroPaths: Sendable, Hashable {
     /// `~/.aeroops/`: sockets, generated ssh_config, the copy of the pinned host keys, public keys.
     public var dotDirectory: URL
-    /// `~/Library/Application Support/AeroOps/`: where an older AeroOps kept `hosts.json`.
-    public var applicationSupport: URL
 
     /// Paths rooted at `home`: the real home directory on macOS (the app is not sandboxed), the
     /// app container on iOS.
     public init(home: URL = URL.homeDirectory) {
         dotDirectory = home.appending(path: ".aeroops", directoryHint: .isDirectory)
-        applicationSupport = home.appending(path: "Library/Application Support/AeroOps", directoryHint: .isDirectory)
     }
 
-    /// Paths with explicit roots, for tests.
-    public init(dotDirectory: URL, applicationSupport: URL) {
+    /// Paths with an explicit root, for tests.
+    public init(dotDirectory: URL) {
         self.dotDirectory = dotDirectory
-        self.applicationSupport = applicationSupport
     }
 
     /// The current user's real paths.
@@ -38,10 +34,6 @@ public struct AeroPaths: Sendable, Hashable {
     public var sshConfig: URL { dotDirectory.appending(path: "ssh_config") }
     /// `~/.aeroops/synced_known_hosts`: ssh's copy of the host keys pinned in the Keychain.
     public var knownHosts: URL { dotDirectory.appending(path: "synced_known_hosts") }
-    /// `~/.aeroops/known_hosts`: where an older AeroOps pinned host keys.
-    public var legacyKnownHosts: URL { dotDirectory.appending(path: "known_hosts") }
     /// `~/.aeroops/pub/`: public keys referenced by `IdentityFile`.
     public var publicKeysDirectory: URL { dotDirectory.appending(path: "pub", directoryHint: .isDirectory) }
-    /// `~/Library/Application Support/AeroOps/hosts.json`: where an older AeroOps kept the hosts.
-    public var legacyHostsFile: URL { applicationSupport.appending(path: HostStore.legacyFileName) }
 }

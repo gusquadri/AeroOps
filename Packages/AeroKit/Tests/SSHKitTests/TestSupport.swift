@@ -44,10 +44,7 @@ final class ScratchDirectory: @unchecked Sendable {
 
     /// `AeroPaths` rooted in this directory: `<scratch>/<name>/` as the dot directory.
     func paths(_ name: String = "d") -> AeroPaths {
-        AeroPaths(
-            dotDirectory: url.appending(path: name, directoryHint: .isDirectory),
-            applicationSupport: url.appending(path: "\(name)-support", directoryHint: .isDirectory)
-        )
+        AeroPaths(dotDirectory: url.appending(path: name, directoryHint: .isDirectory))
     }
 }
 

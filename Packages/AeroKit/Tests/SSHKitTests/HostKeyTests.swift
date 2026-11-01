@@ -247,36 +247,6 @@ struct HostKeyStoreTests {
         #expect(scratch.read("known_hosts") == "")
     }
 
-    @Test("an older AeroOps's known_hosts moves into the Keychain once")
-    func legacyPinsMove() async throws {
-        let legacy = try scratch.write("known_hosts", "[localhost]:2222 ssh-ed25519 \(DevServerKeys.ed25519)\n*.corp \(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)\n", mode: 0o600)
-        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
-        #expect(try await store.importLegacyPins(from: legacy) == 1)
-        #expect(try await store.pinnedKeys(for: host) == [DevServerKeys.ed25519Key])
-        #expect(scratch.read("known_hosts") == "*.corp \(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)\n")
-        #expect(try String(contentsOf: context.knownHostsFile, encoding: .utf8) == "[localhost]:2222 ssh-ed25519 \(DevServerKeys.ed25519)\n")
-        #expect(try await store.importLegacyPins(from: legacy) == 0)
-    }
-
-    @Test("what only ssh can use stays in an older AeroOps's known_hosts")
-    func legacyLeftovers() async throws {
-        let key = "\(DevServerKeys.ed25519Key.type) \(DevServerKeys.ed25519)"
-        let revoked = "@revoked evil.example \(key)"
-        let hashed = "|1|c2FsdA==|aG1hYw== \(key)"
-        let text = "# a note\n\n\(revoked)\n\(hashed)\nplain.example,*.corp \(key)\n"
-        let legacy = try scratch.write("known_hosts", text, mode: 0o600)
-        let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
-
-        #expect(try await store.importLegacyPins(from: legacy) == 1)
-        #expect(scratch.read("known_hosts") == "\(revoked)\n\(hashed)\n*.corp \(key)\n")
-        #expect(try await store.importLegacyPins(from: legacy) == 0)
-        #expect(scratch.read("known_hosts") == "\(revoked)\n\(hashed)\n*.corp \(key)\n")
-
-        _ = try scratch.write("known_hosts", "# a note\nplain.example \(key)\n", mode: 0o600)
-        _ = try await store.importLegacyPins(from: legacy)
-        #expect(scratch.read("known_hosts") == nil)
-    }
-
     @Test("a key accepted on another device lifts the block here")
     func syncedPinLiftsBlock() async throws {
         let pins = InMemoryKeychain()

@@ -114,7 +114,7 @@ final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
         bitCount = BigUInt(bigEndian: n).bitWidth
     }
 
-    /// Loads a key from PKCS#1 `RSAPrivateKey` DER (what the ``SecretStore`` holds).
+    /// Loads a key from PKCS#1 `RSAPrivateKey` DER (what the ``KeychainStore`` holds).
     convenience init(pkcs1DER: Data) throws {
         let attributes: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeyClass: kSecAttrKeyClassPrivate]
         var error: Unmanaged<CFError>?
@@ -153,7 +153,7 @@ final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
 // MARK: Rebuilding keys from stored secrets
 
 enum SigningKeyFactory {
-    /// Rebuilds a signing key from the bytes kept in the ``SecretStore``:
+    /// Rebuilds a signing key from the bytes kept in the ``KeychainStore``:
     /// the Ed25519 seed (32 B), the P-256 scalar (32 B), the SE `dataRepresentation`, or PKCS#1 DER.
     static func make(_ algorithm: SSHKeyAlgorithm, secret: Data) throws -> any SSHSigningKey {
         do {

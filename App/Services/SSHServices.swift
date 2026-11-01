@@ -13,14 +13,14 @@ import SSHKit
 /// ``shutdown()`` before the app quits (``AppDelegate``). Every path comes from ``paths``, so the
 /// DEBUG self-test and previews run against a temporary root instead of `~/.aeroops`.
 ///
-/// - Keys: ``KeyStore`` over a ``SecretStore`` (the Keychain in the app). Private keys never touch
-///   the disk; only `keys.json` metadata and `pub/<id>.pub` files are written.
+/// - Keys: ``KeyStore`` over a ``KeychainStore`` (the Keychain in the app). Private keys never touch
+///   the disk; only `pub/<id>.pub` files are written.
 /// - Agent: ``SSHAgentServer`` on `agent.sock` with a ``PolicySigningAuthorizer`` (Touch ID per the
 ///   key's policy). Peer and signing events are kept in ``agentEvents`` for Settings › Keys.
 /// - Config: rewritten whenever hosts change (``HostInventoryObserver``), keys change or the
 ///   agent choice changes.
 /// - Host keys: ``HostKeyStore``; ``hostKeyBlocks`` mirrors its blocks for the UI.
-/// - Passwords: ``HostPasswordVault`` over a second ``SecretStore``, handed to ssh
+/// - Passwords: ``HostPasswordVault`` over a second ``KeychainStore``, handed to ssh
 ///   only through ``AskpassServer`` on `askpass.sock` and the bundled `aeroops-askpass`.
 ///   ``passwordGate`` keeps background ssh from retrying a rejected password.
 @MainActor
@@ -45,7 +45,7 @@ final class SSHServices {
 
     /// All keys, oldest first.
     private(set) var keys: [SSHKeyRecord] = []
-    /// Why the key store could not be opened, or an older AeroOps's keys moved.
+    /// Why the key store could not be opened.
     private var keySetupError: String?
     /// Why the last reload of the keys failed.
     private var keyReloadError: String?
@@ -79,7 +79,6 @@ final class SSHServices {
     @ObservationIgnored let passwords: HostPasswordVault
     @ObservationIgnored let passwordGate: PasswordAttemptGate
     @ObservationIgnored private let defaults: UserDefaults?
-    @ObservationIgnored private let importsLegacyItems: Bool
     @ObservationIgnored private var agent: SSHAgentServer?
     @ObservationIgnored private var eventPump: Task<Void, Never>?
     @ObservationIgnored private var askpassServer: AskpassServer?
@@ -97,20 +96,16 @@ final class SSHServices {
     ///   - defaults: Where the agent toggle is persisted; `nil` keeps it in memory (self-test, previews).
     ///   - passwordKeychain: Where host passwords are kept; `nil` keeps them in memory (self-test, previews).
     ///   - hostKeyKeychain: Where pinned host keys are kept; `nil` keeps them in memory (self-test, previews).
-    ///   - importsLegacyItems: Whether ``start()`` moves the keys, passwords and pins an older
-    ///     AeroOps kept on this Mac only into `keychain`, `passwordKeychain` and `hostKeyKeychain`.
     init(
         paths: AeroPaths,
         keychain: any KeychainStore,
         passwordKeychain: (any KeychainStore)? = nil,
         hostKeyKeychain: (any KeychainStore)? = nil,
-        importsLegacyItems: Bool = false,
         defaults: UserDefaults?,
         authorizer: PolicySigningAuthorizer = .localAuthentication()
     ) {
         self.paths = paths
         self.defaults = defaults
-        self.importsLegacyItems = importsLegacyItems
         self.authorizer = authorizer
         let passwords = HostPasswordVault(keychain: passwordKeychain ?? InMemoryKeychain())
         self.passwords = passwords
@@ -151,7 +146,6 @@ final class SSHServices {
         } catch {
             configError = error.localizedDescription
         }
-        await importLegacyItems()
         await refreshHostKeys()
         await reloadKeys(rewritingPublicKeyFiles: true)
         await applyAgentChoice()
@@ -162,22 +156,10 @@ final class SSHServices {
         observeActivation()
     }
 
-    private func importLegacyItems() async {
-        guard importsLegacyItems, let keyStore else { return }
-        do {
-            try await keyStore.importLegacyKeys(metadataDirectory: paths.applicationSupport, secrets: KeychainSecretStore())
-        } catch {
-            keySetupError = error.localizedDescription
-        }
-        passwords.importLegacyPasswords(of: Set(hosts.map(\.id)), from: HostPasswordVault.legacyStore())
-        refreshPasswordHosts()
-    }
-
-    /// Copies the pins made on the user's other devices for ssh, after moving in the known_hosts
-    /// of an older AeroOps, and polls the hosts that were waiting on a key again.
+    /// Copies the pins made on the user's other devices for ssh, and polls the hosts that were
+    /// waiting on a key again.
     func refreshHostKeys() async {
         do {
-            if importsLegacyItems { try await hostKeys.importLegacyPins(from: paths.legacyKnownHosts) }
             let changed = try await hostKeys.refreshKnownHostsFile()
             hostKeyError = nil
             await refreshHostKeyBlocks()
@@ -604,10 +586,7 @@ extension SSHServices {
     /// Services for previews: a temporary root, keys in memory, nothing started.
     static func preview() -> SSHServices {
         let root = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
-        let paths = AeroPaths(
-            dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory),
-            applicationSupport: root.appending(path: "support", directoryHint: .isDirectory)
-        )
+        let paths = AeroPaths(dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory))
         return SSHServices(paths: paths, keychain: InMemoryKeychain(), defaults: nil)
     }
 

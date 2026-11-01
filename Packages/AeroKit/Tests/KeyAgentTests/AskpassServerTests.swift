@@ -104,24 +104,6 @@ struct HostPasswordVaultTests {
         #expect(!vault.hasPassword(for: host))
     }
 
-    @Test("moves an older AeroOps's passwords into the Keychain once; a synced one wins")
-    func importLegacy() throws {
-        let synced = UUID()
-        let legacy = InMemorySecretStore()
-        try legacy.save(Data("old".utf8), for: host)
-        try legacy.save(Data("stale".utf8), for: synced)
-        let store = InMemoryKeychain()
-        store.save(KeychainItem(account: synced.uuidString, syncs: true), secret: Data("from the iPhone".utf8))
-        let vault = HostPasswordVault(keychain: store)
-
-        vault.importLegacyPasswords(of: [host, synced, UUID()], from: legacy)
-        vault.setPasswordHosts([host, synced])
-        #expect(vault.loginPassword(for: host) == .success("old"))
-        #expect(vault.loginPassword(for: synced) == .success("from the iPhone"))
-        #expect(store.items().allSatisfy { $0.syncs })
-        #expect(legacy.storedIDs.isEmpty)
-    }
-
     @Test("refuses passwords ssh cannot send", arguments: [
         ("", Askpass.PasswordProblem.empty),
         ("a\nb", .lineBreak),

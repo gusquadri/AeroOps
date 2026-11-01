@@ -45,9 +45,9 @@ struct AeroOpsApp: App {
         let paths = AeroPaths.standard
         let ssh = SSHServices(
             paths: paths, keychain: KeyStore.systemKeychain(), passwordKeychain: HostPasswordVault.systemKeychain(),
-            hostKeyKeychain: HostKeyStore.systemKeychain(), importsLegacyItems: true, defaults: .standard
+            hostKeyKeychain: HostKeyStore.systemKeychain(), defaults: .standard
         )
-        let model = AppModel(hostStore: .system(legacyFile: paths.legacyHostsFile), ssh: ssh)
+        let model = AppModel(hostStore: .system(), ssh: ssh)
         model.onboarding = OnboardingState(defaults: .standard)
         return model
     }

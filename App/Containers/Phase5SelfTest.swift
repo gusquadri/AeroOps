@@ -104,7 +104,6 @@ struct Phase5SelfTest {
         var terminalCommands: [String] = []
         var snapshots: [String] = []
         var authorizedKeysRemaining: String?
-        var staleRunsSwept: [String] = []
     }
 
     private final class Recorder {
@@ -147,7 +146,6 @@ struct Phase5SelfTest {
         defer { ProcessInfo.processInfo.endActivity(activity) }
         NSApp.activate()
         await pause(1.0)
-        r.report.staleRunsSwept = await sweepStaleRuns()
 
         // 1. Key in the Keychain, authorized for dev@ and nodocker@ on the VM.
         guard let key = await Phase2SelfTest.generateKey(name: Self.keyName, ssh: ssh, step: r.step) else {
@@ -631,42 +629,6 @@ struct Phase5SelfTest {
         }
         r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
         return r.report
-    }
-
-    private struct StaleKeyFile: Decodable {
-        struct Key: Decodable {
-            var id: UUID
-            var name: String
-        }
-        var keys: [Key]
-    }
-
-    /// Cleans up after an earlier phase 5 run that died before ``finish(_:key:)``: for every
-    /// other `/tmp/aero-st-*` root holding a key named ``keyName``, removes the key from the
-    /// servers' authorized_keys and from the self-test Keychain service, then deletes the root.
-    private func sweepStaleRuns() async -> [String] {
-        let current = Phase2SelfTest.root.lastPathComponent
-        let tmp = URL(filePath: "/private/tmp", directoryHint: .isDirectory)
-        let entries = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
-        var swept: [String] = []
-        for root in entries where root.lastPathComponent.hasPrefix("aero-st-") && root.lastPathComponent != current {
-            guard let data = try? Data(contentsOf: root.appending(path: "s/keys.json")),
-                  let file = try? JSONDecoder().decode(StaleKeyFile.self, from: data),
-                  file.keys.contains(where: { $0.name == Self.keyName })
-            else { continue }
-            for key in file.keys where key.name == Self.keyName {
-                let pub = root.appending(path: "d/pub/\(key.id.uuidString).pub")
-                if let line = try? String(contentsOf: pub, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-                   line.hasPrefix("ssh-") {
-                    _ = await Self.stripAuthorizedKey(line)
-                }
-                try? KeyStore.systemKeychain(service: Phase2SelfTest.keychainService).delete(key.id.uuidString)
-            }
-            try? FileManager.default.removeItem(at: root)
-            swept.append(root.lastPathComponent)
-            Self.log("[phase5] swept stale run \(root.lastPathComponent)")
-        }
-        return swept
     }
 
     /// Deletes `line` from the VM's dev and nodocker authorized_keys (and the compose servers',

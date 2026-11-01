@@ -64,7 +64,7 @@ public enum KeyStoreError: Error, Equatable, Sendable, LocalizedError {
     /// The stored secret does not produce the recorded public key.
     case secretMismatch(UUID)
     case generationFailed(String)
-    /// A `.pub` file (or an older AeroOps's `keys.json`) could not be read or written.
+    /// A `.pub` file could not be read or written.
     case storage(String)
 
     public var errorDescription: String? {
@@ -103,8 +103,6 @@ public actor KeyStore {
 
     /// The Keychain service of AeroOps key items.
     public static let keychainService = "app.aeroops.keys"
-    /// Where an older AeroOps kept key metadata, in its metadata directory.
-    static let legacyMetadataFileName = "keys.json"
 
     /// The Keychain store the app uses for keys.
     public static func systemKeychain(service: String = keychainService) -> SystemKeychain {
@@ -321,27 +319,6 @@ public actor KeyStore {
         return true
     }
 
-    /// Moves the keys of an older AeroOps (`keys.json` in `metadataDirectory`, private parts in
-    /// `legacySecrets`) into the Keychain, syncing the ones that can, then deletes the old copies.
-    /// A failure leaves the rest of the old copies for the next launch. Returns how many moved.
-    @discardableResult
-    public func importLegacyKeys(metadataDirectory: URL, secrets legacySecrets: any SecretStore) throws -> Int {
-        let file = metadataDirectory.appending(path: Self.legacyMetadataFileName)
-        guard FileManager.default.fileExists(atPath: file.path) else { return 0 }
-        let legacy = try Self.legacyRecords(at: file)
-        var moved = 0
-        for var record in legacy where key(id: record.id) == nil {
-            guard let secret = try Self.legacySecret(of: record, in: legacySecrets) else { continue }
-            record.syncs = record.canSync
-            try store(record, secret: secret)
-            moved += 1
-        }
-        records.sort(by: Self.oldestFirst)
-        for record in legacy { try? legacySecrets.delete(for: record.id) }
-        try? FileManager.default.removeItem(at: file)
-        return moved
-    }
-
     // MARK: Agent
 
     /// The keys the agent offers, in order.
@@ -469,28 +446,6 @@ public actor KeyStore {
         record.syncs = item.syncs
         record.policy = policies[policyAccount(record.id)] ?? arrivalPolicy(record.policy)
         return record
-    }
-
-    private struct LegacyMetadataFile: Decodable {
-        var keys: [SSHKeyRecord]
-    }
-
-    private static func legacyRecords(at url: URL) throws -> [SSHKeyRecord] {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        do {
-            return try decoder.decode(LegacyMetadataFile.self, from: Data(contentsOf: url)).keys
-        } catch {
-            throw KeyStoreError.storage("Could not read \(url.path): \(error.localizedDescription)")
-        }
-    }
-
-    private static func legacySecret(of record: SSHKeyRecord, in store: any SecretStore) throws -> Data? {
-        do {
-            return try store.load(for: record.id)
-        } catch {
-            throw KeyStoreError.storage("Could not move “\(record.name)” from the old Keychain: \(error.localizedDescription)")
-        }
     }
 
     private func writePublicKeyFile(_ record: SSHKeyRecord) throws {

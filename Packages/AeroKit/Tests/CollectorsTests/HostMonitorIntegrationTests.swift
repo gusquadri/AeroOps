@@ -70,10 +70,7 @@ struct HostMonitorIntegrationTests {
         let keygen = try await monitorRunTool("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "aero-hm-it", "-f", keyFile.filePath])
         try #require(keygen.status == 0, "\(keygen.stderr)")
         let publicKey = try String(contentsOf: scratch.file("id.pub"), encoding: .utf8)
-        let context = SSHContext(paths: AeroPaths(
-            dotDirectory: scratch.url.appending(path: "d", directoryHint: .isDirectory),
-            applicationSupport: scratch.url.appending(path: "s", directoryHint: .isDirectory)
-        ))
+        let context = SSHContext(paths: AeroPaths(dotDirectory: scratch.url.appending(path: "d", directoryHint: .isDirectory)))
 
         let added = try await monitorRunTool("/bin/sh", [repo.appending(path: "dev/add-key.sh").filePath, scratch.file("id.pub").filePath])
         do {

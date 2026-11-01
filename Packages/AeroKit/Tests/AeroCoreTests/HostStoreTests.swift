@@ -8,22 +8,13 @@ import AeroCore
 @MainActor
 struct HostStoreTests {
     let hosts = InMemoryKeychain()
-    let directory = FileManager.default.temporaryDirectory
-        .appending(path: "AeroOpsTests-\(UUID().uuidString)", directoryHint: .isDirectory)
 
     private func sampleHost(_ name: String = "web-01") -> RemoteHost {
         RemoteHost(name: name, address: "10.0.0.12", user: "deploy", tags: ["prod"])
     }
 
-    private func device(tiers: InMemoryKeychain = InMemoryKeychain(), legacyFile: URL? = nil) -> HostStore {
-        HostStore(keychain: hosts, tiers: tiers, legacyFile: legacyFile)
-    }
-
-    private func writeLegacyFile(_ text: String) throws -> URL {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appending(path: HostStore.legacyFileName)
-        try Data(text.utf8).write(to: file)
-        return file
+    private func device(tiers: InMemoryKeychain = InMemoryKeychain()) -> HostStore {
+        HostStore(keychain: hosts, tiers: tiers)
     }
 
     @Test("add, update, delete round trip and survive a relaunch, oldest first")
@@ -84,53 +75,5 @@ struct HostStoreTests {
         #expect(throws: HostStoreError.notFound(stranger.id)) { try store.delete(id: stranger.id) }
         #expect(store.hosts.map(\.id) == [host.id])
         #expect(hosts.items().count == 1)
-    }
-
-    @Test("an older AeroOps's hosts.json moves over once, with its order and tiers")
-    func legacyFileMoves() throws {
-        let first = RemoteHost(name: "first", address: "a", user: "u", mcpTier: .readExec)
-        let second = RemoteHost(name: "second", address: "b", user: "u", mcpTier: .off)
-        let encoded = try String(decoding: JSONEncoder().encode([first, second]), as: UTF8.self)
-        let file = try writeLegacyFile(#"{"version":1,"hosts":\#(encoded),"future":{}}"#)
-
-        let tiers = InMemoryKeychain()
-        let store = device(tiers: tiers, legacyFile: file)
-        #expect(store.hosts == [first, second])
-        #expect(store.loadError == nil)
-        #expect(!FileManager.default.fileExists(atPath: file.path))
-        #expect(device(tiers: tiers, legacyFile: file).hosts == [first, second])
-    }
-
-    @Test("a bare array is accepted; an unreadable hosts.json stays in place and is reported")
-    func legacyFileVariants() throws {
-        let id = UUID()
-        let file = try writeLegacyFile(#"[{"id":"\#(id.uuidString)","name":"n","address":"a","user":"u","zzz":1}]"#)
-        #expect(device(legacyFile: file).hosts.map(\.id) == [id])
-
-        let garbage = try writeLegacyFile(#"{"version":1,"hosts":[{"name":"no id"}]}"#)
-        let store = device(legacyFile: garbage)
-        #expect(store.hosts.map(\.id) == [id])
-        guard case .legacyFileUnreadable = store.loadError else {
-            Issue.record("expected legacyFileUnreadable, got \(String(describing: store.loadError))")
-            return
-        }
-        #expect(!FileManager.default.fileExists(atPath: garbage.path))
-        let kept = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        #expect(kept.count == 1 && kept.allSatisfy { $0.hasPrefix("hosts.corrupt-") })
-        #expect(store.loadError?.localizedDescription.contains(kept[0]) == true)
-
-        store.reload()
-        #expect(store.loadError == nil)
-    }
-
-    @Test("a hosts.json that cannot be read stays in place")
-    func legacyFileUnreadableStays() throws {
-        let file = directory.appending(path: HostStore.legacyFileName)
-        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
-        guard case .legacyFileUnreadable = device(legacyFile: file).loadError else {
-            Issue.record("expected legacyFileUnreadable")
-            return
-        }
-        #expect(FileManager.default.fileExists(atPath: file.path))
     }
 }

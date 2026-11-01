@@ -41,10 +41,10 @@ final class MobileModel {
     var hosts: [RemoteHost] { hostStore.hosts }
     /// Why the hosts could not be read.
     var hostsError: String? { hostStore.loadError?.localizedDescription }
-    /// Why the pins of an older AeroOps could not be moved into the Keychain.
+    /// Why the pinned host keys could not be read from the Keychain or copied to their file.
     private(set) var hostKeyError: String?
     private(set) var keys: [SSHKeyRecord] = []
-    /// Why the key store could not be opened, or an older AeroOps's keys moved.
+    /// Why the key store could not be opened.
     private var keySetupError: String?
     /// Why the last reload of the keys failed.
     private var keyReloadError: String?
@@ -75,8 +75,6 @@ final class MobileModel {
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
     @ObservationIgnored private var isStarted = false
-    @ObservationIgnored private let paths: AeroPaths
-    @ObservationIgnored private let importsLegacyItems: Bool
     /// Sample data (previews, "Try Sample Servers", `-AeroOpsDemo`): terminals and files are canned too.
     @ObservationIgnored private(set) var isPreview = false
     @ObservationIgnored private var terminals: [RemoteHost.ID: EmbeddedTerminalSession] = [:]
@@ -85,15 +83,11 @@ final class MobileModel {
 
     /// `paths` roots every file; `keychain`, `passwordKeychain` and `hostKeyKeychain` hold the
     /// keys, passwords and pins (the Keychain the Mac app shares in the app, memory in previews).
-    /// `importsLegacyItems`: whether ``start()`` moves the keys, passwords and pins an older
-    /// AeroOps kept on this device only.
     init(
         paths: AeroPaths = .standard, hostStore: HostStore, keychain: any KeychainStore,
-        passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore, importsLegacyItems: Bool = false
+        passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore
     ) {
         self.hostStore = hostStore
-        self.paths = paths
-        self.importsLegacyItems = importsLegacyItems
         let passwords = HostPasswordVault(keychain: passwordKeychain)
         self.passwords = passwords
         hostKeys = HostKeyStore(keychain: hostKeyKeychain, knownHostsFile: paths.knownHosts, scanner: EmbeddedHostKeyScanner())
@@ -118,9 +112,8 @@ final class MobileModel {
     /// The app's model: hosts, keys, passwords and pins in the Keychain, files under the app container.
     static func live() -> MobileModel {
         MobileModel(
-            hostStore: .system(legacyFile: AeroPaths.standard.legacyHostsFile), keychain: KeyStore.systemKeychain(),
-            passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain(),
-            importsLegacyItems: true
+            hostStore: .system(), keychain: KeyStore.systemKeychain(),
+            passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain()
         )
     }
 
@@ -132,7 +125,6 @@ final class MobileModel {
         isStarted = true
         // Downloads left from the last run.
         MobileFileBrowser<RemoteFileBackend>.removeAllDownloads()
-        await importLegacyItems()
         await reloadKeys()
         await refreshHostKeys()
         guard let client else { return }
@@ -430,22 +422,9 @@ final class MobileModel {
         keys = await keyStore.keys
     }
 
-    private func importLegacyItems() async {
-        guard importsLegacyItems, let keyStore else { return }
-        do {
-            try await keyStore.importLegacyKeys(metadataDirectory: paths.applicationSupport, secrets: KeychainSecretStore())
-        } catch {
-            keySetupError = error.localizedDescription
-        }
-        passwords.importLegacyPasswords(of: Set(hosts.map(\.id)), from: HostPasswordVault.legacyStore())
-        refreshPasswordHosts()
-    }
-
-    /// Takes in the pins of an older AeroOps and the pins made on the user's other devices, and
-    /// polls again when that changed anything.
+    /// Takes in the pins made on the user's other devices, and polls again when that changed anything.
     private func refreshHostKeys() async {
         do {
-            if importsLegacyItems { try await hostKeys.importLegacyPins(from: paths.legacyKnownHosts) }
             let changed = try await hostKeys.refreshKnownHostsFile()
             hostKeyError = nil
             await refreshHostKeyBlocks()
@@ -525,10 +504,7 @@ extension MobileModel {
     /// state. For previews, "Try Sample Servers" and `-AeroOpsDemo`; never monitors.
     static func preview(hosts: [RemoteHost] = SampleData.hosts) -> MobileModel {
         let root = URL.temporaryDirectory.appending(path: "AeroOpsPreview-\(UUID().uuidString)", directoryHint: .isDirectory)
-        let paths = AeroPaths(
-            dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory),
-            applicationSupport: root.appending(path: "support", directoryHint: .isDirectory)
-        )
+        let paths = AeroPaths(dotDirectory: root.appending(path: "dot", directoryHint: .isDirectory))
         let model = MobileModel(
             paths: paths, hostStore: .inMemory(), keychain: InMemoryKeychain(),
             passwordKeychain: InMemoryKeychain(), hostKeyKeychain: InMemoryKeychain()

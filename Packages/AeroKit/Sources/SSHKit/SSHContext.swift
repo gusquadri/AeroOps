@@ -67,8 +67,6 @@ public struct SSHContext: Sendable, Hashable {
     /// `~/.aeroops/synced_known_hosts`, the copy of ``HostKeyStore``'s pins ssh reads.
     public var knownHostsFile: URL { paths.knownHosts }
 
-    /// What an older AeroOps's known_hosts left for ssh alone; see ``HostKeyStore/importLegacyPins(from:)``.
-    public var legacyKnownHostsFile: URL { paths.legacyKnownHosts }
     /// `~/.aeroops/cm/`.
     public var controlMasterDirectory: URL { paths.controlMasterDirectory }
 

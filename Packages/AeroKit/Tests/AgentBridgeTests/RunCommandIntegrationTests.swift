@@ -51,7 +51,7 @@ struct RunCommandIntegrationTests {
         let added = try await LocalProcess.run("/bin/sh", [repo.appending(path: "dev/add-key.sh").path(percentEncoded: false), scratch.appending("id.pub").path(percentEncoded: false)])
         try #require(added.status == 0, "\(added.stdout)")
 
-        let context = SSHContext(paths: AeroPaths(dotDirectory: scratch.appending("d"), applicationSupport: scratch.appending("s")))
+        let context = SSHContext(paths: AeroPaths(dotDirectory: scratch.appending("d")))
         do {
             var writer = SSHConfigWriter(context: context)
             writer.identity = .privateKeyFileForTesting(keyFile)

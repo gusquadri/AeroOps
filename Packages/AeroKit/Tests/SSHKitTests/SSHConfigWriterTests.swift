@@ -6,10 +6,7 @@ import Testing
 
 @Suite("SSHConfigWriter")
 struct SSHConfigWriterTests {
-    static let goldenPaths = AeroPaths(
-        dotDirectory: URL(filePath: "/tmp/aero-golden/.aeroops/", directoryHint: .isDirectory),
-        applicationSupport: URL(filePath: "/tmp/aero-golden/support/", directoryHint: .isDirectory)
-    )
+    static let goldenPaths = AeroPaths(dotDirectory: URL(filePath: "/tmp/aero-golden/.aeroops/", directoryHint: .isDirectory))
 
     static let hostA = RemoteHost(
         id: UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!,
@@ -30,7 +27,7 @@ struct SSHConfigWriterTests {
           IdentityAgent /tmp/aero-golden/.aeroops/agent.sock
           IdentityFile /tmp/aero-golden/.aeroops/pub/key-1.pub
           IdentitiesOnly yes
-          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts /tmp/aero-golden/.aeroops/known_hosts
+          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
           ControlPath /tmp/aero-golden/.aeroops/cm/ed59b22e31123a3e
@@ -48,7 +45,7 @@ struct SSHConfigWriterTests {
           IdentityAgent /tmp/aero-golden/.aeroops/agent.sock
           IdentityFile none
           IdentitiesOnly yes
-          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts /tmp/aero-golden/.aeroops/known_hosts
+          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
           ControlPath /tmp/aero-golden/.aeroops/cm/6285eb46845dc62c
@@ -103,10 +100,7 @@ struct SSHConfigWriterTests {
 
     @Test("quotes paths with spaces and escapes % in token-expanding directives")
     func quoting() throws {
-        let paths = AeroPaths(
-            dotDirectory: URL(filePath: "/tmp/aero q 100%/.aeroops/", directoryHint: .isDirectory),
-            applicationSupport: URL(filePath: "/tmp/x/", directoryHint: .isDirectory)
-        )
+        let paths = AeroPaths(dotDirectory: URL(filePath: "/tmp/aero q 100%/.aeroops/", directoryHint: .isDirectory))
         let text = try SSHConfigWriter(context: SSHContext(paths: paths)).render([Self.hostA]).text
         #expect(text.contains(#"  IdentityAgent "/tmp/aero q 100%%/.aeroops/agent.sock""#))
         #expect(text.contains(#"  IdentityFile "/tmp/aero q 100%%/.aeroops/pub/key-1.pub""#))
@@ -149,10 +143,7 @@ struct SSHConfigWriterTests {
     @Test("refuses paths ssh_config cannot represent")
     func badPaths() {
         for dot in ["/tmp/a\"b/", "/tmp/a\\b/", "/tmp/$HOME/", "/tmp/a\nb/"] {
-            let paths = AeroPaths(
-                dotDirectory: URL(filePath: dot, directoryHint: .isDirectory),
-                applicationSupport: URL(filePath: "/tmp/x/", directoryHint: .isDirectory)
-            )
+            let paths = AeroPaths(dotDirectory: URL(filePath: dot, directoryHint: .isDirectory))
             let rendering = try? SSHConfigWriter(context: SSHContext(paths: paths)).render([Self.hostA])
             #expect(rendering?.included.isEmpty ?? true, "\(dot)")
         }
@@ -162,10 +153,7 @@ struct SSHConfigWriterTests {
     func socketPathTooLong() throws {
         func writer(_ length: Int) -> SSHConfigWriter {
             let dot = "/tmp/" + String(repeating: "x", count: length) + "/"
-            let paths = AeroPaths(
-                dotDirectory: URL(filePath: dot, directoryHint: .isDirectory),
-                applicationSupport: URL(filePath: "/tmp/x/", directoryHint: .isDirectory)
-            )
+            let paths = AeroPaths(dotDirectory: URL(filePath: dot, directoryHint: .isDirectory))
             return SSHConfigWriter(context: SSHContext(paths: paths))
         }
         // `/tmp/<61>/cm` + `/` + 16-hex name + `.` + 16 random is 103 bytes, the most sun_path holds.
@@ -178,10 +166,7 @@ struct SSHConfigWriterTests {
     @Test("ssh -G reads the generated file back as intended")
     func sshAcceptsConfig() async throws {
         let scratch = try ScratchDirectory()
-        let paths = AeroPaths(
-            dotDirectory: scratch.url.appending(path: "a b%c", directoryHint: .isDirectory),
-            applicationSupport: scratch.url.appending(path: "s", directoryHint: .isDirectory)
-        )
+        let paths = AeroPaths(dotDirectory: scratch.url.appending(path: "a b%c", directoryHint: .isDirectory))
         let writer = SSHConfigWriter(context: SSHContext(paths: paths))
         try writer.write([Self.hostA, Self.hostB])
         let result = try await runTool("/usr/bin/ssh", ["-G", "-F", paths.sshConfig.filePath, Self.hostA.sshAlias])

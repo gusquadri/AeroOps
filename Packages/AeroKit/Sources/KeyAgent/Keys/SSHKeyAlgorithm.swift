@@ -1,8 +1,8 @@
 /// How a key is held and which SSH key type it serves.
 public enum SSHKeyAlgorithm: String, Codable, Sendable, CaseIterable {
-    /// `ssh-ed25519`; the 32-byte seed lives in the ``SecretStore``.
+    /// `ssh-ed25519`; the 32-byte seed lives in the ``KeychainStore``.
     case ed25519
-    /// `ecdsa-sha2-nistp256` generated inside the Secure Enclave. The ``SecretStore`` holds only
+    /// `ecdsa-sha2-nistp256` generated inside the Secure Enclave. The ``KeychainStore`` holds only
     /// the SE-wrapped `dataRepresentation`, which is useless on any other Mac.
     case secureEnclaveP256
     /// `ecdsa-sha2-nistp256` imported from a file (software key; cannot move into the Secure Enclave).
@@ -32,7 +32,7 @@ public enum SSHKeyAlgorithm: String, Codable, Sendable, CaseIterable {
 
 /// Which kinds of key the app can generate.
 public enum KeyGenerationType: Sendable, Hashable, CaseIterable {
-    /// Ed25519 (CryptoKit); the private key is stored in the ``SecretStore``.
+    /// Ed25519 (CryptoKit); the private key is stored in the ``KeychainStore``.
     case ed25519
     /// P-256 inside the Secure Enclave; non-exportable.
     case secureEnclaveP256

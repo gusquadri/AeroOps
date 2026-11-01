@@ -45,10 +45,7 @@ struct DockerKubernetesIntegrationTests {
         )
         try #require(added.status == 0, "\(added.stderr)")
 
-        let context = SSHContext(paths: AeroPaths(
-            dotDirectory: scratch.url.appending(path: "d", directoryHint: .isDirectory),
-            applicationSupport: scratch.url.appending(path: "s", directoryHint: .isDirectory)
-        ))
+        let context = SSHContext(paths: AeroPaths(dotDirectory: scratch.url.appending(path: "d", directoryHint: .isDirectory)))
         do {
             try await scenario(context: context, keyFile: keyFile)
         } catch {

@@ -251,39 +251,6 @@ public actor HostKeyStore {
         return mirrored || blocks.count != blockCount
     }
 
-    /// Moves the pins an older AeroOps kept only in `file` (its known_hosts) into the Keychain.
-    /// Hosts that already have pins keep them. What only ssh can use stays in `file`, which it
-    /// reads beside ``knownHostsFile``; a file with nothing left is deleted. Returns how many
-    /// hosts moved.
-    @discardableResult
-    public func importLegacyPins(from file: URL) throws(HostKeyError) -> Int {
-        let text: String?
-        do {
-            text = try FileSystem.readText(file)
-        } catch {
-            throw .knownHostsUnreadable(error.description)
-        }
-        guard let text else { return 0 }
-        let legacy = KnownHostsFile(text: text)
-        let pinned = try pins()
-        let names = legacy.plainNames.filter { pinned.keys(for: $0).isEmpty }
-        for name in names { try store(legacy.keys(for: name), for: name) }
-        try keepOnly(legacy.withoutPlainNames, in: file, replacing: text)
-        return names.count
-    }
-
-    private func keepOnly(_ rest: KnownHostsFile, in file: URL, replacing text: String) throws(HostKeyError) {
-        do {
-            if rest.lines.isEmpty {
-                try FileManager.default.removeItem(at: file)
-            } else if rest.text != text {
-                try FileSystem.writeAtomically(Data(rest.text.utf8), to: file, permissions: 0o600)
-            }
-        } catch {
-            throw .knownHostsWriteFailed(error.localizedDescription)
-        }
-    }
-
     private func load() throws(HostKeyError) -> KnownHostsFile {
         let file = try pins()
         try mirror(file)

@@ -190,7 +190,7 @@ public struct SSHConfigWriter: Sendable {
         let controlDirectory = try ConfigValue.path(context.controlMasterDirectory, trimmingTrailingSlash: true)
         let controlPath = ConfigValue.appendingUnquoted(controlDirectory, "/" + Self.controlSocketName(lines))
         lines += [
-            ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile) + " " + ConfigValue.path(context.legacyKnownHostsFile)),
+            ("UserKnownHostsFile", try ConfigValue.path(context.knownHostsFile)),
             ("StrictHostKeyChecking", "yes"),
             ("ControlMaster", "auto"),
             ("ControlPath", controlPath),

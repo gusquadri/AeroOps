@@ -108,10 +108,7 @@ enum DebugLaunchOptions {
             return model
         }
         guard let dataDirectory else { return nil }
-        let paths = AeroPaths(
-            dotDirectory: dataDirectory.appending(path: "dot", directoryHint: .isDirectory),
-            applicationSupport: dataDirectory
-        )
+        let paths = AeroPaths(dotDirectory: dataDirectory.appending(path: "dot", directoryHint: .isDirectory))
         let ssh = SSHServices(paths: paths, keychain: InMemoryKeychain(), defaults: nil)
         return AppModel(hostStore: .inMemory(), ssh: ssh)
     }

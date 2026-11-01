@@ -46,7 +46,7 @@ struct OpenSSHPrivateKey: Sendable {
     let algorithm: SSHKeyAlgorithm
     let comment: String
     let publicKeyBlob: [UInt8]
-    /// What the ``SecretStore`` keeps: Ed25519 seed, P-256 scalar, or RSA PKCS#1 DER.
+    /// What the ``KeychainStore`` keeps: Ed25519 seed, P-256 scalar, or RSA PKCS#1 DER.
     let secret: Data
     let signingKey: any SSHSigningKey
 

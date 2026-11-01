@@ -41,7 +41,7 @@ struct PasswordAuthTests {
           PubkeyAuthentication no
           PreferredAuthentications password,keyboard-interactive
           NumberOfPasswordPrompts 1
-          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts /tmp/aero-golden/.aeroops/known_hosts
+          UserKnownHostsFile /tmp/aero-golden/.aeroops/synced_known_hosts
           StrictHostKeyChecking yes
           ControlMaster auto
           ControlPath /tmp/aero-golden/.aeroops/cm/37f6476c15b1883d

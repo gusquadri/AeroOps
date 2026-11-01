@@ -220,29 +220,6 @@ struct KeyStoreTests {
         #expect(try String(contentsOf: store.publicKeyFileURL(for: record.id), encoding: .utf8) == record.authorizedKeysLine + "\n")
     }
 
-    @Test func importLegacyKeysMovesThemOnce() async throws {
-        let dir = try TempDirectory()
-        defer { dir.remove() }
-        let old = try await makeKeyStore(dir).generate(.ed25519, name: "From keys.json", syncs: false)
-        let legacySecrets = InMemorySecretStore()
-        try legacySecrets.save(Data(repeating: 3, count: 32), for: old.id)
-        let support = dir.appending("support")
-        try writeLegacyMetadata([old], to: support)
-
-        let keychain = InMemoryKeychain()
-        let store = try makeKeyStore(dir, keychain: keychain)
-        #expect(try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) == 1)
-        let moved = try #require(await store.keys.first)
-        #expect(moved.id == old.id && moved.name == old.name && moved.syncs)
-        #expect(keychain.secret(for: old.id.uuidString) == Data(repeating: 3, count: 32))
-        #expect(legacySecrets.storedIDs.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: support.appending(path: "keys.json").path))
-        #expect(try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) == 0)
-
-        try Data("{not json".utf8).write(to: support.appending(path: "keys.json"))
-        await #expect(throws: KeyStoreError.self) { try await store.importLegacyKeys(metadataDirectory: support, secrets: legacySecrets) }
-    }
-
     @Test(.enabled(if: SecureEnclave.isAvailable)) func secureEnclaveKeyStaysOnThisDevice() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
@@ -264,16 +241,4 @@ struct KeyStoreTests {
         try await store.delete(id: record.id)
         #expect(keychain.items().isEmpty)
     }
-}
-
-/// `keys.json` as an older AeroOps wrote it.
-private func writeLegacyMetadata(_ keys: [SSHKeyRecord], to directory: URL) throws {
-    struct File: Encodable {
-        var version = 1
-        var keys: [SSHKeyRecord]
-    }
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    try encoder.encode(File(keys: keys)).write(to: directory.appending(path: "keys.json"))
 }
