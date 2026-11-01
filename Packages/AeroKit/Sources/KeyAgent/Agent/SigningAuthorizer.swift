@@ -171,9 +171,16 @@ public struct LocalAuthenticationVerifier: UserPresenceVerifier {
     }
 
     public func verifyUserPresence(reason: String) async -> Bool {
+        await authenticate(reason: reason) == .success
+    }
+
+    /// The prompt and how it ended, for callers that tell a missing passcode from a failure.
+    public func authenticate(reason: String) async -> AppLock.Outcome {
         let box = ContextBox()
         var error: NSError?
-        guard box.context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return false }
+        guard box.context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            return AppLock.Outcome(failure: error)
+        }
         let timeout = timeout
         // invalidate() makes a pending evaluatePolicy fail with LAError.appCancel.
         let timer = Task {
@@ -182,9 +189,9 @@ public struct LocalAuthenticationVerifier: UserPresenceVerifier {
         }
         defer { timer.cancel() }
         return await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-                box.context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
-                    continuation.resume(returning: success)
+            await withCheckedContinuation { (continuation: CheckedContinuation<AppLock.Outcome, Never>) in
+                box.context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, error in
+                    continuation.resume(returning: success ? .success : AppLock.Outcome(failure: error))
                 }
             }
         } onCancel: {

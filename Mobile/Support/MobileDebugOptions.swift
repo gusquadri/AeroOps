@@ -1,7 +1,8 @@
 import Foundation
 
-/// Developer-only launch arguments, read from the `UserDefaults` argument domain. Release
-/// builds ignore them.
+/// Developer-only launch arguments, read from the `UserDefaults` argument domain. Release builds
+/// ignore `-AeroOpsScreen`. They honour `-AeroOpsDemo`, which skips the lock because it only ever
+/// opens sample data: the app never builds its real model in that mode.
 ///
 /// ```sh
 /// xcrun simctl launch booted app.aeroops.AeroOpsMobile \
