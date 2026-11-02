@@ -205,8 +205,12 @@ Still open:
 
 - **Release signing.**
   - Done: the hardened runtime, Sparkle wiring, `Scripts/release.sh` and the GitHub Actions release. Pushing a `vX.Y.Z` tag publishes a GitHub Release, and installed copies check its appcast every hour.
-  - Left: the Developer ID certificate, the notarization key and the Sparkle signing key, stored as GitHub secrets, and making the repository public so Sparkle can download the feed. A person has to set these up. A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
+  - Left: making the repository public so Sparkle can download the feed. A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
 - **Performance pass (in progress).** The target is that 20 polled hosts keep the app under 3% CPU.
 - **T3 Code check.** The copy-config buttons are done, but nobody has yet confirmed by hand that the tools work from T3 Code.
 
 The backlog after v1 includes a hub for history and alerts, tmux-backed tabs, password auth and Podman.
+
+## License
+
+AeroOps is released under the [MIT License](LICENSE). The operating system logos in `AeroTheme` remain trademarks of their owners.
