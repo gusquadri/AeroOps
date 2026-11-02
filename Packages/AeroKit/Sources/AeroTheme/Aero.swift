@@ -96,6 +96,11 @@ public enum Aero {
     public static func monospacedNSFont(_ style: NSFont.TextStyle, weight: NSFont.Weight = .regular) -> NSFont {
         .monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
     }
+    #else
+    /// ``monospacedFont(_:weight:)`` for UIKit text views (the log viewer).
+    public static func monospacedUIFont(_ style: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
+        .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
+    }
     #endif
 }
 

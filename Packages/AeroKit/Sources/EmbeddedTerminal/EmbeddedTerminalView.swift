@@ -1,8 +1,8 @@
 import SwiftUI
 internal import GhosttyTerminal
 
-/// The libghostty surface of an ``EmbeddedTerminalSession``, rebuilt for each connection. On
-/// iOS the software keyboard comes with libghostty's accessory bar (Esc, Tab, Ctrl, Alt, arrows,
+/// The libghostty surface of an ``EmbeddedTerminalSession``, rebuilt for each connection and kept
+/// between screens. On iOS the software keyboard comes with libghostty's accessory bar (Esc, Tab, Ctrl, Alt, arrows,
 /// common symbols, paste).
 public struct EmbeddedTerminalView: View {
     let session: EmbeddedTerminalSession

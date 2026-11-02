@@ -1,6 +1,4 @@
-import AeroTheme
-import AppKit
-import SwiftUI
+import Foundation
 
 /// One log line as received: the raw text (with the `--timestamps` prefix) plus what the
 /// display needs to know about it.
@@ -36,24 +34,18 @@ struct LogLine: Sendable, Hashable {
     /// `2026-10-11T10:00:00.123456789Z ` (docker) or `…+00:00 ` (kubectl): the length up to
     /// and including the first space, when the line starts with such a timestamp.
     static func timestampPrefixLength(_ text: String) -> Int {
-        let utf8 = text.utf8
-        guard utf8.count >= 21 else { return 0 }
-        var index = 0
-        for byte in utf8 {
-            switch index {
-            case 0...3, 5, 6, 8, 9:
-                guard (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) else { return 0 }
-            case 4, 7:
-                guard byte == UInt8(ascii: "-") else { return 0 }
-            case 10:
-                guard byte == UInt8(ascii: "T") else { return 0 }
-            default:
-                if byte == UInt8(ascii: " ") { return index >= 19 ? index + 1 : 0 }
-                if index > 40 { return 0 }
-            }
-            index += 1
+        let bytes = Array(text.utf8.prefix(42))
+        guard bytes.count >= 21, startsWithDate(bytes),
+              let space = bytes.firstIndex(of: UInt8(ascii: " ")), space >= 19
+        else { return 0 }
+        return space + 1
+    }
+
+    private static func startsWithDate(_ bytes: [UInt8]) -> Bool {
+        let digits = UInt8(ascii: "0")...UInt8(ascii: "9")
+        return zip(bytes, "dddd-dd-ddT".utf8).allSatisfy { byte, expected in
+            expected == UInt8(ascii: "d") ? digits.contains(byte) : byte == expected
         }
-        return 0
     }
 
     /// kubectl prints these on stdout instead of log text while a container restarts.
@@ -63,7 +55,7 @@ struct LogLine: Sendable, Hashable {
     }
 }
 
-/// The log text view: an `NSTextView` (TextKit 1, non-contiguous layout) that keeps at most the
+/// The log text: a ``LogTextSurface`` (TextKit 1, non-contiguous layout) that keeps at most the
 /// newest ``maxLines`` lines (trimming ``trimSlack`` further at a time), appends batches without
 /// re-laying out what is already there, highlights search matches and keeps the view pinned to
 /// the bottom while the user is there.
@@ -72,7 +64,7 @@ struct LogLine: Sendable, Hashable {
 /// All work runs on the main actor; callers batch lines (``LogViewerModel`` flushes every
 /// 100 ms) so a busy container costs one append per flush, not one per line.
 @MainActor
-final class LogTextController: NSObject, NSTextViewDelegate {
+final class LogTextController {
     /// Never more lines than this; the oldest are dropped.
     nonisolated static let maxLines = 10_000
     /// Lines dropped beyond the excess when the cap is hit, so trimming happens in chunks: a cut
@@ -82,8 +74,7 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     /// Matches highlighted at most (the count stops there too).
     nonisolated static let maxMatches = 5_000
 
-    let scrollView: NSScrollView
-    let textView: NSTextView
+    let surface = LogTextSurface()
 
     private(set) var lines: [LogLine] = []
     /// UTF-16 length of each displayed line including its newline.
@@ -100,66 +91,28 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     /// Called after the match list changed (count, current index).
     var onMatchesChange: (() -> Void)?
 
-    private let font: NSFont
-    private let textColor = NSColor(Aero.text.primary)
-    private let timestampColor = NSColor(Aero.text.secondary)
-    private let infoColor = NSColor(Aero.aquaDeep)
-    private let matchColor = NSColor(name: nil) { appearance in
-        NSColor(Aero.sun).withAlphaComponent(AeroVariant(appearance) == .night ? 0.2 : 0.45)
-    }
-    /// Full sun by day. By night the text is light, so the current match is a stronger tint
-    /// that light text still reads on.
-    private let currentMatchColor = NSColor(name: nil) { appearance in
-        AeroVariant(appearance) == .night ? NSColor(Aero.sun).withAlphaComponent(0.42) : NSColor(Aero.sun)
-    }
+    private let font = LogTextStyle.font
+    private let textColor = LogTextStyle.text
+    private let timestampColor = LogTextStyle.timestamp
+    private let infoColor = LogTextStyle.info
+    private let matchColor = LogTextStyle.match
+    private let currentMatchColor = LogTextStyle.currentMatch
 
-    override init() {
-        // Monospaced, so log text aligns in columns.
-        font = Aero.monospacedNSFont(.callout)
-        let textView = NSTextView(usingTextLayoutManager: false)
-        self.textView = textView
-        scrollView = NSScrollView()
-        super.init()
-
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.importsGraphics = false
-        textView.usesFindBar = false
-        textView.allowsUndo = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.isContinuousSpellCheckingEnabled = false
-        textView.drawsBackground = true
-        textView.backgroundColor = NSColor(Aero.glass.solidFill)
-        textView.textColor = textColor
-        textView.font = font
-        textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.minSize = .zero
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        textView.layoutManager?.allowsNonContiguousLayout = true
-        textView.layoutManager?.backgroundLayoutEnabled = true
-        textView.selectedTextAttributes = [.backgroundColor: NSColor(Aero.aqua).withAlphaComponent(0.3)]
-        textView.setAccessibilityLabel("Log lines")
-        textView.delegate = self
-
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = true
-        scrollView.backgroundColor = NSColor(Aero.glass.solidFill)
-        scrollView.borderType = .noBorder
+    init() {
+        surface.onSelectionChange = { [weak self] in
+            guard let self else { return }
+            onSelectionChange?(hasSelection)
+        }
     }
 
     var lineCount: Int { lines.count }
-    var hasSelection: Bool { textView.selectedRange().length > 0 }
-    var displayedText: String { textView.string }
+    var hasSelection: Bool { surface.selectedRange.length > 0 }
+    var displayedText: String { surface.storage.string }
+    var isPinnedToBottom: Bool { surface.isPinnedToBottom }
 
-    // MARK: - Content
+    func scrollToBottom() {
+        surface.scrollToBottom()
+    }
 
     /// Replaces everything.
     func reset(_ newLines: [LogLine] = []) {
@@ -168,14 +121,15 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         droppedLines = 0
         matches = []
         currentMatch = nil
-        textView.textStorage?.setAttributedString(NSAttributedString())
+        surface.storage.setAttributedString(NSAttributedString())
         append(newLines)
     }
 
     /// Appends `batch` (one attributed-string edit), trims the oldest lines beyond the cap and
     /// highlights matches in the new text. Keeps the view at the bottom if it was there.
     func append(_ batch: [LogLine]) {
-        guard !batch.isEmpty, let storage = textView.textStorage else { return }
+        guard !batch.isEmpty else { return }
+        let storage = surface.storage
         var batch = batch[...]
         if batch.count > Self.maxLines {
             droppedLines += batch.count - Self.maxLines
@@ -223,16 +177,6 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         scrollToBottom()
     }
 
-    var isPinnedToBottom: Bool {
-        guard let document = scrollView.documentView else { return true }
-        let visible = scrollView.contentView.documentVisibleRect
-        return visible.maxY >= document.bounds.maxY - 24 || document.bounds.height <= visible.height
-    }
-
-    func scrollToBottom() {
-        textView.scrollToEndOfDocument(nil)
-    }
-
     /// One string for the whole batch, then colour runs for timestamps and info lines: a single
     /// attributed-string build per flush, whatever the line count.
     private func render(_ batch: ArraySlice<LogLine>) -> (text: NSAttributedString, lengths: [Int]) {
@@ -257,23 +201,25 @@ final class LogTextController: NSObject, NSTextViewDelegate {
             lengths.append(length)
             offset += length
         }
-        let result = NSMutableAttributedString(string: whole, attributes: [.font: font, .foregroundColor: textColor])
+        return (colored(whole, stamps: stamps, infos: infos), lengths)
+    }
+
+    private func colored(_ text: String, stamps: [NSRange], infos: [NSRange]) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: textColor])
         result.beginEditing()
         for range in stamps { result.addAttribute(.foregroundColor, value: timestampColor, range: range) }
         for range in infos { result.addAttribute(.foregroundColor, value: infoColor, range: range) }
         result.endEditing()
-        return (result, lengths)
+        return result
     }
 
     /// Prefix of info lines.
     static let infoMarker = "ⓘ "
 
-    // MARK: - Search
-
     /// Highlights every case-insensitive match of `newQuery` (up to ``maxMatches``) and makes
     /// the last one current.
     func setQuery(_ newQuery: String) {
-        guard let storage = textView.textStorage else { return }
+        let storage = surface.storage
         query = newQuery
         storage.beginEditing()
         storage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: storage.length))
@@ -301,7 +247,8 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     }
 
     private func highlight(in range: NSRange) {
-        guard !query.isEmpty, let storage = textView.textStorage, range.length > 0 else { return }
+        guard !query.isEmpty, range.length > 0 else { return }
+        let storage = surface.storage
         let string = storage.string as NSString
         var searchRange = range
         storage.beginEditing()
@@ -318,7 +265,8 @@ final class LogTextController: NSObject, NSTextViewDelegate {
     }
 
     private func select(match index: Int) {
-        guard let storage = textView.textStorage, matches.indices.contains(index) else { return }
+        guard matches.indices.contains(index) else { return }
+        let storage = surface.storage
         storage.beginEditing()
         if let current = currentMatch, matches.indices.contains(current) {
             storage.addAttribute(.backgroundColor, value: matchColor, range: matches[current])
@@ -326,8 +274,7 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         currentMatch = index
         storage.addAttribute(.backgroundColor, value: currentMatchColor, range: matches[index])
         storage.endEditing()
-        textView.scrollRangeToVisible(matches[index])
-        textView.showFindIndicator(for: matches[index])
+        surface.reveal(matches[index])
     }
 
     /// After `removed` characters were cut from the start.
@@ -345,41 +292,15 @@ final class LogTextController: NSObject, NSTextViewDelegate {
         onMatchesChange?()
     }
 
-    // MARK: - Copy
-
     /// Copies every displayed line.
     func copyAll() {
-        copy(textView.string)
+        LogTextSurface.copy(displayedText)
     }
 
     /// Copies the selected text.
     func copySelection() {
-        let range = textView.selectedRange()
+        let range = surface.selectedRange
         guard range.length > 0 else { return }
-        copy((textView.string as NSString).substring(with: range))
+        LogTextSurface.copy((displayedText as NSString).substring(with: range))
     }
-
-    private func copy(_ text: String) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setString(text, forType: .string)
-    }
-
-    // MARK: - NSTextViewDelegate
-
-    func textViewDidChangeSelection(_ notification: Notification) {
-        onSelectionChange?(hasSelection)
-    }
-}
-
-/// Hosts a ``LogTextController``'s scroll view in SwiftUI. The controller, not SwiftUI, drives
-/// the content, so new lines never re-render the SwiftUI hierarchy.
-struct LogTextView: NSViewRepresentable {
-    let controller: LogTextController
-
-    func makeNSView(context: Context) -> NSScrollView {
-        controller.scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {}
 }

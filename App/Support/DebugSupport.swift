@@ -50,6 +50,8 @@ import UniformTypeIdentifiers
 ///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest sync -AeroSelfTestOutput /tmp/aeroops-sync.json  # iCloud Keychain, see SyncSelfTest
 ///
+/// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest workloads -AeroSelfTestOutput /tmp/aeroops-workloads.json  # Containers models, no server; see WorkloadsSelfTest
+///
 /// AeroOps.app/Contents/MacOS/AeroOps -AeroSelfTest perf -AeroSelfTestOutput /tmp/aeroops-perf.json \
 ///   -AeroSelfTestAuthorizeScript dev/add-key.sh  # 20 hosts: app and ssh CPU, memory; see PerfSelfTest
 /// ```
@@ -170,6 +172,7 @@ enum DebugLaunchOptions {
         "perf": { await PerfSelfTest(model: $0).runAndQuit() },
         "files": { await FilesSelfTest(model: $0).runAndQuit() },
         "sync": { _ in await SyncSelfTest().runAndQuit() },
+        "workloads": { _ in await WorkloadsSelfTest().runAndQuit() },
     ]
 
     @MainActor

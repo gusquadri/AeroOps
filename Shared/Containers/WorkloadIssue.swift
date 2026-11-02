@@ -33,34 +33,47 @@ struct WorkloadIssue: Hashable, Sendable {
 
     /// Maps a collector, SSH or input error. `nil` for cancellation.
     static func from(_ error: any Error, capabilities: HostCapabilities? = nil, host: RemoteHost? = nil) -> WorkloadIssue? {
-        if error is CancellationError { return nil }
         switch error {
+        case is CancellationError:
+            return nil
         case let error as DockerError:
-            let kind: Kind = switch error {
-            case .permissionDenied, .sudoRefused, .notInstalled: .setup
-            case .daemonNotRunning: .unavailable
-            case .failed: .transient
-            }
-            return WorkloadIssue(title: error.errorDescription ?? "Docker failed.", hint: hint(error.hint, kind), kind: kind)
+            return dockerIssue(error)
         case let error as KubectlError:
-            let kind: Kind = switch error {
-            case .kubeconfigUnreadable, .sudoRefused, .notInstalled: .setup
-            case .connectionRefused: .unavailable
-            case .noPreviousContainer, .invalidOutput, .failed: .transient
-            }
-            var issue = WorkloadIssue(title: error.errorDescription ?? "kubectl failed.", hint: hint(error.hint, kind), kind: kind)
-            if case .kubeconfigUnreadable = error, host?.kubectlPrefix == nil {
-                issue.suggestedPrefix = capabilities?.suggestedKubectlPrefix
-            }
-            return issue
+            return kubectlIssue(error, capabilities: capabilities, host: host)
         case let error as CollectorInputError:
-            let kind: Kind = if case .invalidKubectlPrefix = error { .setup } else { .transient }
-            return WorkloadIssue(title: error.errorDescription ?? "Invalid request.", hint: error.recoverySuggestion, kind: kind)
+            return inputIssue(error)
         case let error as SSHError:
-            return from(error, host: host)
+            return sshIssue(error, host: host)
         default:
             return WorkloadIssue(title: error.localizedDescription, hint: nil, kind: .transient)
         }
+    }
+
+    private static func dockerIssue(_ error: DockerError) -> WorkloadIssue {
+        let kind: Kind = switch error {
+        case .permissionDenied, .sudoRefused, .notInstalled: .setup
+        case .daemonNotRunning: .unavailable
+        case .failed: .transient
+        }
+        return WorkloadIssue(title: error.errorDescription ?? "Docker failed.", hint: hint(error.hint, kind), kind: kind)
+    }
+
+    private static func kubectlIssue(_ error: KubectlError, capabilities: HostCapabilities?, host: RemoteHost?) -> WorkloadIssue {
+        let kind: Kind = switch error {
+        case .kubeconfigUnreadable, .sudoRefused, .notInstalled: .setup
+        case .connectionRefused: .unavailable
+        case .noPreviousContainer, .invalidOutput, .failed: .transient
+        }
+        var issue = WorkloadIssue(title: error.errorDescription ?? "kubectl failed.", hint: hint(error.hint, kind), kind: kind)
+        if case .kubeconfigUnreadable = error, host?.kubectlPrefix == nil {
+            issue.suggestedPrefix = capabilities?.suggestedKubectlPrefix
+        }
+        return issue
+    }
+
+    private static func inputIssue(_ error: CollectorInputError) -> WorkloadIssue {
+        let kind: Kind = if case .invalidKubectlPrefix = error { .setup } else { .transient }
+        return WorkloadIssue(title: error.errorDescription ?? "Invalid request.", hint: error.recoverySuggestion, kind: kind)
     }
 
     /// The collector's hint, telling the user that AeroOps keeps checking a service that is down.
@@ -69,23 +82,11 @@ struct WorkloadIssue: Hashable, Sendable {
         return [hint, "AeroOps keeps checking."].compactMap(\.self).joined(separator: " ")
     }
 
-    private static func from(_ error: SSHError, host: RemoteHost?) -> WorkloadIssue? {
+    private static func sshIssue(_ error: SSHError, host: RemoteHost?) -> WorkloadIssue {
         let title = error.errorDescription ?? "ssh failed."
         switch error {
-        case .authFailed where host?.auth == .password:
-            return WorkloadIssue(
-                title: title,
-                hint: "Save the host's password in the host editor (Test Connection checks it), then press Refresh. "
-                    + "AeroOps does not retry a rejected password on its own.",
-                kind: .access
-            )
         case .authFailed:
-            return WorkloadIssue(
-                title: title,
-                hint: "Authorize the host's key on the server (Test Connection in the host editor shows how), "
-                    + "then press Refresh. AeroOps does not retry failed logins on its own.",
-                kind: .access
-            )
+            return WorkloadIssue(title: title, hint: authFailedHint(host), kind: .access)
         case .hostKeyUnknown:
             return WorkloadIssue(
                 title: title,
@@ -103,6 +104,15 @@ struct WorkloadIssue: Hashable, Sendable {
         case .remoteCommandFailed, .launchFailed, .invalidRequest, .other:
             return WorkloadIssue(title: title, hint: nil, kind: .transient)
         }
+    }
+
+    private static func authFailedHint(_ host: RemoteHost?) -> String {
+        if host?.auth == .password {
+            return "Save the host's password in the host editor (Test Connection checks it), then press Refresh. "
+                + "AeroOps does not retry a rejected password on its own."
+        }
+        return "Authorize the host's key on the server (Test Connection in the host editor shows how), "
+            + "then press Refresh. AeroOps does not retry failed logins on its own."
     }
 }
 

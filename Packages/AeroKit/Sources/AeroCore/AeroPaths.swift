@@ -8,18 +8,19 @@ public struct AeroPaths: Sendable, Hashable {
     /// `~/.aeroops/`: sockets, generated ssh_config, the copy of the pinned host keys, public keys.
     public var dotDirectory: URL
 
-    /// Paths rooted at `home`: the real home directory on macOS (the app is not sandboxed), the
-    /// app container on iOS.
+    /// Paths rooted at `home`, by default the real home directory on macOS (the app is not
+    /// sandboxed). iOS denies writes to its home, the app container's root, so the iOS app passes
+    /// a directory of its own to ``init(dotDirectory:)``.
     public init(home: URL = URL.homeDirectory) {
         dotDirectory = home.appending(path: ".aeroops", directoryHint: .isDirectory)
     }
 
-    /// Paths with an explicit root, for tests.
+    /// Paths with an explicit root: the iOS app's, and tests'.
     public init(dotDirectory: URL) {
         self.dotDirectory = dotDirectory
     }
 
-    /// The current user's real paths.
+    /// The Mac user's real paths.
     public static let standard = AeroPaths()
 
     /// `~/.aeroops/agent.sock`: the in-app ssh-agent.

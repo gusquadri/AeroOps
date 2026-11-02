@@ -96,8 +96,6 @@ final class LogViewerModel: Identifiable {
         }
     }
 
-    // MARK: - Labels
-
     var title: String {
         switch target {
         case .container(let name, _): name
@@ -115,8 +113,6 @@ final class LogViewerModel: Identifiable {
     }
 
     var isPod: Bool { if case .pod = target { true } else { false } }
-
-    // MARK: - Lifecycle
 
     /// Loads (and, if following, follows) from scratch. Called when the sheet appears.
     func start() {
@@ -170,8 +166,6 @@ final class LogViewerModel: Identifiable {
         }
     }
 
-    // MARK: - Search and copy
-
     /// The search field's text. The sheet applies it, debounced, with ``search(_:)``.
     var searchText = ""
 
@@ -188,8 +182,6 @@ final class LogViewerModel: Identifiable {
     func copyAll() { text.copyAll() }
     func copySelection() { text.copySelection() }
 
-    // MARK: - Terminal
-
     /// The plain follow command for a terminal tab (quoted by the collectors' builders).
     var terminalCommand: String? {
         switch target {
@@ -203,8 +195,6 @@ final class LogViewerModel: Identifiable {
     }
 
     var terminalTitle: String { "logs \(title)" }
-
-    // MARK: - Loading
 
     private func request(follow: Bool) -> LogRequest {
         switch target {
@@ -255,12 +245,22 @@ final class LogViewerModel: Identifiable {
 
     private func startFollowing() {
         status = .loading
-        let request = request(follow: true)
-        let logs = service.logs
-        let host = host
         let inbox = LineInbox()
         self.inbox = inbox
-        readTask = Task.detached(priority: .userInitiated) {
+        readTask = Self.read(request(follow: true), logs: service.logs, host: host, into: inbox)
+        flushTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.flushInterval)
+                guard !Task.isCancelled, let self else { return }
+                if flush() { return }
+            }
+        }
+    }
+
+    private nonisolated static func read(
+        _ request: LogRequest, logs: LogCollector, host: RemoteHost, into inbox: LineInbox
+    ) -> Task<Void, Never> {
+        Task.detached(priority: .userInitiated) {
             do {
                 let stream = try await logs.follow(request, on: host)
                 for try await line in stream {
@@ -269,13 +269,6 @@ final class LogViewerModel: Identifiable {
                 inbox.finish(nil)
             } catch {
                 inbox.finish(Task.isCancelled ? nil : error)
-            }
-        }
-        flushTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.flushInterval)
-                guard !Task.isCancelled, let self else { return }
-                if flush() { return }
             }
         }
     }
@@ -292,23 +285,30 @@ final class LogViewerModel: Identifiable {
     @discardableResult
     private func flush(final: Bool = false) -> Bool {
         let drained = inbox.drain()
-        if !drained.lines.isEmpty {
-            let start = ContinuousClock.now
-            text.append(drained.lines)
-            let elapsed = (ContinuousClock.now - start).milliseconds
-            stats.flushes += 1
-            stats.linesReceived += drained.lines.count
-            stats.maxBatch = max(stats.maxBatch, drained.lines.count)
-            stats.maxFlushMilliseconds = max(stats.maxFlushMilliseconds, elapsed)
-            stats.totalFlushMilliseconds += elapsed
-            if status == .loading { status = .following }
-        }
+        if !drained.lines.isEmpty { show(drained.lines) }
         stats.droppedBeforeDisplay += drained.dropped
         if status == .loading, drained.lines.isEmpty, drained.end == nil, inbox.started {
             status = .following
         }
         syncCounts()
         guard !final, let end = drained.end else { return false }
+        finishFollowing(end)
+        return true
+    }
+
+    private func show(_ lines: [LogLine]) {
+        let start = ContinuousClock.now
+        text.append(lines)
+        let elapsed = (ContinuousClock.now - start).milliseconds
+        stats.flushes += 1
+        stats.linesReceived += lines.count
+        stats.maxBatch = max(stats.maxBatch, lines.count)
+        stats.maxFlushMilliseconds = max(stats.maxFlushMilliseconds, elapsed)
+        stats.totalFlushMilliseconds += elapsed
+        if status == .loading { status = .following }
+    }
+
+    private func finishFollowing(_ end: LineInbox.End) {
         switch end {
         case .finished:
             text.append([LogLine(info: "The log stream ended (the container stopped or the connection closed).")])
@@ -318,7 +318,6 @@ final class LogViewerModel: Identifiable {
         }
         follow = false
         syncCounts()
-        return true
     }
 
     private func fail(_ error: any Error) {
@@ -347,11 +346,11 @@ final class LogViewerModel: Identifiable {
         return body.split(separator: "\n", omittingEmptySubsequences: false).map { LogLine(String($0)) }
     }
 
+    /// The most-restarted container for previous logs; else the crash-looping one, else the first.
     private static func defaultContainer(_ containers: [PodContainerStatus], previous: Bool) -> String? {
         if previous {
             return containers.max { $0.restartCount < $1.restartCount }?.name
         }
-        // The crash-looping container first, else the first one.
         return (containers.first { $0.waitingReason == "CrashLoopBackOff" } ?? containers.first)?.name
     }
 

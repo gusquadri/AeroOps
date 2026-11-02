@@ -13,6 +13,14 @@ enum WorkloadAction: String, Hashable, Sendable {
     case stop
     case restart
     case delete
+
+    var dockerAction: DockerContainerAction {
+        switch self {
+        case .stop: .stop
+        case .restart: .restart
+        case .delete: .remove
+        }
+    }
 }
 
 /// An action picked on a row, with the texts for its confirmation and its failure alert.
@@ -128,35 +136,6 @@ extension PodInfo {
     var canRestart: Bool { owner?.recreatesPods == true }
 }
 
-// MARK: - Menus
-
-/// A row's Stop, Restart and Delete menu, or a spinner while one of them runs.
-struct WorkloadActionsMenu<Items: View>: View {
-    let busy: Bool
-    @ViewBuilder let items: () -> Items
-
-    var body: some View {
-        if busy {
-            ProgressView()
-                .controlSize(.small)
-                .help("Working…")
-        } else {
-            Menu {
-                items()
-            } label: {
-                Label("Stop, Restart or Delete", systemImage: "power")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .menuIndicator(.hidden)
-            .labelStyle(.iconOnly)
-            .foregroundStyle(Aero.aquaDeep)
-            .fixedSize()
-            .help("Stop, restart or delete")
-        }
-    }
-}
-
 /// Stop, Restart and Delete… for a container, in its row menu and its context menu.
 struct ContainerActionItems: View {
     let container: ContainerInfo
@@ -164,15 +143,18 @@ struct ContainerActionItems: View {
 
     var body: some View {
         let busy = containers.isBusy(container.id)
-        Button("Stop", systemImage: "stop.fill") { containers.request(.stop, on: container) }
-            .disabled(busy || !container.canStop)
-        Button(container.canStop ? "Restart" : "Start", systemImage: "arrow.clockwise") {
-            containers.request(.restart, on: container)
-        }
-        .disabled(busy)
-        Divider()
-        Button("Delete…", systemImage: "trash", role: .destructive) { containers.request(.delete, on: container) }
+        Section {
+            Button("Stop", systemImage: "stop.fill") { containers.request(.stop, on: container) }
+                .disabled(busy || !container.canStop)
+            Button(container.canStop ? "Restart" : "Start", systemImage: "arrow.clockwise") {
+                containers.request(.restart, on: container)
+            }
             .disabled(busy)
+        }
+        Section {
+            Button("Delete…", systemImage: "trash", role: .destructive) { containers.request(.delete, on: container) }
+                .disabled(busy)
+        }
     }
 }
 
@@ -191,9 +173,10 @@ struct PodActionItems: View {
             Button("Restart", systemImage: "arrow.clockwise") { containers.request(.restart, on: pod) }
                 .disabled(busy || !pod.canRestart)
         }
-        Divider()
-        Button("Delete…", systemImage: "trash", role: .destructive) { containers.request(.delete, on: pod) }
-            .disabled(busy)
+        Section {
+            Button("Delete…", systemImage: "trash", role: .destructive) { containers.request(.delete, on: pod) }
+                .disabled(busy)
+        }
     }
 
     /// The owner, or why Stop and Restart are off.

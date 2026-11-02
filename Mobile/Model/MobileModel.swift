@@ -8,6 +8,15 @@ import KeyAgent
 import Observation
 import SSHKit
 
+/// An open terminal. It stays open, connected or not, until ``MobileModel/closeTerminal(_:)``.
+struct MobileTerminal: Identifiable {
+    let id: UUID
+    let hostID: RemoteHost.ID
+    /// Tells a host's terminals apart: the lowest number not in use when it opened.
+    let number: Int
+    let session: EmbeddedTerminalSession
+}
+
 /// The iOS app's state and services: the Mac app's AeroKit stack, with AeroKit's in-process
 /// ``EmbeddedSSHClient`` in place of `/usr/bin/ssh` (iOS cannot spawn processes).
 ///
@@ -21,8 +30,9 @@ import SSHKit
 ///   update goes into the host's ``HostDisplayState``, which the shared ``HostCard`` draws. Hosts
 ///   with monitoring off (``RemoteHost/monitored``) are not polled and show ``HostStatus/unmonitored``.
 ///
-/// - Terminals and files: an ``EmbeddedTerminalSession`` and a ``MobileFileBrowser`` (SFTP) per
+/// - Terminals and files: any number of ``MobileTerminal``s and a ``MobileFileBrowser`` (SFTP) per
 ///   host, over the same embedded client and host-key checks.
+/// - Containers: the Mac app's ``ContainerService`` with the embedded client as its runner.
 ///
 /// Activity follows the scene: polling every 5 s while the app is active, paused (and every
 /// connection closed) in the background, since iOS suspends the app and drops its sockets. An
@@ -60,6 +70,8 @@ final class MobileModel {
     /// Why the last key scan for a host failed, shown on its card.
     private(set) var scanErrors: [RemoteHost.ID: String] = [:]
     private(set) var activity: MonitorActivity = .visible
+    /// The open terminals, oldest first.
+    private(set) var terminals: [MobileTerminal] = []
 
     /// Whether this device can make Secure Enclave keys (not the Simulator).
     let canUseSecureEnclave = SecureEnclave.isAvailable
@@ -77,12 +89,14 @@ final class MobileModel {
     @ObservationIgnored private var isStarted = false
     /// Sample data (previews, "Try Sample Servers", `-AeroOpsDemo`): terminals and files are canned too.
     @ObservationIgnored private(set) var isPreview = false
-    @ObservationIgnored private var terminals: [RemoteHost.ID: EmbeddedTerminalSession] = [:]
     @ObservationIgnored private var fileBrowsers: [RemoteHost.ID: MobileFileBrowser<RemoteFileBackend>] = [:]
     @ObservationIgnored private var demoFileBrowsers: [RemoteHost.ID: MobileFileBrowser<DemoFileBackend>] = [:]
+    /// Built on first use, because ``isPreview`` is set after init.
+    @ObservationIgnored private lazy var containerService = makeContainerService()
 
     /// `paths` roots every file; `keychain`, `passwordKeychain` and `hostKeyKeychain` hold the
     /// keys, passwords and pins (the Keychain the Mac app shares in the app, memory in previews).
+    /// `unlocked` says the user has just authenticated, which covers "once per session" keys.
     init(
         paths: AeroPaths, hostStore: HostStore, keychain: any KeychainStore,
         passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore, unlocked: Bool = false
@@ -96,7 +110,6 @@ final class MobileModel {
         do {
             let keyStore = try KeyStore(keychain: keychain, paths: paths)
             self.keyStore = keyStore
-    /// `unlocked` says the user has just authenticated, which covers "once per session" keys.
             client = EmbeddedSSHClient(
                 hostKeys: hostKeys,
                 credentials: EmbeddedSSHCredentials(keyStore: keyStore, passwords: passwords, authorizer: authorizer),
@@ -111,8 +124,10 @@ final class MobileModel {
     }
 
     /// The app's model: hosts, keys, passwords and pins in the Keychain, files under the app container.
+    /// Only built after an unlock.
     static func live() -> MobileModel {
         MobileModel(
+            paths: AeroPaths(dotDirectory: .applicationSupportDirectory),
             hostStore: .system(), keychain: KeyStore.systemKeychain(),
             passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain(),
             unlocked: true
@@ -233,7 +248,7 @@ final class MobileModel {
     private func forgetHost(_ id: RemoteHost.ID) {
         displayStates[id] = nil
         scanErrors[id] = nil
-        closeTerminal(id)
+        for terminal in terminals where terminal.hostID == id { closeTerminal(terminal.id) }
         fileBrowsers.removeValue(forKey: id)?.close()
         if let client { Task { await client.disconnect(id) } }
     }
@@ -271,6 +286,7 @@ final class MobileModel {
         refreshPasswordHosts()
         // The coordinator skips hosts with monitoring off.
         coordinator?.setHosts(hosts)
+        containerService.hostsDidChange(hosts)
         for host in hosts {
             fileBrowsers[host.id]?.hostDidChange(host)
         }
@@ -293,28 +309,63 @@ final class MobileModel {
 
     // MARK: - Terminals and files
 
-    /// Host `id`'s terminal, created (not connected) on first use: one per host, until
-    /// ``closeTerminal(_:)``. Each connect opens a login shell on the host as it is then.
-    func terminal(for id: RemoteHost.ID) -> EmbeddedTerminalSession {
-        if let session = terminals[id] { return session }
-        let session: EmbeddedTerminalSession
-        if isPreview {
-            let host = host(id: id)
-            session = EmbeddedTerminalSession { _ in DemoTerminalChannel(user: host?.user ?? "dev", hostName: host?.name ?? "demo") }
-        } else {
-            session = EmbeddedTerminalSession { [weak self] size in
-                guard let self else { throw CancellationError() }
-                let (client, host) = try await self.sessionTarget(id)
-                return try await client.openTerminal(on: host, term: EmbeddedTerminalSession.term, size: size)
-            }
-        }
-        terminals[id] = session
-        return session
+    /// Whether a terminal or the file browser can try host `host`: its key has not changed and
+    /// the keys could be opened.
+    func canOpenSession(on host: RemoteHost) -> Bool {
+        hostKeyBlock(for: host) == nil && (client != nil || isPreview)
     }
 
-    /// Ends host `id`'s shell (the terminal screen was closed).
-    func closeTerminal(_ id: RemoteHost.ID) {
-        terminals.removeValue(forKey: id)?.close()
+    func terminal(id: MobileTerminal.ID) -> MobileTerminal? {
+        terminals.first { $0.id == id }
+    }
+
+    /// Host `id`'s newest terminal, or a new one if it has none.
+    func currentTerminal(on id: RemoteHost.ID) -> MobileTerminal {
+        terminals.last { $0.hostID == id } ?? openTerminal(on: id)
+    }
+
+    /// A new terminal on host `id`, not connected yet. Each connect opens a login shell on the
+    /// host as it is then.
+    @discardableResult
+    func openTerminal(on id: RemoteHost.ID) -> MobileTerminal {
+        let used = Set(terminals.lazy.filter { $0.hostID == id }.map(\.number))
+        let number = (1...).first { !used.contains($0) } ?? 1
+        let terminal = MobileTerminal(id: UUID(), hostID: id, number: number, session: makeTerminalSession(on: id))
+        terminals.append(terminal)
+        return terminal
+    }
+
+    private func makeTerminalSession(on id: RemoteHost.ID) -> EmbeddedTerminalSession {
+        if isPreview {
+            let host = host(id: id)
+            return EmbeddedTerminalSession { _ in DemoTerminalChannel(user: host?.user ?? "dev", hostName: host?.name ?? "demo") }
+        }
+        return EmbeddedTerminalSession { [weak self] size in
+            guard let self else { throw CancellationError() }
+            let (client, host) = try await self.sessionTarget(id)
+            return try await client.openTerminal(on: host, term: EmbeddedTerminalSession.term, size: size)
+        }
+    }
+
+    /// Ends a terminal's shell and removes it.
+    func closeTerminal(_ id: MobileTerminal.ID) {
+        terminals.first { $0.id == id }?.session.close()
+        terminals.removeAll { $0.id == id }
+    }
+
+    /// Host `id`'s Docker and Kubernetes state. Nothing connects until its screen polls it.
+    func containers(for id: RemoteHost.ID) -> HostContainersModel {
+        containerService.model(for: id)
+    }
+
+    private func makeContainerService() -> ContainerService {
+        let runner = workloadRunner
+        return ContainerService(runner: { runner }, host: { [weak self] in self?.host(id: $0) })
+    }
+
+    private var workloadRunner: any RemoteCommandRunning {
+        if isPreview { return DemoWorkloadRunner() }
+        return client ?? UnavailableWorkloadRunner(reason: keyStoreError)
     }
 
     /// Host `host`'s file browser, kept while the host exists so its folder and transfers

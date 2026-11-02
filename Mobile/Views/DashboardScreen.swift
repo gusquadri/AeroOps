@@ -2,26 +2,19 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// A screen pushed from the dashboard.
-enum MobileRoute: Hashable {
-    case host(RemoteHost.ID)
-    case terminal(RemoteHost.ID)
-    case files(RemoteHost.ID)
-}
-
-/// Every host's card; tap one for its details, and from there its terminal and files. Pull to
-/// poll every host now.
+/// Every host's card; tap one for its details, or its buttons for its files and terminal. Pull
+/// to poll every host now.
 struct DashboardScreen: View {
     @Environment(MobileModel.self) private var model
+    @Environment(MobileNavigator.self) private var navigator
     @Environment(\.showSampleServers) private var showSampleServers
-    @State private var path: [MobileRoute] = []
     @State private var editor: HostEditorScreen.Request?
     /// Why turning a host's monitoring on or off could not be saved.
     @State private var monitoringFailure: String?
 
     var body: some View {
-        @Bindable var model = model
-        NavigationStack(path: $path) {
+        @Bindable var navigator = navigator
+        NavigationStack(path: $navigator.serverPath) {
             content
                 .background { SkyBackground() }
                 .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
@@ -35,35 +28,12 @@ struct DashboardScreen: View {
                         Button("Add Host", systemImage: "plus") { editor = .new }
                     }
                 }
-                .navigationDestination(for: MobileRoute.self) { route in
-                    switch route {
-                    case .host(let id): HostScreen(id: id) { path.append($0) }
-                    case .terminal(let id): TerminalScreen(id: id)
-                    case .files(let id): FilesScreen(id: id)
-                    }
-                }
-        }
-        .onChange(of: path) { old, new in
-            // A closed terminal screen ends its shell.
-            for case .terminal(let id) in old where !new.contains(.terminal(id)) {
-                model.closeTerminal(id)
-            }
+                .navigationDestination(for: RemoteHost.ID.self) { HostScreen(id: $0) }
         }
         .sheet(item: $editor) { request in
             HostEditorScreen(request: request)
         }
         .task(openDebugScreen)
-        .sheet(item: $model.trustRequest) { request in
-            NavigationStack {
-                HostKeyTrustSheet(
-                    host: request.host,
-                    offered: request.offered,
-                    onTrust: { try await model.trust(request) },
-                    onCancel: { model.trustRequest = nil }
-                )
-            }
-            .presentationDetents([.large])
-        }
         .alert(
             "Couldn’t save the server",
             isPresented: Binding(get: { monitoringFailure != nil }, set: { if !$0 { monitoringFailure = nil } }),
@@ -115,9 +85,7 @@ struct DashboardScreen: View {
     private func openDebugScreen() {
         guard let first = model.hosts.first else { return }
         switch MobileDebugOptions.screen {
-        case .host: path = [.host(first.id)]
-        case .terminal: path = [.host(first.id), .terminal(first.id)]
-        case .files: path = [.host(first.id), .files(first.id)]
+        case .host: navigator.serverPath = [first.id]
         case .add: editor = .new
         case .edit: editor = .edit(first.id)
         default: break
@@ -149,9 +117,11 @@ struct DashboardScreen: View {
         HostCard(
             host: host,
             state: model.displayState(for: host.id),
-            showsSessionActions: false,
+            canOpenSSH: model.canOpenSession(on: host),
+            onOpenSSH: { navigator.show(terminal: model.currentTerminal(on: host.id).id) },
+            onBrowseFiles: { navigator.showFiles(of: host.id) },
             keyBlock: model.hostKeyBlock(for: host),
-            onReviewKey: { path.append(.host(host.id)) },
+            onReviewKey: { navigator.serverPath.append(host.id) },
             onTrustKey: { Task { await model.requestHostKeyTrust(for: host) } },
             isScanningKey: model.scanningHostIDs.contains(host.id),
             keyScanError: model.scanErrors[host.id],
@@ -159,7 +129,7 @@ struct DashboardScreen: View {
         )
         .equatable()
         .contentShape(.rect(cornerRadius: Aero.radius.card))
-        .onTapGesture { path.append(.host(host.id)) }
+        .onTapGesture { navigator.serverPath.append(host.id) }
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows the server’s details")
     }
@@ -168,10 +138,12 @@ struct DashboardScreen: View {
 #Preview("Dashboard") {
     DashboardScreen()
         .environment(MobileModel.preview())
+        .environment(MobileNavigator())
 }
 
 #Preview("Dashboard · empty") {
     DashboardScreen()
         .environment(MobileModel.preview(hosts: []))
+        .environment(MobileNavigator())
         .environment(\.showSampleServers) { _ in }
 }

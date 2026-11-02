@@ -7,8 +7,7 @@ import SwiftUI
 /// A host's dashboard card: a status bubble with the host's system logo, name and address, with
 /// uptime and the Files and Open SSH buttons in the top-right corner, then tags, all on a
 /// title-bar wash in the host's status colour; CPU / memory / disk gauges below. Load is in the
-/// inspector. Shared by the Mac dashboard and the iOS app, which has no Files or SSH tabs yet
-/// and hides those buttons with ``showsSessionActions``.
+/// inspector. Shared by the Mac dashboard and the iOS app.
 ///
 /// Every card is the same size whatever the host's state: the tag row is always there, as tall
 /// as a small button, so held host keys and untagged hosts don't change the height. The bubble's
@@ -24,8 +23,6 @@ struct HostCard: View, Equatable {
     let host: RemoteHost
     let state: HostDisplayState
     var isSelected = false
-    /// Whether the card has the Files and Open SSH buttons at all (`false` on iOS for now).
-    var showsSessionActions = true
     /// Whether Open SSH and Files are available (both need the host's SSH connection).
     var canOpenSSH = false
     var onOpenSSH: () -> Void = {}
@@ -48,9 +45,9 @@ struct HostCard: View, Equatable {
     /// Equal when everything but the actions is: those are new closures each time, and do the
     /// same thing for the same host. `state` is compared by identity; the card observes it.
     nonisolated static func == (lhs: HostCard, rhs: HostCard) -> Bool {
-        lhs.host == rhs.host && lhs.state === rhs.state && lhs.isSelected == rhs.isSelected
-            && lhs.showsSessionActions == rhs.showsSessionActions && lhs.canOpenSSH == rhs.canOpenSSH && lhs.keyBlock == rhs.keyBlock
-            && lhs.isScanningKey == rhs.isScanningKey && lhs.keyScanError == rhs.keyScanError
+        lhs.state === rhs.state
+            && (lhs.host, lhs.isSelected, lhs.canOpenSSH, lhs.keyBlock, lhs.isScanningKey, lhs.keyScanError)
+            == (rhs.host, rhs.isSelected, rhs.canOpenSSH, rhs.keyBlock, rhs.isScanningKey, rhs.keyScanError)
     }
     /// The name column's width before the buttons shrink to small, then uptime goes.
     private static let nameIdealWidth: CGFloat = 110
@@ -169,13 +166,11 @@ struct HostCard: View, Equatable {
             if layout.showsUptime {
                 uptime
             }
-            if showsSessionActions {
-                HStack(spacing: 8) {
-                    filesButton
-                    openSSHButton
-                }
-                .controlSize(layout.buttonSize)
+            HStack(spacing: 8) {
+                filesButton
+                openSSHButton
             }
+            .controlSize(layout.buttonSize)
         }
     }
 
@@ -456,7 +451,7 @@ extension String {
     ScrollView {
         VStack(spacing: 16) {
             ForEach(hosts.indices, id: \.self) { index in
-                HostCard(host: hosts[index], state: states[index], showsSessionActions: false)
+                HostCard(host: hosts[index], state: states[index])
             }
         }
         .padding(20)

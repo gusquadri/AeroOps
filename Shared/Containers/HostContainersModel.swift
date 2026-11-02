@@ -35,8 +35,6 @@ final class HostContainersModel {
     let hostID: RemoteHost.ID
     @ObservationIgnored private unowned let service: ContainerService
 
-    // MARK: Data
-
     /// The probe result; `nil` before the first probe or when it failed.
     private(set) var capabilities: HostCapabilities?
     /// Why the probe failed (ssh login, host key, unreachable).
@@ -52,8 +50,6 @@ final class HostContainersModel {
 
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
-
-    // MARK: Filters and selection
 
     var section: Section?
     /// Docker: show exited and created containers too.
@@ -85,8 +81,6 @@ final class HostContainersModel {
     /// The inspector's pane; events first, so a Pending pod's FailedScheduling is the first thing seen.
     var inspectorTab = InspectorTab.events
 
-    // MARK: Presentations
-
     /// The Logs sheet; `nil` when closed. Closing it stops any follow.
     var logs: LogViewerModel? {
         didSet {
@@ -111,8 +105,6 @@ final class HostContainersModel {
     /// Rows with a Stop, Restart or Delete running: container IDs and `namespace/pod` IDs.
     private(set) var busyRows: Set<String> = []
 
-    // MARK: Statistics (self-test)
-
     private(set) var refreshCount = 0
     @ObservationIgnored private(set) var maxConcurrentRefreshes = 0
     @ObservationIgnored private var runningRefreshes = 0
@@ -128,8 +120,6 @@ final class HostContainersModel {
     }
 
     var host: RemoteHost? { service.host(id: hostID) }
-
-    // MARK: - Derived
 
     /// Docker is installed (the probe found the `docker` command).
     var showsDocker: Bool {
@@ -197,8 +187,6 @@ final class HostContainersModel {
         selectedPodID.flatMap { id in pods.first { $0.id == id } }
     }
 
-    // MARK: - Polling
-
     /// Refreshes now and then every ``pollInterval`` until cancelled (the tab or window hides).
     func poll() async {
         activePollers += 1
@@ -212,15 +200,16 @@ final class HostContainersModel {
     /// Refreshes once. Waits for a refresh that is already running instead of overlapping it;
     /// `reprobe` (the Refresh button) probes capabilities again and retries stopped sections.
     /// `fresh` loads again after a running refresh, so a change just made shows.
+    ///
+    /// The task clears `inFlight` itself, before it finishes. Awaiting a finished task does not
+    /// suspend, so if a caller cleared it after its await, the wait loop could spin on the main
+    /// actor forever while the caller that would clear it waits for its turn.
     func refresh(reprobe: Bool = false, fresh: Bool = false) async {
         if let running = inFlight {
             await running.value
             guard reprobe || fresh else { return }
         }
         while let running = inFlight { await running.value }
-        // The task clears `inFlight` itself, before it finishes. Awaiting a finished task does not
-        // suspend, so if a caller cleared it after its await, the loop above could spin on the
-        // main actor forever while the caller that would clear it waits for its turn.
         let task = Task {
             await self.performRefresh(reprobe: reprobe)
             self.inFlight = nil
@@ -234,44 +223,14 @@ final class HostContainersModel {
     }
 
     private func performRefresh(reprobe: Bool) async {
-        guard let host = service.host(id: hostID) else { return }
-        if isPollingHalted, !reprobe { return }
-        runningRefreshes += 1
-        maxConcurrentRefreshes = max(maxConcurrentRefreshes, runningRefreshes)
-        isRefreshing = true
-        defer {
-            runningRefreshes -= 1
-            isRefreshing = false
-            refreshCount += 1
-        }
-
-        let cache = service.capabilityCache
-        let caps: HostCapabilities
-        do {
-            caps = reprobe ? try await cache.refresh(host) : try await cache.capabilities(for: host)
-            capabilities = caps
-            connectionIssue = nil
-        } catch {
-            guard let issue = WorkloadIssue.from(error, host: host), !Task.isCancelled else { return }
-            connectionIssue = issue
-            lastRefresh = .now
-            return
-        }
-
-        if reprobe {
-            if dockerIssue?.kind != .transient { dockerIssue = nil }
-            if podsIssue?.kind != .transient { podsIssue = nil }
-        }
-        let fetchDocker = caps.contains(.docker) && dockerIssue?.kind != .setup && dockerIssue?.kind != .access
-        let fetchPods = showsKubernetes && podsIssue?.kind != .setup && podsIssue?.kind != .access
-        if !caps.contains(.docker) {
-            containers = []
-            dockerIssue = nil
-        }
-        if !showsKubernetes {
-            pods = []
-            podsIssue = nil
-        }
+        guard let host = service.host(id: hostID), reprobe || !isPollingHalted else { return }
+        beginRefresh()
+        defer { endRefresh() }
+        guard let caps = await probe(host, reprobe: reprobe) else { return }
+        if reprobe { clearStoppedSections() }
+        let fetchDocker = fetchesDocker(caps)
+        let fetchPods = fetchesPods
+        clearAbsentSections(caps)
 
         let docker = service.docker
         let kubernetes = service.kubernetes
@@ -280,38 +239,102 @@ final class HostContainersModel {
         let (dockerOutcome, podsOutcome) = await (dockerResult, podsResult)
         guard !Task.isCancelled else { return }
 
-        switch dockerOutcome {
+        apply(docker: dockerOutcome, caps, host)
+        apply(pods: podsOutcome, caps, host)
+        lastRefresh = .now
+    }
+
+    private func beginRefresh() {
+        runningRefreshes += 1
+        maxConcurrentRefreshes = max(maxConcurrentRefreshes, runningRefreshes)
+        isRefreshing = true
+    }
+
+    private func endRefresh() {
+        runningRefreshes -= 1
+        isRefreshing = false
+        refreshCount += 1
+    }
+
+    private func probe(_ host: RemoteHost, reprobe: Bool) async -> HostCapabilities? {
+        let cache = service.capabilityCache
+        do {
+            let caps = reprobe ? try await cache.refresh(host) : try await cache.capabilities(for: host)
+            capabilities = caps
+            connectionIssue = nil
+            return caps
+        } catch {
+            guard let issue = WorkloadIssue.from(error, host: host), !Task.isCancelled else { return nil }
+            connectionIssue = issue
+            lastRefresh = .now
+            return nil
+        }
+    }
+
+    private func clearStoppedSections() {
+        if dockerIssue?.kind != .transient { dockerIssue = nil }
+        if podsIssue?.kind != .transient { podsIssue = nil }
+    }
+
+    private func clearAbsentSections(_ caps: HostCapabilities) {
+        if !caps.contains(.docker) {
+            containers = []
+            dockerIssue = nil
+        }
+        if !showsKubernetes {
+            pods = []
+            podsIssue = nil
+        }
+    }
+
+    private func fetchesDocker(_ caps: HostCapabilities) -> Bool {
+        caps.contains(.docker) && !Self.stopsFetching(dockerIssue)
+    }
+
+    private var fetchesPods: Bool {
+        showsKubernetes && !Self.stopsFetching(podsIssue)
+    }
+
+    private static func stopsFetching(_ issue: WorkloadIssue?) -> Bool {
+        issue?.kind == .setup || issue?.kind == .access
+    }
+
+    private func apply(docker outcome: Result<[ContainerInfo], any Error>?, _ caps: HostCapabilities, _ host: RemoteHost) {
+        switch outcome {
         case .success(let list)?:
             containers = list
             dockerIssue = nil
             dockerLoaded = true
         case .failure(let error)?:
-            if let issue = WorkloadIssue.from(error, capabilities: caps, host: host) {
-                dockerIssue = issue
-                if issue.kind != .transient { containers = [] }
-                dockerLoaded = true
-            }
+            guard let issue = WorkloadIssue.from(error, capabilities: caps, host: host) else { return }
+            dockerIssue = issue
+            if issue.kind != .transient { containers = [] }
+            dockerLoaded = true
         case nil:
             break
         }
-        switch podsOutcome {
+    }
+
+    private func apply(pods outcome: Result<[PodInfo], any Error>?, _ caps: HostCapabilities, _ host: RemoteHost) {
+        switch outcome {
         case .success(let list)?:
             pods = list
             podsIssue = nil
             podsLoaded = true
-            if let selectedPodID, !list.contains(where: { $0.id == selectedPodID }) {
-                podDetail?.markGone()
-            }
+            markSelectedPodGone(unlessIn: list)
         case .failure(let error)?:
-            if let issue = WorkloadIssue.from(error, capabilities: caps, host: host) {
-                podsIssue = issue
-                if issue.kind != .transient { pods = [] }
-                podsLoaded = true
-            }
+            guard let issue = WorkloadIssue.from(error, capabilities: caps, host: host) else { return }
+            podsIssue = issue
+            if issue.kind != .transient { pods = [] }
+            podsLoaded = true
         case nil:
             break
         }
-        lastRefresh = .now
+    }
+
+    private func markSelectedPodGone(unlessIn list: [PodInfo]) {
+        guard let selectedPodID, !list.contains(where: { $0.id == selectedPodID }) else { return }
+        podDetail?.markGone()
     }
 
     private nonisolated static func load<T: Sendable>(
@@ -325,31 +348,24 @@ final class HostContainersModel {
         }
     }
 
-    // MARK: - Host changes
-
     /// A new kubectl prefix, docker sudo setting or address may fix a stopped section: clear the
     /// stop and refresh if the tab is showing this host.
     func hostDidChange(_ host: RemoteHost) {
         defer { lastHost = host }
         guard let old = lastHost else { return }
-        let endpointChanged = old.address != host.address || old.port != host.port || old.user != host.user
-            || old.keyId != host.keyId || old.auth != host.auth
-        let dockerChanged = old.dockerSudo != host.dockerSudo
-        let kubeChanged = old.kubectlPrefix != host.kubectlPrefix
-        guard endpointChanged || dockerChanged || kubeChanged else { return }
-        if endpointChanged {
-            connectionIssue = nil
-            dockerIssue = nil
-            podsIssue = nil
-        }
-        if dockerChanged { dockerIssue = nil }
-        if kubeChanged { podsIssue = nil }
+        let change = WorkloadSettingsChange(old: old, new: host)
+        guard change.isAny else { return }
+        clearIssues(after: change)
         if activePollers > 0 {
             Task { await refresh() }
         }
     }
 
-    // MARK: - Actions
+    private func clearIssues(after change: WorkloadSettingsChange) {
+        if change.endpoint { connectionIssue = nil }
+        if change.endpoint || change.docker { dockerIssue = nil }
+        if change.endpoint || change.kubernetes { podsIssue = nil }
+    }
 
     /// Opens the Logs sheet for a container (following while it runs).
     func showLogs(_ container: ContainerInfo) {
@@ -410,8 +426,6 @@ final class HostContainersModel {
         detail.load()
     }
 
-    // MARK: - Stop, restart, delete
-
     func isBusy(_ rowID: String) -> Bool {
         busyRows.contains(rowID)
     }
@@ -456,22 +470,25 @@ final class HostContainersModel {
     private nonisolated static func run(
         _ request: WorkloadActionRequest, on host: RemoteHost, docker: DockerCollector, kubernetes: KubernetesCollector
     ) async throws {
-        switch (request.action, request.target) {
-        case (.stop, .container(let container)):
-            try await docker.perform(.stop, on: container.id, host: host)
-        case (.restart, .container(let container)):
-            try await docker.perform(.restart, on: container.id, host: host)
-        case (.delete, .container(let container)):
-            try await docker.perform(.remove, on: container.id, host: host)
-        case (.stop, .pod(let pod)):
-            guard let owner = pod.owner else { throw CollectorInputError.unsupported("This pod has no controller to scale.") }
-            try await kubernetes.scale(owner, namespace: pod.namespace, replicas: 0, on: host)
-        case (.restart, .pod(let pod)), (.delete, .pod(let pod)):
-            try await kubernetes.deletePod(pod.name, namespace: pod.namespace, on: host)
+        switch request.target {
+        case .container(let container):
+            try await docker.perform(request.action.dockerAction, on: container.id, host: host)
+        case .pod(let pod):
+            try await run(request.action, on: pod, host: host, kubernetes: kubernetes)
         }
     }
 
-    // MARK: - Terminal
+    private nonisolated static func run(
+        _ action: WorkloadAction, on pod: PodInfo, host: RemoteHost, kubernetes: KubernetesCollector
+    ) async throws {
+        switch action {
+        case .stop:
+            guard let owner = pod.owner else { throw CollectorInputError.unsupported("This pod has no controller to scale.") }
+            try await kubernetes.scale(owner, namespace: pod.namespace, replicas: 0, on: host)
+        case .restart, .delete:
+            try await kubernetes.deletePod(pod.name, namespace: pod.namespace, on: host)
+        }
+    }
 
     var canOpenTerminal: Bool {
         service.canOpenSSH(hostID)
@@ -501,8 +518,6 @@ final class HostContainersModel {
         service.openSSH(hostID, remoteCommand: command, title: viewer.terminalTitle)
     }
 
-    // MARK: - Teardown
-
     /// Stops every follow and closes the sheets and the inspector.
     func stopPresentations() {
         logs = nil
@@ -512,4 +527,20 @@ final class HostContainersModel {
         podDetail = nil
         inspectorPresented = false
     }
+}
+
+/// Which of a host's settings the Containers state depends on were edited.
+private struct WorkloadSettingsChange {
+    let endpoint: Bool
+    let docker: Bool
+    let kubernetes: Bool
+
+    init(old: RemoteHost, new: RemoteHost) {
+        endpoint = old.address != new.address || old.port != new.port || old.user != new.user
+            || old.keyId != new.keyId || old.auth != new.auth
+        docker = old.dockerSudo != new.dockerSudo
+        kubernetes = old.kubectlPrefix != new.kubectlPrefix
+    }
+
+    var isAny: Bool { endpoint || docker || kubernetes }
 }

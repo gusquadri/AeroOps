@@ -28,7 +28,7 @@ let package = Package(
         // the EmbeddedTerminal product (iOS).
         .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "2.2.2026101003"),
         // SSH in Swift for iOS, which has no /usr/bin/ssh. Pinned exactly. Only EmbeddedSSH links it.
-        .package(url: "https://github.com/apple/swift-nio-ssh", exact: "0.15.0"),
+        .package(url: "https://github.com/gusquadri/swift-nio-ssh", revision: "7a9d8c39777f99927c3c2591b0246c1e06ec3dfe"),
         // swift-nio-ssh's own dependency; declared for the NIOCore/NIOPosix products.
         .package(url: "https://github.com/apple/swift-nio", from: "2.81.0"),
     ],

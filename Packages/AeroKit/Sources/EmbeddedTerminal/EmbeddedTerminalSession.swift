@@ -129,7 +129,9 @@ public final class EmbeddedTerminalSession {
         viewState?.requestFocus()
     }
 
-    /// The surface state for the current connection, created when first shown.
+    /// The surface state for the current connection, created when first shown. It hands SwiftUI
+    /// the same view every time: libghostty frees the grid and scrollback with the view, and they
+    /// have to be there when the terminal's screen opens again.
     func surfaceState() -> TerminalViewState? {
         if let viewState { return viewState }
         guard let io else { return nil }
@@ -140,6 +142,8 @@ public final class EmbeddedTerminalSession {
         )
         let viewState = TerminalViewState(controller: controller)
         viewState.configuration = TerminalSurfaceOptions(backend: .inMemory(io))
+        let surfaceView = TerminalView(frame: .zero)
+        viewState.makePlatformView = { surfaceView }
         self.viewState = viewState
         return viewState
     }
