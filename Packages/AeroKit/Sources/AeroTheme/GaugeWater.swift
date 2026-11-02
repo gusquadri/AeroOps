@@ -1,5 +1,7 @@
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 import QuartzCore
 import SwiftUI
@@ -10,7 +12,7 @@ import SwiftUI
 /// The motion runs in Core Animation's render server: each part is a cached ring image that
 /// turns clockwise and loops, masked to the tube's arc, at 15 fps. Once set up, a gauge costs
 /// the app no CPU per frame. With Reduce Motion, and in `ImageRenderer` (which cannot draw
-/// AppKit views), the same images stand still.
+/// platform views), the same images stand still.
 struct GaugeWater: Equatable {
     /// The filled share of the ring, `0...1`: the arc the water fills.
     let fraction: Double
@@ -283,16 +285,11 @@ struct GaugeWaterView: View {
     var body: some View {
         let variant = AeroVariant(colorScheme)
         Group {
-            #if os(macOS)
             if animated && !accessibility.reduceMotion {
                 LiveWater(water: water, lineWidth: lineWidth, variant: variant)
             } else {
                 StillWater(water: water, variant: variant, lineWidth: lineWidth, diameter: diameter, scale: displayScale)
             }
-            #else
-            // iOS: still water for now (the live water's layers are an AppKit view).
-            StillWater(water: water, variant: variant, lineWidth: lineWidth, diameter: diameter, scale: displayScale)
-            #endif
         }
         .frame(width: diameter, height: diameter)
         .allowsHitTesting(false)
@@ -333,17 +330,13 @@ private struct StillWater: View {
     }
 }
 
-#if os(macOS)
 /// Live water: a Core Animation layer tree driven by the render server.
-private struct LiveWater: NSViewRepresentable {
+private struct LiveWater {
     let water: GaugeWater
     let lineWidth: CGFloat
     let variant: AeroVariant
 
-    func makeNSView(context: Context) -> WaterView { WaterView() }
-
-    func updateNSView(_ view: WaterView, context: Context) {
-        let transaction = context.transaction
+    func update(_ view: WaterView, _ transaction: Transaction) {
         view.show(
             water, lineWidth: lineWidth, variant: variant,
             animated: transaction.animation != nil && !transaction.disablesAnimations
@@ -351,7 +344,23 @@ private struct LiveWater: NSViewRepresentable {
     }
 }
 
-/// The live water's layers (y up):
+#if os(macOS)
+typealias WaterHostView = NSView
+
+extension LiveWater: NSViewRepresentable {
+    func makeNSView(context: Context) -> WaterView { WaterView() }
+    func updateNSView(_ view: WaterView, context: Context) { update(view, context.transaction) }
+}
+#else
+typealias WaterHostView = UIView
+
+extension LiveWater: UIViewRepresentable {
+    func makeUIView(context: Context) -> WaterView { WaterView() }
+    func updateUIView(_ view: WaterView, context: Context) { update(view, context.transaction) }
+}
+#endif
+
+/// The live water's layers:
 ///
 /// ```
 /// root (the gauge's ring)
@@ -359,8 +368,8 @@ private struct LiveWater: NSViewRepresentable {
 ///     wave, bubble streams (gauge-sized rings turning clockwise)
 /// ```
 ///
-/// The rings turn only while the window is on screen and Low Power Mode is off.
-final class WaterView: NSView {
+/// The rings turn only while the view is on screen and Low Power Mode is off.
+final class WaterView: WaterHostView {
     private(set) var water: GaugeWater?
     private(set) var variant: AeroVariant = .day
     private(set) var lineWidth: CGFloat = 0
@@ -382,10 +391,8 @@ final class WaterView: NSView {
     // Set and cleared on the main actor; deinit is the last reference, so nothing races.
     nonisolated(unsafe) private var observers: [any NSObjectProtocol] = []
 
-    override init(frame: NSRect) {
+    override init(frame: CGRect) {
         super.init(frame: frame)
-        wantsLayer = true
-        layerContentsRedrawPolicy = .never
         tube.fillColor = nil
         tube.strokeColor = CGColor(gray: 0, alpha: 1)
         tube.lineCap = .round
@@ -394,14 +401,10 @@ final class WaterView: NSView {
         for ring in [waveLayer] + streamLayers {
             content.addSublayer(ring)
         }
-        layer?.addSublayer(content)
+        hostContent()
     }
 
     required init?(coder: NSCoder) { nil }
-
-    override var isFlipped: Bool { false }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override func isAccessibilityElement() -> Bool { false }
 
     /// Shows `water` in a ring `lineWidth` wide. `animated` glides the arc to a new value.
     func show(_ water: GaugeWater, lineWidth: CGFloat, variant: AeroVariant, animated: Bool) {
@@ -413,93 +416,83 @@ final class WaterView: NSView {
         apply(glide: animated && previous != nil && previous?.fraction != water.fraction)
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        apply(glide: false)
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        apply(glide: false)
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        observers = []
-        if let window {
-            let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshMotion() }
-            }
-            observers = [
-                NotificationCenter.default.addObserver(
-                    forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main, using: refresh
-                ),
-                NotificationCenter.default.addObserver(
-                    forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main, using: refresh
-                ),
-            ]
-        }
-        apply(glide: false)
-    }
-
     deinit {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 
+    /// Follows what starts and stops the rings in the current window, then lays out for it.
+    private func windowChanged() {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshMotion() }
+        }
+        observers = motionSignals.map { signal in
+            NotificationCenter.default.addObserver(forName: signal.name, object: signal.object, queue: .main, using: refresh)
+        }
+        apply(glide: false)
+    }
+
     /// Whether the water should move: on screen, Low Power Mode off.
     private var shouldMove: Bool {
-        guard let window, window.occlusionState.contains(.visible) else { return false }
-        return !ProcessInfo.processInfo.isLowPowerModeEnabled
+        isOnScreen && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
     /// Lays out the layers for the current water, size and scale; draws new art if needed.
     private func apply(glide: Bool) {
         guard let water else { return }
         let diameter = min(bounds.width, bounds.height)
-        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         guard let art = WaterArt.art(
-            variant: variant, strong: water.strong, diameter: diameter, lineWidth: lineWidth, scale: scale
+            variant: variant, strong: water.strong, diameter: diameter, lineWidth: lineWidth, scale: displayScale
         ) else { return }
         self.art = art
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // The mask is the tube's exact shape; the art is drawn on whole pixels.
+        layOut(art, diameter: diameter)
+        fill(to: CGFloat(min(max(water.fraction, 0), 1)), glide: glide)
+        CATransaction.commit()
+
+        setMoving(shouldMove)
+    }
+
+    /// The mask is the tube's exact shape; the art is drawn on whole pixels.
+    private func layOut(_ art: WaterArt, diameter: CGFloat) {
         let geometry = TubeGeometry(diameter: diameter, lineWidth: lineWidth)
         let square = CGRect(x: 0, y: 0, width: diameter, height: diameter)
         let center = CGPoint(x: square.midX, y: square.midY)
         content.frame = square.offsetBy(dx: (bounds.width - diameter) / 2, dy: (bounds.height - diameter) / 2)
         tube.frame = square
         tube.lineWidth = lineWidth
-        // From the top, clockwise (y up), like the tube.
+        let top = -Self.clockwise * .pi / 2
         let path = CGMutablePath()
-        path.addArc(center: center, radius: geometry.radius, startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi, clockwise: true)
+        path.addArc(
+            center: center, radius: geometry.radius, startAngle: top, endAngle: top + Self.clockwise * 2 * .pi,
+            clockwise: Self.clockwise < 0
+        )
         tube.path = path
         let side = art.geometry.diameter
         for (ring, image) in zip([waveLayer] + streamLayers, [art.wave] + art.streams) {
             ring.bounds = CGRect(x: 0, y: 0, width: side, height: side)
             ring.position = center
             ring.contents = image
-            ring.contentsScale = scale
+            ring.contentsScale = displayScale
         }
+    }
 
-        let target = CGFloat(min(max(water.fraction, 0), 1))
+    /// Moves the arc's tip to `target`.
+    private func fill(to target: CGFloat, glide: Bool) {
         let from = tube.presentation()?.strokeEnd ?? tube.strokeEnd
         tube.strokeEnd = target
-        if glide, abs(from - target) > 0.0001, shouldMove {
-            let animation = CASpringAnimation(perceptualDuration: Self.glide, bounce: 0)
-            animation.keyPath = "strokeEnd"
-            animation.fromValue = from
-            animation.toValue = target
-            animation.duration = animation.settlingDuration
-            tube.add(animation, forKey: "glide")
-        } else {
+        guard glide, abs(from - target) > 0.0001, shouldMove else {
             tube.removeAnimation(forKey: "glide")
+            return
         }
-        CATransaction.commit()
-
-        setMoving(shouldMove)
+        let animation = CASpringAnimation(perceptualDuration: Self.glide, bounce: 0)
+        animation.keyPath = "strokeEnd"
+        animation.fromValue = from
+        animation.toValue = target
+        animation.duration = animation.settlingDuration
+        tube.add(animation, forKey: "glide")
     }
 
     private func refreshMotion() { setMoving(shouldMove) }
@@ -514,10 +507,9 @@ final class WaterView: NSView {
         guard moving else { return }
         var random = SplitMix64(seed: UInt64.random(in: .min ... .max))
         for (ring, period) in rings {
-            // Clockwise (y up): toward the tip of the arc.
             let animation = CABasicAnimation(keyPath: "transform.rotation.z")
             animation.fromValue = 0
-            animation.toValue = -2 * CGFloat.pi
+            animation.toValue = Self.clockwise * 2 * CGFloat.pi
             animation.duration = period
             animation.repeatCount = .infinity
             animation.timeOffset = random.unit(in: 0...period)
@@ -525,5 +517,80 @@ final class WaterView: NSView {
             ring.add(animation, forKey: "flow")
         }
     }
+
+    #if os(macOS)
+    /// The sign of a clockwise angle: layers on the Mac have y up.
+    private static let clockwise: CGFloat = -1
+
+    private var displayScale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
+
+    private var isOnScreen: Bool { window?.occlusionState.contains(.visible) ?? false }
+
+    private var motionSignals: [(name: Notification.Name, object: AnyObject?)] {
+        guard let window else { return [] }
+        return [(NSWindow.didChangeOcclusionStateNotification, window), (.NSProcessInfoPowerStateDidChange, nil)]
+    }
+
+    private func hostContent() {
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+        layer?.addSublayer(content)
+    }
+
+    override var isFlipped: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { false }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        apply(glide: false)
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        apply(glide: false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        windowChanged()
+    }
+    #else
+    /// The sign of a clockwise angle: layers on iOS have y down.
+    private static let clockwise: CGFloat = 1
+
+    private var displayScale: CGFloat { traitCollection.displayScale }
+
+    /// iOS drops layer animations in the background, so the rings stop there and start again
+    /// when the scene comes back.
+    private var isOnScreen: Bool {
+        guard let state = window?.windowScene?.activationState else { return false }
+        return state == .foregroundActive || state == .foregroundInactive
+    }
+
+    private var motionSignals: [(name: Notification.Name, object: AnyObject?)] {
+        guard let scene = window?.windowScene else { return [] }
+        return [
+            (UIScene.didActivateNotification, scene),
+            (UIScene.didEnterBackgroundNotification, scene),
+            (.NSProcessInfoPowerStateDidChange, nil),
+        ]
+    }
+
+    private func hostContent() {
+        isUserInteractionEnabled = false
+        layer.addSublayer(content)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard content.bounds.size != bounds.size else { return }
+        apply(glide: false)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        windowChanged()
+    }
+    #endif
 }
-#endif

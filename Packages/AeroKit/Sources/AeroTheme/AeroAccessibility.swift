@@ -64,7 +64,7 @@ extension EnvironmentValues {
         set { self[AeroLiquidGlassKey.self] = newValue }
     }
 
-    /// Whether the gauge water moves. The live water is an AppKit view, which `ImageRenderer`
+    /// Whether the gauge water moves. The live water is a platform view, which `ImageRenderer`
     /// cannot draw, so the showcase render test turns it off and the gauges show still water.
     var aeroAnimatedWater: Bool {
         get { self[AeroAnimatedWaterKey.self] }
