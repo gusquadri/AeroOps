@@ -278,6 +278,19 @@ struct SigningPolicyTests {
         #expect(verifier.callCount == 4)
     }
 
+    @Test func anUnlockedSessionAsksOnlyForEverySignatureKeys() async {
+        let verifier = ScriptedVerifier(answer: true)
+        let authorizer = PolicySigningAuthorizer(verifier: verifier, sessionApproved: true)
+        #expect(await authorizer.authorize(request(policy: .oncePerSession)) == .allow)
+        #expect(verifier.callCount == 0)
+        #expect(await authorizer.authorize(request(policy: .everySignature)) == .allow)
+        #expect(verifier.callCount == 1)
+
+        await authorizer.endSession()
+        #expect(await authorizer.authorize(request(policy: .oncePerSession)) == .allow)
+        #expect(verifier.callCount == 2)
+    }
+
     @Test func oncePerSessionDenialIsNotRemembered() async {
         let verifier = ScriptedVerifier(answer: false)
         let authorizer = PolicySigningAuthorizer(verifier: verifier)

@@ -32,7 +32,7 @@ extension SigningPolicy {
         #else
         switch self {
         case .always: return "Signs in without asking. Only AeroOps can use the key."
-        case .oncePerSession: return "\(auth) or the passcode the first time the key signs, then not again until AeroOps quits."
+        case .oncePerSession: return "Unlocking AeroOps approves the key, so it signs without asking until AeroOps quits."
         case .everySignature: return "\(auth) or the passcode for every new SSH connection."
         }
         #endif

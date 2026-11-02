@@ -84,18 +84,19 @@ final class MobileModel {
     /// `paths` roots every file; `keychain`, `passwordKeychain` and `hostKeyKeychain` hold the
     /// keys, passwords and pins (the Keychain the Mac app shares in the app, memory in previews).
     init(
-        paths: AeroPaths = .standard, hostStore: HostStore, keychain: any KeychainStore,
-        passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore
+        paths: AeroPaths, hostStore: HostStore, keychain: any KeychainStore,
+        passwordKeychain: any KeychainStore, hostKeyKeychain: any KeychainStore, unlocked: Bool = false
     ) {
         self.hostStore = hostStore
         let passwords = HostPasswordVault(keychain: passwordKeychain)
         self.passwords = passwords
         hostKeys = HostKeyStore(keychain: hostKeyKeychain, knownHostsFile: paths.knownHosts, scanner: EmbeddedHostKeyScanner())
         gate = PasswordAttemptGate { passwords.hasPassword(for: $0) }
-        authorizer = .localAuthentication()
+        authorizer = .localAuthentication(sessionApproved: unlocked)
         do {
             let keyStore = try KeyStore(keychain: keychain, paths: paths)
             self.keyStore = keyStore
+    /// `unlocked` says the user has just authenticated, which covers "once per session" keys.
             client = EmbeddedSSHClient(
                 hostKeys: hostKeys,
                 credentials: EmbeddedSSHCredentials(keyStore: keyStore, passwords: passwords, authorizer: authorizer),
@@ -113,7 +114,8 @@ final class MobileModel {
     static func live() -> MobileModel {
         MobileModel(
             hostStore: .system(), keychain: KeyStore.systemKeychain(),
-            passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain()
+            passwordKeychain: HostPasswordVault.systemKeychain(), hostKeyKeychain: HostKeyStore.systemKeychain(),
+            unlocked: true
         )
     }
 

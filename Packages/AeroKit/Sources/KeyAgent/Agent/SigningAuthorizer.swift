@@ -90,18 +90,24 @@ public protocol UserPresenceVerifier: Sendable {
 /// "Once per session" approvals are remembered per key until ``endSession()`` (call it when the
 /// Mac locks or sleeps) or ``forgetSessionApproval(for:)``. Concurrent first requests for the same
 /// key share one prompt. Requests from untrusted peers never use or create session approvals.
+/// `sessionApproved` starts a session whose user has already authenticated (the iOS app's unlock):
+/// its "once per session" keys sign without a prompt of their own until ``endSession()``.
 public actor PolicySigningAuthorizer: SigningAuthorizer {
     private let verifier: any UserPresenceVerifier
+    private var sessionApproved: Bool
     private var approvedKeys: Set<UUID> = []
     private var pendingApprovals: [UUID: Task<Bool, Never>] = [:]
 
-    public init(verifier: any UserPresenceVerifier) {
+    public init(verifier: any UserPresenceVerifier, sessionApproved: Bool = false) {
         self.verifier = verifier
+        self.sessionApproved = sessionApproved
     }
 
     /// Touch ID via LocalAuthentication; no answer within `timeout` means deny.
-    public static func localAuthentication(timeout: Duration = .seconds(60)) -> PolicySigningAuthorizer {
-        PolicySigningAuthorizer(verifier: LocalAuthenticationVerifier(timeout: timeout))
+    public static func localAuthentication(
+        timeout: Duration = .seconds(60), sessionApproved: Bool = false
+    ) -> PolicySigningAuthorizer {
+        PolicySigningAuthorizer(verifier: LocalAuthenticationVerifier(timeout: timeout), sessionApproved: sessionApproved)
     }
 
     public func authorize(_ request: SignRequest) async -> SigningDecision {
@@ -122,31 +128,34 @@ public actor PolicySigningAuthorizer: SigningAuthorizer {
     }
 
     private func authorize(_ requirement: UserPresenceRequirement, keyID: UUID, reason: String) async -> SigningDecision {
+        let approved: Bool
         switch requirement {
-        case .none:
-            return .allow
-        case .everySignature:
-            let approved = await verifier.verifyUserPresence(reason: reason)
-            return approved ? .allow : .deny(reason: "user presence not confirmed")
-        case .oncePerSession:
-            if approvedKeys.contains(keyID) { return .allow }
-            let pending: Task<Bool, Never>
-            if let existing = pendingApprovals[keyID] {
-                pending = existing
-            } else {
-                let verifier = verifier
-                pending = Task { await verifier.verifyUserPresence(reason: reason) }
-                pendingApprovals[keyID] = pending
-            }
-            let approved = await pending.value
-            if pendingApprovals[keyID] == pending { pendingApprovals[keyID] = nil }
-            if approved { approvedKeys.insert(keyID) }
-            return approved ? .allow : .deny(reason: "user presence not confirmed")
+        case .none: approved = true
+        case .everySignature: approved = await verifier.verifyUserPresence(reason: reason)
+        case .oncePerSession: approved = await approveOnce(keyID: keyID, reason: reason)
         }
+        return approved ? .allow : .deny(reason: "user presence not confirmed")
+    }
+
+    private func approveOnce(keyID: UUID, reason: String) async -> Bool {
+        if hasSessionApproval(for: keyID) { return true }
+        let pending = pendingApprovals[keyID] ?? askOnce(keyID: keyID, reason: reason)
+        let approved = await pending.value
+        if pendingApprovals[keyID] == pending { pendingApprovals[keyID] = nil }
+        if approved { approvedKeys.insert(keyID) }
+        return approved
+    }
+
+    private func askOnce(keyID: UUID, reason: String) -> Task<Bool, Never> {
+        let verifier = verifier
+        let pending = Task { await verifier.verifyUserPresence(reason: reason) }
+        pendingApprovals[keyID] = pending
+        return pending
     }
 
     /// Forgets every "once per session" approval.
     public func endSession() {
+        sessionApproved = false
         approvedKeys.removeAll()
     }
 
@@ -157,7 +166,7 @@ public actor PolicySigningAuthorizer: SigningAuthorizer {
 
     /// Whether a key currently has a session approval.
     public func hasSessionApproval(for keyID: UUID) -> Bool {
-        approvedKeys.contains(keyID)
+        sessionApproved || approvedKeys.contains(keyID)
     }
 }
 
