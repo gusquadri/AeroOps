@@ -35,7 +35,8 @@ public struct PseudoTerminalSize: Sendable, Hashable {
 ///
 /// Bytes from the remote side arrive on ``incoming`` in order; ``send(_:)`` queues bytes for it.
 /// The session ends with ``close()``, when the remote program exits, or when its connection
-/// closes (``EmbeddedSSHClient/disconnect(_:)``, ``EmbeddedSSHClient/disconnectAll()``).
+/// closes (``EmbeddedSSHClient/disconnect(_:)``, ``EmbeddedSSHClient/disconnectAll()``, a failed
+/// ``isResponsive(within:)``).
 /// Dropping ``incoming`` closes it too.
 public final class EmbeddedSSHChannel: RemoteByteChannel {
     private let child: any Channel
@@ -79,6 +80,15 @@ public final class EmbeddedSSHChannel: RemoteByteChannel {
 
     public func waitForEnd() async -> SSHError? {
         await state.waitForEnd()
+    }
+
+    /// Whether the session's connection still answers within `timeout`. One that does not is
+    /// closed, which ends every session on it, so the next one connects afresh.
+    public func isResponsive(within timeout: Duration) async -> Bool {
+        guard let connection = child.parent else { return false }
+        let answered = await connection.answersPing(within: timeout)
+        if !answered { connection.close(promise: nil) }
+        return answered
     }
 }
 

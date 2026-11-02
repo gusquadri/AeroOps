@@ -48,6 +48,25 @@ struct EmbeddedSSHSessionTests {
         await fixture.tearDown()
     }
 
+    @Test("Going to the background keeps a session's connection; one that stops answering fails the probe and ends")
+    func backgroundAndProbe() async throws {
+        let fixture = try await Fixture()
+        let channel = try await fixture.client.openSubsystem("echo", on: fixture.host)
+        await fixture.client.closeIdleConnections()
+        #expect(await channel.isResponsive(within: .seconds(5)))
+        channel.send(Data("still here".utf8))
+        channel.closeInput()
+        #expect(await collect(channel) == "still here")
+
+        let stuck = try await fixture.client.openSubsystem("echo", on: fixture.host)
+        await fixture.server.stopAnswering()
+        let started = ContinuousClock.now
+        #expect(await stuck.isResponsive(within: .milliseconds(300)) == false)
+        #expect(.now - started < .seconds(3))
+        #expect(await stuck.waitForEnd() == .connectionClosed)
+        await fixture.tearDown()
+    }
+
     @Test("A missing subsystem is refused; a server that never answers times out; bad names never connect")
     func refusals() async throws {
         let fixture = try await Fixture()

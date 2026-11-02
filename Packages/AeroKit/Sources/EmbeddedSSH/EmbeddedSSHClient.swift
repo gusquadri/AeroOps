@@ -24,7 +24,8 @@ import SSHKit
 /// (``openTerminal(on:term:size:command:timeout:)``).
 ///
 /// Each host's connection stays open between commands (``ConnectionPool``). Call
-/// ``disconnectAll()`` when the app goes to the background; that ends the sessions too.
+/// ``closeIdleConnections()`` when the app goes to the background: connections that carry a
+/// session (a shell, an SFTP browser) stay open. ``disconnectAll()`` ends the sessions too.
 ///
 /// Limits (swift-nio-ssh's): Ed25519 and ECDSA P-256 keys only (no RSA); servers must offer
 /// curve25519 or ECDH key exchange, AES-GCM and an Ed25519 or ECDSA host key; password logins use
@@ -271,9 +272,15 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
         await pool.disconnect(id)
     }
 
-    /// Closes every connection, e.g. when the app moves to the background.
+    /// Closes every connection; the sessions on them end.
     public func disconnectAll() async {
         await pool.disconnectAll()
+    }
+
+    /// Closes the connections no command or session is using, e.g. when the app moves to the
+    /// background. The next command connects again.
+    public func closeIdleConnections() async {
+        await pool.closeIdle()
     }
 
     // MARK: - Internals

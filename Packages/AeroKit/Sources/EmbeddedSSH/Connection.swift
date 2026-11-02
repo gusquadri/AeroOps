@@ -41,6 +41,9 @@ final class SSHConnection: Sendable {
         sessions.withLock { $0 = max(0, $0 - 1) }
     }
 
+    /// No command or session holds a slot on it.
+    var isIdle: Bool { sessions.withLock { $0 == 0 } }
+
     /// Connects and logs in. Throws NIO's and NIOSSH's errors as they are, and whatever the
     /// delegates fail with (classify them with ``EmbeddedSSHErrors/classify(_:)``).
     ///
@@ -123,6 +126,39 @@ final class SSHConnection: Sendable {
         let child = try await opened.futureResult.get()
         child.closeFuture.whenComplete { _ in self.release() }
         return child
+    }
+}
+
+extension Channel {
+    /// Whether the SSH connection on this channel answers within `timeout`. It asks to cancel a
+    /// port forward that was never set up, which servers refuse at once: like OpenSSH's
+    /// `ServerAliveInterval` request, any answer, a refusal too, proves the server is still there.
+    /// A socket iOS left half-open in the background looks active until TCP keepalive gives up.
+    func answersPing(within timeout: Duration) async -> Bool {
+        let answered = eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
+        let deadline = eventLoop.scheduleTask(in: TimeAmount(timeout)) { answered.fail(SSHError.timeout) }
+        defer { deadline.cancel() }
+        eventLoop.execute { [self] in
+            do {
+                let handler = try pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+                handler.sendTCPForwardingRequest(.cancel(host: "localhost", port: 0), promise: answered)
+            } catch {
+                answered.fail(error)
+            }
+        }
+        do {
+            _ = try await answered.futureResult.get()
+            return true
+        } catch {
+            return (error as? NIOSSHError)?.type == .globalRequestRefused
+        }
+    }
+}
+
+extension TimeAmount {
+    init(_ duration: Duration) {
+        let (seconds, attoseconds) = duration.components
+        self = .nanoseconds(seconds * 1_000_000_000 + attoseconds / 1_000_000_000)
     }
 }
 

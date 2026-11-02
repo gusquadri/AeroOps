@@ -14,6 +14,7 @@ struct AeroOpsMobileApp: App {
     /// The sample servers, while they are shown in place of the user's.
     @State private var sample: MobileModel? = MobileDebugOptions.isDemo ? .preview() : nil
     @State private var lock = AppLockController()
+    @State private var grace = BackgroundGrace()
     @Environment(\.scenePhase) private var scenePhase
 
     private var model: MobileModel? { sample ?? live }
@@ -71,14 +72,17 @@ struct AeroOpsMobileApp: App {
     }
 
     /// `inactive` changes nothing but the cover: prompts, sheets and Control Center must not lock
-    /// the app or close its sessions.
+    /// the app or close its sessions. In the background the open shells keep running for the
+    /// grace period iOS grants; the lock covers them meanwhile.
     private func sceneChanged(to phase: ScenePhase) {
         switch phase {
         case .active:
+            grace.end()
             resume()
         case .inactive:
             lock.sceneChanged(to: .inactive)
         case .background:
+            grace.begin()
             lock.sceneChanged(to: .background)
             model?.setActive(false)
         @unknown default:
@@ -102,7 +106,8 @@ struct AeroOpsMobileApp: App {
     }
 
     /// Swaps in fresh sample servers, or goes back to the user's, through the lock when it is
-    /// locked. The user's model stays paused (no polling, no connections) while the samples are shown.
+    /// locked. The user's model stays paused (no polling, only its sessions' connections) while the
+    /// samples are shown.
     private func showSampleServers(_ show: Bool) {
         if show {
             live?.setActive(false)

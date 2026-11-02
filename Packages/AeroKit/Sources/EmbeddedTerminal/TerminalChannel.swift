@@ -10,12 +10,17 @@ public protocol TerminalChannel: RemoteByteChannel {
     func resize(_ size: PseudoTerminalSize)
     /// The remote program's exit status, once it ended with one.
     var exitStatus: Int32? { get }
+    /// Whether the connection under the channel still answers within `timeout`; when it does not,
+    /// the channel ends.
+    func isResponsive(within timeout: Duration) async -> Bool
 }
 
 extension EmbeddedSSHChannel: TerminalChannel {}
 
-/// Where the surface's keys and size go: the channel, once it is open. Keys typed while it
-/// opens wait (up to ``pendingLimit``) and the latest size is applied when it opens.
+/// Where the surface's keys and size go: the channel, while one is attached. Keys typed while
+/// one opens wait (up to ``pendingLimit``) and the latest size is applied when it opens; keys
+/// typed between channels (after ``detach()``, before ``expectChannel()``) are dropped. A surface
+/// keeps its link across reconnects, so each new shell gets the surface's size.
 ///
 /// Called from libghostty's callbacks on the main thread and from the session's task.
 final class TerminalLink: Sendable {
@@ -26,7 +31,7 @@ final class TerminalLink: Sendable {
         var channel: (any TerminalChannel)?
         var pending = Data()
         var size: PseudoTerminalSize
-        var isClosed = false
+        var isWaiting = true
     }
 
     private let state: Mutex<State>
@@ -42,10 +47,10 @@ final class TerminalLink: Sendable {
 
     func write(_ data: Data) {
         state.withLock { state in
-            guard !state.isClosed, !data.isEmpty else { return }
+            guard !data.isEmpty else { return }
             if let channel = state.channel {
                 channel.send(data)
-            } else {
+            } else if state.isWaiting {
                 state.pending.append(data.prefix(max(0, Self.pendingLimit - state.pending.count)))
             }
         }
@@ -59,26 +64,29 @@ final class TerminalLink: Sendable {
         }
     }
 
+    /// A channel is opening: keep the keys typed until it is attached.
+    func expectChannel() {
+        state.withLock { $0.isWaiting = true }
+    }
+
     /// Hands over the opened channel: sends the waiting keys, and the size if it changed since
-    /// the channel was opened with `size`. A closed link closes the channel instead.
+    /// the channel was opened with `size`.
     func attach(_ channel: any TerminalChannel, openedWith size: PseudoTerminalSize) {
-        let attached = state.withLock { state in
-            guard !state.isClosed else { return false }
+        state.withLock { state in
             state.channel = channel
+            state.isWaiting = false
             if state.size != size { channel.resize(state.size) }
             if !state.pending.isEmpty {
                 channel.send(state.pending)
                 state.pending = Data()
             }
-            return true
         }
-        if !attached { channel.close() }
     }
 
-    /// Closes the channel; later keys are dropped.
-    func close() {
+    /// Closes the channel, if any; keys are dropped until the next ``expectChannel()``.
+    func detach() {
         let channel = state.withLock { state in
-            state.isClosed = true
+            state.isWaiting = false
             state.pending = Data()
             defer { state.channel = nil }
             return state.channel

@@ -66,6 +66,8 @@ final class DemoTerminalChannel: TerminalChannel {
 
     func waitForEnd() async -> SSHError? { nil }
 
+    func isResponsive(within timeout: Duration) async -> Bool { true }
+
     private func answer(_ command: String) {
         emit("\r\n")
         switch command.split(separator: " ").first.map(String.init) {

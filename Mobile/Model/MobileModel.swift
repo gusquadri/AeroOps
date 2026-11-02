@@ -34,9 +34,10 @@ struct MobileTerminal: Identifiable {
 ///   host, over the same embedded client and host-key checks.
 /// - Containers: the Mac app's ``ContainerService`` with the embedded client as its runner.
 ///
-/// Activity follows the scene: polling every 5 s while the app is active, paused (and every
-/// connection closed) in the background, since iOS suspends the app and drops its sockets. An
-/// open terminal then shows that it was disconnected and offers to reconnect.
+/// Activity follows the scene: polling every 5 s while the app is active, paused in the
+/// background, where only connections that carry a session (a shell, an SFTP browser) stay open.
+/// iOS suspends the app after a short grace period and may drop those sockets; on return, open
+/// terminals check their connection and reconnect in place (``EmbeddedTerminalSession/resume(probeTimeout:)``).
 @MainActor
 @Observable
 final class MobileModel {
@@ -157,8 +158,8 @@ final class MobileModel {
         coordinator.setHosts(hosts)
     }
 
-    /// Follows the scene phase: active polls every 5 s and refreshes at once; background pauses
-    /// and closes every connection (iOS would drop them anyway).
+    /// Follows the scene phase: active polls every 5 s, refreshes at once and resumes the open
+    /// terminals; background pauses and closes the connections no session is using.
     func setActive(_ active: Bool) {
         let next: MonitorActivity = active ? .visible : .paused
         guard next != activity else { return }
@@ -166,9 +167,16 @@ final class MobileModel {
         coordinator?.setActivity(next)
         if active {
             coordinator?.refreshAll()
+            resumeTerminals()
             Task { await keychainMayHaveChanged() }
         } else if let client {
-            Task { await client.disconnectAll() }
+            Task { await client.closeIdleConnections() }
+        }
+    }
+
+    private func resumeTerminals() {
+        for terminal in terminals {
+            Task { await terminal.session.resume() }
         }
     }
 

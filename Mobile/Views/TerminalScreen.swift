@@ -5,8 +5,8 @@ import SwiftUI
 
 /// A shell on one host in a libghostty surface, with libghostty's key bar above the keyboard.
 /// It connects when first shown and stays open after the screen is closed, until End Session. A
-/// connection that drops (the app went to the background, the network changed) leaves the last
-/// screen up with Reconnect.
+/// connection that drops (the network changed, iOS suspended the app too long) leaves the screen
+/// and scrollback up with Reconnect; coming back to the app reconnects by itself.
 struct TerminalScreen: View {
     let id: MobileTerminal.ID
     @Environment(MobileModel.self) private var model
@@ -45,7 +45,7 @@ private struct TerminalSessionView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu("Session", systemImage: "ellipsis.circle") {
                         Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnect() }
-                            .disabled(session.state == .connecting)
+                            .disabled(session.state == .connecting || session.state == .reconnecting)
                         Button("End Session", systemImage: "xmark", role: .destructive, action: onEnd)
                     }
                 }
@@ -64,15 +64,9 @@ private struct TerminalSessionView: View {
     private var overlay: some View {
         switch session.state {
         case .connecting:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Connecting to \(host.name)…")
-                    .font(Aero.font(.callout))
-                    .foregroundStyle(Aero.text.primary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Aero.glass.fill, in: .capsule)
+            progress("Connecting to \(host.name)…")
+        case .reconnecting:
+            progress("Reconnecting to \(host.name)…")
         case .running:
             EmptyView()
         case .ended(let status):
@@ -87,13 +81,25 @@ private struct TerminalSessionView: View {
                 systemImage: "bolt.horizontal.circle.fill",
                 tint: Aero.sun,
                 title: "Disconnected",
-                message: "The connection to \(host.name) closed. AeroOps disconnects while it is in the background."
+                message: "The connection to \(host.name) closed. The screen stays; Reconnect opens a new shell below it."
             )
         case .failed(let error):
             SessionIssueView(host: host, error: error, retryTitle: "Reconnect") { session.reconnect() }
                 .padding(16)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
+    }
+
+    private func progress(_ title: String) -> some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text(title)
+                .font(Aero.font(.callout))
+                .foregroundStyle(Aero.text.primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Aero.glass.fill, in: .capsule)
     }
 
     private func notice(systemImage: String, tint: Color, title: String, message: String) -> some View {

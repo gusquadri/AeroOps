@@ -137,6 +137,7 @@ private extension EmbeddedTerminalSession.State {
     var title: String {
         switch self {
         case .connecting: "Connecting"
+        case .reconnecting: "Reconnecting"
         case .running: "Connected"
         case .ended: "Ended"
         case .disconnected: "Disconnected"
@@ -147,7 +148,7 @@ private extension EmbeddedTerminalSession.State {
     var orbTone: OrbTone {
         switch self {
         case .running: .healthy
-        case .connecting, .ended: .neutral
+        case .connecting, .reconnecting, .ended: .neutral
         case .disconnected: .warning
         case .failed: .error
         }

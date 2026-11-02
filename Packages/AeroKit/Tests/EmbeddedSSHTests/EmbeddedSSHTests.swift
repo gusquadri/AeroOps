@@ -354,6 +354,26 @@ struct ConnectionPoolTests {
         await server.close()
     }
 
+    @Test("Closing idle connections keeps the ones a session holds")
+    func closesIdleOnly() async throws {
+        let server = try await SilentServer()
+        let pool = ConnectionPool { _ in try await server.connection() }
+        let busyHost = RemoteHost.test(port: server.port)
+        let idleHost = RemoteHost.test(port: server.port)
+        let busy = try await pool.reserve(for: busyHost).connection
+        let idle = try await pool.reserve(for: idleHost).connection
+        idle.release()
+
+        await pool.closeIdle()
+        try await idle.channel.closeFuture.get()
+        #expect(busy.isActive)
+        let again = try await pool.reserve(for: busyHost)
+        #expect(again.connection === busy)
+        #expect(again.reused)
+        await pool.disconnectAll()
+        await server.close()
+    }
+
     @Test("A failed login fails every caller waiting for it; the next call tries again")
     func sharesFailures() async throws {
         let logins = Counter()

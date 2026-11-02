@@ -69,6 +69,12 @@ final class TestSSHServer: Sendable {
         try? await channel.close()
         for child in accepted.all { try? await child.close() }
     }
+
+    /// Stops reading from the connections accepted so far, like a server behind a socket iOS left
+    /// half-open: they stay up but nothing they are sent gets an answer. New connections work.
+    func stopAnswering() async {
+        for child in accepted.all { try? await child.setOption(ChannelOptions.autoRead, value: false) }
+    }
 }
 
 private final class AcceptedChannels: Sendable {

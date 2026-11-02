@@ -39,17 +39,21 @@ struct EmbeddedTerminalTests {
     }
 
     private func waitFor(_ session: EmbeddedTerminalSession, _ isDone: (EmbeddedTerminalSession.State) -> Bool) async throws {
+        try await waitFor("still \(session.state)") { isDone(session.state) }
+    }
+
+    private func waitFor(_ failure: @autoclosure () -> String = "timed out", _ isDone: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(10)
-        while !isDone(session.state) {
+        while !isDone() {
             guard ContinuousClock.now < deadline else {
-                Issue.record("still \(session.state)")
+                Issue.record(Comment(rawValue: failure()))
                 return
             }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
 
-    @Test("Keys typed while it opens are sent, the size follows the surface, the shell's exit ends it")
+    @Test("Keys typed while it opens are sent, the size follows the surface, the shell's exit ends it and its surface")
     func shell() async throws {
         let fixture = try await Fixture()
         let session = fixture.session()
@@ -74,10 +78,16 @@ struct EmbeddedTerminalTests {
             PseudoTerminalSize(columns: 100, rows: 30),
         ])
         #expect(session.io?.pendingOutputByteCount == "$ ls\rexit\r".utf8.count)
+        #expect(session.surface == .finished)
+
+        session.connect()
+        #expect(session.connection == 2)
+        #expect(session.state == .connecting)
+        try await waitFor(session) { $0 == .running }
         await fixture.tearDown()
     }
 
-    @Test("A dropped connection shows as disconnected; reconnect opens a new shell at the last size")
+    @Test("A dropped connection shows as disconnected and drops keys; reconnect opens a new shell in the same surface at the last size")
     func reconnect() async throws {
         let fixture = try await Fixture()
         let session = fixture.session()
@@ -92,10 +102,20 @@ struct EmbeddedTerminalTests {
         await fixture.client.disconnect(fixture.host.id)
         try await waitFor(session) { $0.isOver }
         #expect(session.state == .disconnected)
+        #expect(session.surface == .used)
+        let io = try #require(session.io)
+        let shown = io.pendingOutputByteCount
+        session.link?.write(Data("lost\r".utf8))
 
         session.reconnect()
-        #expect(session.connection == first + 1)
+        #expect(session.connection == first)
+        #expect(session.state == .reconnecting)
         try await waitFor(session) { $0 == .running }
+        #expect(session.io === io)
+        let expected = shown + EmbeddedTerminalSession.reconnectedNote.count + "$ ".utf8.count
+        try await waitFor { io.pendingOutputByteCount >= expected }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(io.pendingOutputByteCount == expected)
         #expect(fixture.server.log.terminals.map(\.size) == [
             EmbeddedTerminalSession.initialSize, PseudoTerminalSize(columns: 90, rows: 20),
         ])
@@ -117,16 +137,52 @@ struct EmbeddedTerminalTests {
 
         try await fixture.env.hostKeys.trust(fixture.server.hostKey, for: fixture.host)
         session.reconnect()
+        #expect(session.state == .connecting)
         try await waitFor(session) { $0 == .running }
         await fixture.tearDown()
     }
 
-    @Test("Errors from the opener become SSHError; closing while it opens drops the late channel")
+    @Test("Coming back, a dropped terminal and one whose server stopped answering reconnect in place")
+    func resume() async throws {
+        let fixture = try await Fixture()
+        let session = fixture.session()
+        session.connect()
+        try await waitFor(session) { $0 == .running }
+        let io = try #require(session.io)
+
+        await session.resume()
+        #expect(session.state == .running)
+        #expect(fixture.server.log.terminals.count == 1)
+
+        await fixture.server.stopAnswering()
+        await session.resume(probeTimeout: .milliseconds(300))
+        #expect(session.state == .reconnecting)
+        try await waitFor(session) { $0 == .running }
+        #expect(fixture.server.log.terminals.count == 2)
+
+        await fixture.client.disconnect(fixture.host.id)
+        try await waitFor(session) { $0 == .disconnected }
+        await session.resume()
+        try await waitFor(session) { $0 == .running }
+        #expect(fixture.server.log.terminals.count == 3)
+        #expect(session.io === io)
+        #expect(session.connection == 1)
+        await fixture.tearDown()
+    }
+
+    @Test("Errors from the opener become SSHError and are not retried on resume; closing while it opens drops the late channel")
     func openerErrors() async throws {
-        let failing = EmbeddedTerminalSession { _ in throw SSHError.authFailed }
+        let attempts = Counter()
+        let failing = EmbeddedTerminalSession { _ in
+            attempts.increment()
+            throw SSHError.authFailed
+        }
         failing.connect()
         try await waitFor(failing) { $0.isOver }
         #expect(failing.state == .failed(.authFailed))
+        await failing.resume()
+        #expect(failing.state == .failed(.authFailed))
+        #expect(attempts.value == 1)
 
         let channel = FakeChannel()
         // An opener that finishes even when cancelled, like a connection that was already up.
@@ -162,4 +218,6 @@ private final class FakeChannel: TerminalChannel {
     }
 
     func waitForEnd() async -> SSHError? { nil }
+
+    func isResponsive(within timeout: Duration) async -> Bool { true }
 }

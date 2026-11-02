@@ -70,6 +70,18 @@ actor ConnectionPool {
         for id in entries.keys { drop(id) }
     }
 
+    /// Closes the connections no command or session is using. Busy ones stay open, and so do
+    /// logins still in progress.
+    func closeIdle() {
+        for id in entries.keys {
+            entries[id]?.connections.removeAll { connection in
+                guard connection.isIdle else { return false }
+                connection.close()
+                return true
+            }
+        }
+    }
+
     private func newEntry(_ key: Key) -> Entry {
         generations += 1
         return Entry(key: key, generation: generations)
