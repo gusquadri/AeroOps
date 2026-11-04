@@ -3,7 +3,7 @@ import AeroTheme
 import SwiftUI
 
 /// Every host's card; tap one for its details, or its buttons for its files and terminal. Pull
-/// to poll every host now.
+/// to poll every host now. The info menu links to the privacy policy and the source code.
 struct DashboardScreen: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
@@ -22,6 +22,12 @@ struct DashboardScreen: View {
                     if isShowingSamples, let showSampleServers {
                         ToolbarItem(placement: .topBarLeading) {
                             Button("Exit Samples") { showSampleServers(false) }
+                        }
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu("About AeroOps", systemImage: "info.circle") {
+                            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
+                            Link("Source Code", destination: AppLinks.sourceCode)
                         }
                     }
                     ToolbarItem(placement: .primaryAction) {
