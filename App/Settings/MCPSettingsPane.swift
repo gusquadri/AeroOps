@@ -119,10 +119,7 @@ struct ConnectAgentSection: View {
                 ForEach(MCPClientConfig.Client.allCases) { client in
                     snippet(client, path: path)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    note("T3 Code runs Claude Code or Codex underneath and uses their MCP settings: add AeroOps there and it appears in T3 Code too.")
-                    note("AeroOps never edits an agent's config files; copy the snippet and add it yourself. If you move AeroOps.app, copy it again.")
-                }
+                note("AeroOps never edits an agent's config files; copy the snippet and add it yourself. If you move AeroOps.app, copy it again.")
             }
         }
     }

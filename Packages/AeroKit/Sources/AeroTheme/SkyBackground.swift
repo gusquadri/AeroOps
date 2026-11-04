@@ -323,7 +323,7 @@ struct SkyPainter: Sendable, Equatable {
 
     // MARK: Night
 
-    /// Nightly Frutiger Aero: the day's composition after dark, after the T3 Code nightly icon.
+    /// Nightly Frutiger Aero: the day's composition after dark.
     /// The sun becomes a moon bloom, the hills violet cloud banks with lit crests, the white
     /// ribbons an aqua and violet aurora, and the sparkles four-point stars over a star field.
     private func paintNight(in context: inout GraphicsContext, size: CGSize) {
