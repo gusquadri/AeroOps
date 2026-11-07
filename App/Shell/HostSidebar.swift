@@ -28,6 +28,7 @@ struct HostSidebar: View {
                 }
             }
         }
+        .id(model.hostSearch.isEmpty)
         .overlay {
             if model.hosts.isEmpty || model.searchedHosts.isEmpty {
                 Text(model.hosts.isEmpty ? "No hosts yet" : "No matching hosts")
@@ -373,13 +374,18 @@ struct HostRow: View {
     let state: HostDisplayState
     var keyBlock: HostKeyBlock?
 
+    private let orbSize: CGFloat = 10
+    private let orbSpacing: CGFloat = 8
+
     var body: some View {
-        HStack(spacing: 8) {
-            StatusOrb(tone: state.orbTone(blocked: keyBlock != nil), size: 10)
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: orbSpacing) {
+                StatusOrb(tone: state.orbTone(blocked: keyBlock != nil), size: orbSize)
                 Text(host.name)
                     .font(Aero.font(.body, weight: .medium))
                     .lineLimit(1)
+            }
+            Group {
                 if let keyBlock {
                     AeroTag("Key changed", systemImage: "exclamationmark.octagon.fill", tint: Aero.coral)
                         .help(keyBlock.helpText)
@@ -388,6 +394,7 @@ struct HostRow: View {
                     TagRow(tags: host.tags)
                 }
             }
+            .padding(.leading, orbSize + orbSpacing)
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)

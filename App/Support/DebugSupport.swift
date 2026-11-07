@@ -175,6 +175,7 @@ enum DebugLaunchOptions {
         "workloads": { _ in await WorkloadsSelfTest().runAndQuit() },
         "host-search": { _ in HostSearchSelfTest().runAndQuit() },
         "termius-import": { _ in await TermiusImportSelfTest().runAndQuit() },
+        "sidebar": { await SidebarSelfTest(model: $0).runAndQuit() },
     ]
 
     @MainActor
