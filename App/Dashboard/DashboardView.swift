@@ -7,6 +7,10 @@ import SwiftUI
 /// Dashboard tab: one card per host matching the sidebar's search field, fed live by
 /// ``MonitorService``, and the selected host's details in an inspector.
 ///
+/// Without a search, folders come first as tiles, then the hosts in no folder; clicking a tile
+/// shows that folder's hosts. Drag a card onto another to reorder, onto a tile to move it into
+/// that folder, or onto "All Hosts" to take it out; drag tiles to reorder folders.
+///
 /// Each card observes only its own ``HostDisplayState``, so a poll result redraws one card.
 /// Selecting a host in the sidebar or double-clicking a card opens ``HostDetailView``;
 /// Refresh (⌘R) polls every host now.
@@ -17,6 +21,7 @@ struct DashboardView: View {
     @State private var selectedFromCard = false
     /// Why turning a host's monitoring on or off could not be saved.
     @State private var monitoringFailure: HostStoreError?
+    @State private var deletionCandidate: RemoteHost?
 
     private let columns = [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 20, alignment: .top)]
 
@@ -39,7 +44,9 @@ struct DashboardView: View {
                         .disabled(model.hosts.isEmpty)
                 }
             }
+            .hostDeletionConfirmation($deletionCandidate)
             .onChange(of: model.selection) { _, selection in
+                if let selection { model.showFolder(ofHost: selection) }
                 if selectedFromCard {
                     selectedFromCard = false
                 } else if selection != nil {
@@ -79,20 +86,72 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HostStatusSummary(counts: model.statusCounts())
-                    let hosts = model.searchedHosts
-                    if hosts.isEmpty {
-                        NoMatchingHostsView(search: model.hostSearch)
-                    } else {
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                            ForEach(hosts) { host in
-                                card(for: host)
-                            }
-                        }
-                    }
+                    hostsSection
                 }
                 .padding(24)
             }
         }
+    }
+
+    @ViewBuilder
+    private var hostsSection: some View {
+        if !model.hostSearch.isEmpty {
+            searchResults
+        } else if let folder = model.openFolder {
+            folderContents(folder)
+        } else {
+            topLevel
+        }
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        let hosts = model.searchedHosts
+        if hosts.isEmpty {
+            NoMatchingHostsView(search: model.hostSearch)
+        } else {
+            grid(hosts, in: nil, isArranging: false)
+        }
+    }
+
+    private var topLevel: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if !model.folders.isEmpty {
+                HostFolderShelf(
+                    folders: model.folders,
+                    statuses: { id in model.hosts(inFolder: id).map { model.displayState(for: $0.id).status } },
+                    onOpen: { model.openFolderID = $0.id },
+                    onRename: { model.folderRequest = .rename($0) },
+                    onDelete: { model.folderDeletion = $0 },
+                    onDrop: model.arrange
+                )
+            }
+            grid(model.hosts(inFolder: nil), in: nil)
+        }
+    }
+
+    private func folderContents(_ folder: HostFolder) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            FolderHeader(folder: folder, onBack: { model.openFolderID = nil }, onDrop: model.arrange)
+            let hosts = model.hosts(inFolder: folder.id)
+            if hosts.isEmpty {
+                EmptyFolderView()
+                    .hostArranging(nil, target: .end(folder: folder.id), onDrop: model.arrange)
+            } else {
+                grid(hosts, in: folder.id)
+            }
+        }
+    }
+
+    private func grid(_ hosts: [RemoteHost], in folder: HostFolder.ID?, isArranging: Bool = true) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+            ForEach(hosts) { host in
+                card(for: host)
+                    .contextMenu { HostMenu(host: host) { deletionCandidate = host } }
+                    .hostArranging(.host(host.id), target: .item(.host(host.id)), isEnabled: isArranging, onDrop: model.arrange)
+            }
+        }
+        .hostArranging(nil, target: .end(folder: folder), isEnabled: isArranging, onDrop: model.arrange)
     }
 
     private func card(for host: RemoteHost) -> some View {
@@ -144,6 +203,40 @@ struct DashboardView: View {
             ContentUnavailableView("No Host Selected", systemImage: "server.rack", description: Text("Select a host in the sidebar or double-click a card."))
                 .font(Aero.font(.body))
                 .foregroundStyle(Aero.text.secondary)
+        }
+    }
+}
+
+/// Above an open folder's cards: back to every host (drop a card here to take it out of the
+/// folder), and the folder's name.
+private struct FolderHeader: View {
+    let folder: HostFolder
+    let onBack: () -> Void
+    let onDrop: (HostLayoutItem, HostLayoutTarget) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button("All Hosts", systemImage: "chevron.left", action: onBack)
+                .buttonStyle(.aquaSecondary)
+                .hostArranging(nil, target: .end(folder: nil), cornerRadius: 100, onDrop: onDrop)
+                .help("Back to every host. Drop a host here to take it out of the folder.")
+            FolderGel(size: 32)
+            Text(folder.name)
+                .font(Aero.font(.title2, weight: .semibold))
+                .foregroundStyle(Aero.text.primary)
+                .lineLimit(1)
+        }
+    }
+}
+
+/// An open folder with no hosts yet.
+private struct EmptyFolderView: View {
+    var body: some View {
+        AeroCard {
+            Text("Drag hosts here, or add one with Add › Add Host… while this folder is open.")
+                .font(Aero.font(.callout))
+                .foregroundStyle(Aero.text.secondary)
+                .frame(maxWidth: .infinity, minHeight: 80)
         }
     }
 }

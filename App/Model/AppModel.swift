@@ -48,6 +48,14 @@ final class AppModel {
     var settingsPane: SettingsPane = .hosts
     /// The main window's host editor sheet; `nil` when closed.
     var editorRequest: HostEditorRequest?
+    /// The folder the Dashboard shows; `nil` for the top level.
+    var openFolderID: HostFolder.ID?
+    /// The main window's folder name sheet; `nil` when closed.
+    var folderRequest: FolderNameRequest?
+    /// The folder the main window asks about deleting; `nil` when not asking.
+    var folderDeletion: HostFolder?
+    /// Why the last folder or order change could not be saved.
+    var layoutError: HostStoreError?
     /// Whether the main window shows the "Import from ~/.ssh/config" sheet. Set it with
     /// ``requestSSHConfigImport()``.
     var isImportingSSHConfig = false
@@ -187,7 +195,7 @@ final class AppModel {
 
     /// Adds `host`, saves, and selects it.
     func addHost(_ host: RemoteHost) throws(HostStoreError) {
-        try hostStore.add(host)
+        try hostStore.add(host, toFolder: newHostFolderID)
         hostsDidChange()
         selection = host.id
     }
@@ -316,16 +324,11 @@ final class AppModel {
     // MARK: - Sync
 
     /// Keeps ``displayStates`` and ``selection`` in step with the inventory and notifies observers.
-    private func hostsDidChange() {
+    func hostsDidChange() {
+        closeMissingFolder()
         let current = hosts
         let ids = Set(current.map(\.id))
-        if Set(displayStates.keys) != ids {
-            var next = displayStates.filter { ids.contains($0.key) }
-            for id in ids where next[id] == nil {
-                next[id] = HostDisplayState(hostID: id)
-            }
-            displayStates = next
-        }
+        syncDisplayStates(with: ids)
         if let selection, !ids.contains(selection) {
             self.selection = nil
         }
@@ -335,5 +338,14 @@ final class AppModel {
         for observer in inventoryObservers {
             observer.hostsDidChange(current)
         }
+    }
+
+    private func syncDisplayStates(with ids: Set<RemoteHost.ID>) {
+        guard Set(displayStates.keys) != ids else { return }
+        var next = displayStates.filter { ids.contains($0.key) }
+        for id in ids where next[id] == nil {
+            next[id] = HostDisplayState(hostID: id)
+        }
+        displayStates = next
     }
 }

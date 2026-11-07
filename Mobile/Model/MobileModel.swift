@@ -73,6 +73,8 @@ final class MobileModel {
     private(set) var activity: MonitorActivity = .visible
     /// The open terminals, oldest first.
     private(set) var terminals: [MobileTerminal] = []
+    /// Why the last folder change or drag and drop could not be saved.
+    var layoutError: HostStoreError?
 
     /// Whether this device can make Secure Enclave keys (not the Simulator).
     let canUseSecureEnclave = SecureEnclave.isAvailable
@@ -225,13 +227,14 @@ final class MobileModel {
 
     /// Adds or updates `host`. A typed `password` is saved to the Keychain first, so a password
     /// host never exists without it; a new host's password is removed again if saving fails.
-    func save(_ host: RemoteHost, password: String?) throws {
+    /// A new host goes last into the folder with `folder` (`nil`: the top level).
+    func save(_ host: RemoteHost, password: String?, folder: HostFolder.ID? = nil) throws {
         let isNew = hostStore.host(id: host.id) == nil
         if let password, host.auth == .password {
             try passwords.save(password, for: host.id)
         }
         do {
-            if isNew { try hostStore.add(host) } else { try hostStore.update(host) }
+            if isNew { try hostStore.add(host, toFolder: folder) } else { try hostStore.update(host) }
         } catch {
             if password != nil, isNew { try? passwords.delete(for: host.id) }
             throw error
@@ -578,5 +581,13 @@ extension MobileModel {
         model.isStarted = true
         model.isPreview = true
         return model
+    }
+}
+
+extension MobileModel: HostLayoutEditing {
+    var layoutStore: HostStore { hostStore }
+
+    func layoutDidChange() {
+        hostsDidChange()
     }
 }

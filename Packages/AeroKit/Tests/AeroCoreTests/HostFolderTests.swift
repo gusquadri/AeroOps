@@ -76,6 +76,24 @@ struct HostFolderTests {
         #expect(mac.folders.map(\.name) == ["Staging", "Production"])
     }
 
+    @Test("drops move hosts and folders; a folder dropped on a host does nothing")
+    func drops() throws {
+        let (store, h) = try store(with: ["a", "b", "c"])
+        let prod = try store.addFolder(named: "Prod")
+        let lab = try store.addFolder(named: "Lab")
+        #expect(try store.drop(.host(h[0].id), on: .item(.folder(prod.id))))
+        #expect(try store.drop(.host(h[2].id), on: .item(.host(h[0].id))))
+        #expect(store.hosts(inFolder: prod.id).map(\.name) == ["c", "a"])
+        #expect(try store.drop(.host(h[2].id), on: .end(folder: nil)))
+        #expect(store.hosts(inFolder: nil).map(\.name) == ["b", "c"])
+        #expect(try store.drop(.folder(lab.id), on: .item(.folder(prod.id))))
+        #expect(store.folders.map(\.name) == ["Lab", "Prod"])
+        #expect(try store.drop(.folder(lab.id), on: .end(folder: nil)))
+        #expect(store.folders.map(\.name) == ["Prod", "Lab"])
+        #expect(try !store.drop(.folder(lab.id), on: .item(.host(h[1].id))))
+        #expect(try !store.drop(.folder(lab.id), on: .end(folder: prod.id)))
+    }
+
     @Test("editing a host keeps its folder and position")
     func updateKeepsPlacement() throws {
         let (store, h) = try store(with: ["a", "b"])

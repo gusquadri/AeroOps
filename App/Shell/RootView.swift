@@ -35,6 +35,19 @@ struct RootView: View {
         .sheet(item: $model.editorRequest) { request in
             HostEditorSheet(request: request)
         }
+        .folderNameSheet($model.folderRequest) { request, name in
+            try model.saveFolder(request, name: name)
+        }
+        .folderDeletionConfirmation($model.folderDeletion) { model.deleteFolder($0) }
+        .alert(
+            "Couldn’t save the change",
+            isPresented: Binding(get: { model.layoutError != nil }, set: { if !$0 { model.layoutError = nil } }),
+            presenting: model.layoutError
+        ) { _ in
+            Button("OK") {}
+        } message: { error in
+            Text(error.localizedDescription)
+        }
         .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
             if let first = ids.first { model.selection = first }
         }

@@ -21,6 +21,24 @@ struct HostContextMenu: View {
     }
 }
 
+/// A host's whole menu, the same in the sidebar and on its dashboard card: its actions, then
+/// "Move to Folder".
+struct HostMenu: View {
+    @Environment(AppModel.self) private var model
+    let host: RemoteHost
+    let onDelete: () -> Void
+
+    var body: some View {
+        HostContextMenu(host: host, onEdit: { model.requestEdit(host.id) }, onDelete: onDelete)
+        MoveToFolderMenu(
+            folders: model.folders,
+            current: model.folderID(ofHost: host.id),
+            onMove: { model.moveHost(host.id, toFolder: $0) },
+            onNewFolder: { model.requestNewFolder(moving: host.id) }
+        )
+    }
+}
+
 extension View {
     /// Asks before deleting `host` (set it to start), then deletes it through ``AppModel`` and
     /// shows an alert if saving fails.

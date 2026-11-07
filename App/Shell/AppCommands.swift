@@ -4,7 +4,7 @@ import TerminalKit
 
 /// Menu commands.
 ///
-/// - File: New Host… (⌘N), Import Hosts from ~/.ssh/config…, Import Hosts from Termius…,
+/// - File: New Host… (⌘N), New Folder… (⇧⌘N), Import Hosts from ~/.ssh/config…, Import Hosts from Termius…,
 ///   New Terminal Tab (⌘T), and Close (⌘W), which closes the shown terminal tab (asking
 ///   first while it runs) or else the key window.
 /// - View: Dashboard…Activity (⌘1–⌘5).
@@ -25,6 +25,11 @@ struct AppCommands: Commands {
                 model.requestNewHost()
             }
             .keyboardShortcut("n")
+            Button("New Folder…") {
+                openWindow(id: AeroOpsApp.mainWindowID)
+                model.requestNewFolder()
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Import Hosts from ~/.ssh/config…") {
                 openWindow(id: AeroOpsApp.mainWindowID)
                 model.requestSSHConfigImport()

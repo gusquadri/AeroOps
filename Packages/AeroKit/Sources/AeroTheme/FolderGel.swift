@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// A glossy aqua gel tile with a white folder inside, the folder counterpart of
-/// ``StatusBubble``: the primary Aqua gel (light top, deep band, caustic bottom) in a rounded
-/// square, a specular cap and a dark rim. `isOpen` shows the folder open, for a drop target that
-/// is about to take a host.
+/// ``StatusBubble``. `isOpen` shows the folder open, for a drop target that is about to take a
+/// host.
 ///
 /// ```swift
 /// FolderGel(size: 44)
@@ -15,12 +14,36 @@ public struct FolderGel: View {
     /// Shows the folder open (a drop target under a dragged host).
     public let isOpen: Bool
 
-    private var accessibility = AeroAccessibility()
-
     /// Creates a gel of `size` points (default 40).
     public init(size: CGFloat = 40, isOpen: Bool = false) {
         self.size = size
         self.isOpen = isOpen
+    }
+
+    /// The gel.
+    public var body: some View {
+        SymbolGel(systemImage: isOpen ? "folder.fill.badge.plus" : "folder.fill", size: size)
+    }
+}
+
+/// A glossy aqua gel tile with a white SF Symbol inside: the primary Aqua gel (light top, deep
+/// band, caustic bottom) in a rounded square, a specular cap and a dark rim.
+///
+/// ```swift
+/// SymbolGel(systemImage: "server.rack", size: 32)
+/// ```
+public struct SymbolGel: View {
+    /// The SF Symbol drawn in white.
+    public let systemImage: String
+    /// Width and height in points.
+    public let size: CGFloat
+
+    private var accessibility = AeroAccessibility()
+
+    /// Creates a gel of `size` points (default 40) showing `systemImage`.
+    public init(systemImage: String, size: CGFloat = 40) {
+        self.systemImage = systemImage
+        self.size = size
     }
 
     /// The gel.
@@ -37,7 +60,7 @@ public struct FolderGel: View {
                     startRadiusFraction: 0, endRadiusFraction: 0.55
                 ))
             }
-            Image(systemName: isOpen ? "folder.fill.badge.plus" : "folder.fill")
+            Image(systemName: systemImage)
                 .resizable()
                 .scaledToFit()
                 .fontWeight(.semibold)
@@ -75,6 +98,7 @@ public struct FolderGel: View {
         FolderGel(size: 44)
         FolderGel(size: 44, isOpen: true)
         FolderGel(size: 64)
+        SymbolGel(systemImage: "server.rack", size: 44)
     }
     .padding(32)
     .background { SkyBackground() }

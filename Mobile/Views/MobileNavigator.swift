@@ -6,6 +6,12 @@ enum MobileSection: Hashable {
     case servers, terminals, files, containers, keys
 }
 
+/// A screen pushed in the Servers tab.
+enum ServerRoute: Hashable {
+    case host(RemoteHost.ID)
+    case folder(HostFolder.ID)
+}
+
 /// A screen pushed in the Containers tab.
 enum ContainersRoute: Hashable {
     case host(RemoteHost.ID)
@@ -28,13 +34,21 @@ enum ContainersRoute: Hashable {
 @Observable
 final class MobileNavigator {
     var section: MobileSection
-    var serverPath: [RemoteHost.ID] = []
+    var serverPath: [ServerRoute] = []
     var terminalPath: [MobileTerminal.ID] = []
     var filePath: [RemoteHost.ID] = []
     var containerPath: [ContainersRoute] = []
 
     init(section: MobileSection = .servers) {
         self.section = section
+    }
+
+    /// Pops every folder not in `folders` off the Servers tab: it was deleted, here or
+    /// on another device.
+    func closeFolders(notIn folders: Set<HostFolder.ID>) {
+        serverPath.removeAll { route in
+            if case .folder(let id) = route { !folders.contains(id) } else { false }
+        }
     }
 
     func show(terminal id: MobileTerminal.ID) {

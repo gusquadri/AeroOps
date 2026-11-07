@@ -2,16 +2,17 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// Every host's card, filtered by the search field (name or address); tap one for its details, or its buttons for its files and terminal. Pull
-/// to poll every host now. The info menu links to the privacy policy and the source code.
+/// The host folders, then every host in none; tap a folder to open it, a card for its details, or its buttons for its files and terminal.
+/// Long-press a card to drag it into place or onto a folder. The search field (name or address) lists every matching host instead. Pull
+/// to poll every host now. The + menu adds a host or a folder; the info menu links to the privacy policy and the source code.
 struct DashboardScreen: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
     @Environment(\.showSampleServers) private var showSampleServers
     @State private var editor: HostEditorScreen.Request?
     @State private var search = ""
-    /// Why turning a host's monitoring on or off could not be saved.
-    @State private var monitoringFailure: String?
+    @State private var folderRequest: FolderNameRequest?
+    @State private var folderDeletion: HostFolder?
 
     var body: some View {
         @Bindable var navigator = navigator
@@ -33,29 +34,43 @@ struct DashboardScreen: View {
                         }
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Add Host", systemImage: "plus") { editor = .new }
+                        Menu("Add", systemImage: "plus") {
+                            Button("New Host", systemImage: "server.rack") { editor = .new }
+                            Button("New Folder", systemImage: "folder") { folderRequest = .new(moving: nil) }
+                        }
                     }
                 }
-                .navigationDestination(for: RemoteHost.ID.self) { HostScreen(id: $0) }
+                .navigationDestination(for: ServerRoute.self, destination: screen)
         }
         .sheet(item: $editor) { request in
             HostEditorScreen(request: request)
         }
+        .folderNameSheet($folderRequest) { try model.saveFolder($0, name: $1) }
+        .folderDeletionConfirmation($folderDeletion) { model.deleteFolder($0) }
+        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
         .task(openDebugScreen)
         .alert(
-            "Couldn’t save the server",
-            isPresented: Binding(get: { monitoringFailure != nil }, set: { if !$0 { monitoringFailure = nil } }),
-            presenting: monitoringFailure
+            "Couldn’t save the change",
+            isPresented: Binding(get: { model.layoutError != nil }, set: { if !$0 { model.layoutError = nil } }),
+            presenting: model.layoutError
         ) { _ in
             Button("OK") {}
-        } message: { message in
-            Text(message)
+        } message: { error in
+            Text(error.localizedDescription)
+        }
+    }
+
+    @ViewBuilder
+    private func screen(for route: ServerRoute) -> some View {
+        switch route {
+        case .host(let id): HostScreen(id: id)
+        case .folder(let id): FolderScreen(id: id)
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.hosts.isEmpty {
+        if model.hosts.isEmpty, model.folders.isEmpty {
             AeroEmptyState(
                 systemImage: "server.rack",
                 title: "No servers yet",
@@ -73,21 +88,38 @@ struct DashboardScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     problems
                     HostStatusSummary(counts: model.statusCounts())
-                    let hosts = model.hosts.matching(search: search)
-                    if hosts.isEmpty {
-                        NoMatchingHostsView(search: search)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
-                            ForEach(hosts) { host in
-                                card(for: host)
-                            }
-                        }
-                    }
+                    hostsSection
                 }
                 .padding(16)
             }
             .refreshable { model.refreshAll() }
         }
+    }
+
+    @ViewBuilder
+    private var hostsSection: some View {
+        if search.isEmpty {
+            HostFolderShelf(
+                folders: model.folders,
+                statuses: { id in model.hosts(inFolder: id).map { model.displayState(for: $0.id).status } },
+                onOpen: { navigator.serverPath.append(.folder($0.id)) },
+                onRename: { folderRequest = .rename($0) },
+                onDelete: { folderDeletion = $0 },
+                onDrop: { model.arrange($0, on: $1) }
+            )
+            grid(model.hosts(inFolder: nil), isArranging: true)
+        } else {
+            let hosts = model.hosts.matching(search: search)
+            if hosts.isEmpty {
+                NoMatchingHostsView(search: search)
+            } else {
+                grid(hosts, isArranging: false)
+            }
+        }
+    }
+
+    private func grid(_ hosts: [RemoteHost], isArranging: Bool) -> some View {
+        HostCardGrid(hosts: hosts, folder: nil, isArranging: isArranging) { folderRequest = .new(moving: $0) }
     }
 
     /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews).
@@ -98,7 +130,7 @@ struct DashboardScreen: View {
     private func openDebugScreen() {
         guard let first = model.hosts.first else { return }
         switch MobileDebugOptions.screen {
-        case .host: navigator.serverPath = [first.id]
+        case .host: navigator.serverPath = [.host(first.id)]
         case .add: editor = .new
         case .edit: editor = .edit(first.id)
         default: break
@@ -116,35 +148,6 @@ struct DashboardScreen: View {
         if let error = model.hostKeyError {
             ValidationMessage(text: error)
         }
-    }
-
-    private func toggleMonitoring(_ host: RemoteHost) {
-        do {
-            try model.setMonitoring(!host.monitored, for: host.id)
-        } catch {
-            monitoringFailure = error.localizedDescription
-        }
-    }
-
-    private func card(for host: RemoteHost) -> some View {
-        HostCard(
-            host: host,
-            state: model.displayState(for: host.id),
-            canOpenSSH: model.canOpenSession(on: host),
-            onOpenSSH: { navigator.show(terminal: model.currentTerminal(on: host.id).id) },
-            onBrowseFiles: { navigator.showFiles(of: host.id) },
-            keyBlock: model.hostKeyBlock(for: host),
-            onReviewKey: { navigator.serverPath.append(host.id) },
-            onTrustKey: { Task { await model.requestHostKeyTrust(for: host) } },
-            isScanningKey: model.scanningHostIDs.contains(host.id),
-            keyScanError: model.scanErrors[host.id],
-            onToggleMonitoring: { toggleMonitoring(host) }
-        )
-        .equatable()
-        .contentShape(.rect(cornerRadius: Aero.radius.card))
-        .onTapGesture { navigator.serverPath.append(host.id) }
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Shows the server’s details")
     }
 }
 
