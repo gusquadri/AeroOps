@@ -25,7 +25,7 @@ struct DashboardScreen: View {
 
 /// The host folders, then every host in none; tap a folder to open it, a card for its details, or its buttons for its files and terminal.
 /// Long-press a card to drag it into place or onto a folder. The search field (name or address) lists every matching host instead. Pull
-/// to poll every host now. The + menu adds a host or a folder; the info menu links to the privacy policy and the source code.
+/// to poll every host now. The + menu adds a host or a folder; the info menu links to the website, the privacy policy and the source code.
 ///
 /// It sits in the Servers tab's stack or the split layout's detail; `onOpen` shows a host's details or a folder.
 struct DashboardContent: View {
@@ -174,6 +174,7 @@ struct AppToolbarItems: ToolbarContent {
         }
         ToolbarItem(placement: .topBarLeading) {
             Menu("About AeroOps", systemImage: "info.circle") {
+                Link("Website", destination: AppLinks.website)
                 Link("Privacy Policy", destination: AppLinks.privacyPolicy)
                 Link("Source Code", destination: AppLinks.sourceCode)
             }

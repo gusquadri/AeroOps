@@ -1,5 +1,7 @@
 # AeroOps
 
+**[aeroops.sh](https://aeroops.sh)**
+
 AeroOps is a native macOS app for keeping an eye on a handful of Linux servers over SSH. Each server gets a live card with CPU, memory, disk, uptime and load. You can browse its Docker containers and Kubernetes pods, read their logs, and open terminal tabs to it. A local MCP server, `aeroops-mcp`, lets AI agents such as Claude Code and Codex use the same servers. Agents never see your keys, and they are told to ask you before running any command. The only thing a server needs is SSH: nothing is installed on it. Private keys stay in the macOS Keychain or the Secure Enclave.
 
 ![Dashboard with six demo hosts in every card state](docs/screenshots/dashboard.png)

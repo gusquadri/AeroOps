@@ -10,6 +10,7 @@ import TerminalKit
 /// - View: Dashboard…Activity (⌘1–⌘5).
 /// - Terminal: next / previous tab (⌃Tab / ⌃⇧Tab), Reconnect, font size (⌘+ / ⌘− / ⌘0) and
 ///   tabs 1…9 (⌘⌥1…⌘⌥9). They act while the main window shows terminal tabs.
+/// - Help: the AeroOps website, privacy policy and source code.
 ///
 /// Copy, Paste and Select All stay in the standard Edit menu and reach the focused terminal
 /// through the responder chain.
@@ -94,6 +95,11 @@ struct AppCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: [.command, .option])
                     .disabled(terminalTabs == nil)
             }
+        }
+        CommandGroup(replacing: .help) {
+            Link("AeroOps Website", destination: AppLinks.website)
+            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
+            Link("Source Code", destination: AppLinks.sourceCode)
         }
     }
 }
