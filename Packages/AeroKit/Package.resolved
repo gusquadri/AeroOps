@@ -1,5 +1,5 @@
 {
-  "originHash" : "d80945d150db3850958ebf1c194075e81946d38deb3b073341c29e6d65f0adbd",
+  "originHash" : "d94c3c9814c14c998ca676461c33f25e06370a51b23a0fbfd1b2cce6bedb7cc0",
   "pins" : [
     {
       "identity" : "displaylink",
@@ -11,30 +11,12 @@
       }
     },
     {
-      "identity" : "eventsource",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mattt/eventsource.git",
-      "state" : {
-        "revision" : "86b5096ac59ab46e66bd1f6377c604bc1dab0bc2",
-        "version" : "1.5.1"
-      }
-    },
-    {
       "identity" : "libghostty-spm",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Lakr233/libghostty-spm",
       "state" : {
         "revision" : "3404c8a2e6403d0a5e730eb08abdaa1c865a83e9",
         "version" : "2.2.2026103001"
-      }
-    },
-    {
-      "identity" : "sparkle",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sparkle-project/Sparkle",
-      "state" : {
-        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
-        "version" : "2.10.0"
       }
     },
     {
@@ -74,21 +56,12 @@
       }
     },
     {
-      "identity" : "swift-log",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-log",
-      "state" : {
-        "revision" : "4038b6a4f74a1426f47eb1dd5b4bb5628a15d597",
-        "version" : "1.16.1"
-      }
-    },
-    {
       "identity" : "swift-nio",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-nio",
+      "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "6db9d9abd92ad7399b8a564cafbb87d3507245fa",
-        "version" : "2.104.0"
+        "revision" : "2f58d8ef84438d6517fc78bcea2f8527e3c72936",
+        "version" : "2.105.0"
       }
     },
     {
@@ -97,15 +70,6 @@
       "location" : "https://github.com/gusquadri/swift-nio-ssh",
       "state" : {
         "revision" : "7a9d8c39777f99927c3c2591b0246c1e06ec3dfe"
-      }
-    },
-    {
-      "identity" : "swift-sdk",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/modelcontextprotocol/swift-sdk",
-      "state" : {
-        "revision" : "a0ae212ebf6eab5f754c3129608bc5557637e605",
-        "version" : "0.12.1"
       }
     },
     {
