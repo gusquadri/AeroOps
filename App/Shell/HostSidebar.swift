@@ -42,8 +42,7 @@ struct HostSidebar: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 8) {
-                AddHostButton()
-                    .help("Add a server to monitor (⌘N)")
+                AddMenu()
                 SidebarUpdateButton()
             }
             .frame(maxWidth: .infinity)

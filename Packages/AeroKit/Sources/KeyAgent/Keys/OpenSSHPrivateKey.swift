@@ -158,7 +158,7 @@ struct OpenSSHPrivateKey: Sendable {
     }
 
     /// Signs a random message and verifies it, which catches wrong RSA CRT parameters.
-    private static func selfTest(_ key: any SSHSigningKey) throws {
+    static func selfTest(_ key: any SSHSigningKey) throws {
         let message = (0..<32).map { _ in UInt8.random(in: 0...255) }
         let blob = try key.signature(for: message, flags: AgentMessage.flagRSASHA512)
         guard SignatureVerifier.verify(signatureBlob: blob, publicKeyBlob: key.publicKeyBlob, data: message) else {

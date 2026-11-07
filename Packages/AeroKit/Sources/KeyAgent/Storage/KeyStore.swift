@@ -182,8 +182,9 @@ public actor KeyStore {
             publicKeyBlob: signingKey.publicKeyBlob, secret: secret, signingKey: signingKey)
     }
 
-    /// Imports an unencrypted OpenSSH private key (`-----BEGIN OPENSSH PRIVATE KEY-----`):
-    /// Ed25519, ECDSA P-256 or RSA (≥ 1024 bits). `name` defaults to the key's comment.
+    /// Imports an unencrypted private key: OpenSSH (`-----BEGIN OPENSSH PRIVATE KEY-----`),
+    /// PEM (PKCS#1, SEC1, PKCS#8) or PuTTY `.ppk`; Ed25519, ECDSA P-256 or RSA (≥ 1024 bits).
+    /// `name` defaults to the key's comment.
     ///
     /// The private key moves into the Keychain; this does not touch the original file.
     @discardableResult
@@ -192,7 +193,7 @@ public actor KeyStore {
     ) throws -> SSHKeyRecord {
         let parsed: OpenSSHPrivateKey
         do {
-            parsed = try OpenSSHPrivateKey.parse(text)
+            parsed = try OpenSSHPrivateKey.parseAnyFormat(text)
         } catch {
             throw KeyStoreError.importFailed(error)
         }
@@ -201,6 +202,17 @@ public actor KeyStore {
         return try add(
             algorithm: parsed.algorithm, name: chosenName, comment: parsed.comment, policy: policy, syncs: syncs, origin: .imported,
             publicKeyBlob: parsed.publicKeyBlob, secret: parsed.secret, signingKey: parsed.signingKey)
+    }
+
+    /// Why ``importOpenSSHPrivateKey(_:name:policy:syncs:)`` would refuse `text`, or `nil` if it
+    /// would accept it. Parses and self-tests the key without storing anything.
+    public static func importIssue(_ text: String) -> KeyImportError? {
+        do {
+            _ = try OpenSSHPrivateKey.parseAnyFormat(text)
+            return nil
+        } catch {
+            return error
+        }
     }
 
     private func add(

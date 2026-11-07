@@ -113,10 +113,12 @@ final class SSHConfigImportModel {
     /// The host editor's validation as a last gate: a host that the editor wouldn't save is
     /// never added. (The planner applies the same rules; this keeps the two from drifting.)
     nonisolated static func checkedWithEditorRules(
-        _ candidate: SSHConfigImportCandidate, existingNames: [String]
+        _ candidate: SSHConfigImportCandidate, existingNames: [String], password: String = ""
     ) -> SSHConfigImportCandidate {
         guard candidate.isSelectable else { return candidate }
-        let validation = HostDraft(host: candidate.host).validate(otherHostNames: existingNames)
+        var draft = HostDraft(host: candidate.host)
+        draft.password = password
+        let validation = draft.validate(otherHostNames: existingNames)
         guard let message = HostDraft.Field.allCases.lazy.compactMap(validation.message(for:)).first else {
             return candidate
         }

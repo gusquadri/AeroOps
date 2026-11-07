@@ -158,7 +158,7 @@ struct SSHConfigImportSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(importer.candidates.enumerated()), id: \.element.id) { index, candidate in
                             if index > 0 { Divider().padding(.leading, 44) }
-                            SSHConfigImportRow(
+                            HostImportRow(
                                 candidate: candidate,
                                 localUser: importer.localUserName,
                                 isSelected: Binding(
@@ -227,10 +227,21 @@ struct SSHConfigImportSheet: View {
     }
 }
 
-/// One host: checkbox, name, `user@address:port`, a status chip and notes.
-private struct SSHConfigImportRow: View {
+/// One host in an import sheet: checkbox, name, `user@address:port`, a status chip and notes.
+/// Shared by the ssh_config and Termius imports.
+struct HostImportRow: View {
+    /// A remark under the host, e.g. what else is imported with it.
+    struct Note: Hashable {
+        var text: String
+        var systemImage: String
+        var isWarning = false
+    }
+
     let candidate: SSHConfigImportCandidate
     let localUser: String
+    /// Where the hosts come from, as the notes name it: “the config”, “Termius”.
+    var source = "the config"
+    var extraNotes: [Note] = []
     @Binding var isSelected: Bool
 
     var body: some View {
@@ -251,7 +262,7 @@ private struct SSHConfigImportRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if candidate.isRenamed {
-                        Text("“\(safe(candidate.alias))” in the config")
+                        Text("“\(safe(candidate.alias))” in \(source)")
                             .font(Aero.font(.caption))
                             .foregroundStyle(Aero.text.secondary)
                             .lineLimit(1)
@@ -316,7 +327,10 @@ private struct SSHConfigImportRow: View {
         }
         if candidate.isSelectable {
             if candidate.usesLocalUser {
-                note("No User in the config, so ssh would log in as your account name “\(localUser)”.", systemImage: "person", tint: Aero.aquaDeep)
+                note("No user in \(source), so ssh would log in as your account name “\(localUser)”.", systemImage: "person", tint: Aero.aquaDeep)
+            }
+            ForEach(extraNotes, id: \.self) { extra in
+                note(extra.text, systemImage: extra.systemImage, tint: extra.isWarning ? Aero.sun : Aero.aquaDeep)
             }
             if !candidate.identityFiles.isEmpty {
                 let files = candidate.identityFiles.map { "“\(safe($0, limit: 60))”" }.formatted(.list(type: .and))

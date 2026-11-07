@@ -51,6 +51,9 @@ final class AppModel {
     /// Whether the main window shows the "Import from ~/.ssh/config" sheet. Set it with
     /// ``requestSSHConfigImport()``.
     var isImportingSSHConfig = false
+    /// Whether the main window shows the "Import from Termius" sheet. Set it with
+    /// ``requestTermiusImport()``.
+    var isImportingTermius = false
     /// The first-run onboarding sheet. In memory unless replaced: the real app's model stores
     /// its flag in `UserDefaults.standard` (`AeroOpsApp.makeModel()`).
     var onboarding = OnboardingState()
@@ -257,14 +260,18 @@ final class AppModel {
         isImportingSSHConfig = true
     }
 
+    /// Opens the main window's "Import from Termius" sheet (``TermiusImportSheet``), which
+    /// reads the hosts, keys and passwords saved in the Termius app and adds the picked hosts.
+    /// The first imported host is selected when it closes.
+    func requestTermiusImport() {
+        editorRequest = nil
+        isImportingSSHConfig = false
+        isImportingTermius = true
+    }
+
     // MARK: - Terminals
 
     /// Whether Open SSH is available for the host: it exists, renders into `ssh_config`, is not
-    /// The first imported host is selected when it closes.
-        editorRequest = nil
-        isImportingSSHConfig = false
-    }
-
     /// blocked by a changed host key, and has its key with the agent running (or the system
     /// agent option is on).
     func canOpenSSH(_ id: RemoteHost.ID) -> Bool {

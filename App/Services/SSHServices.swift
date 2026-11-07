@@ -429,6 +429,14 @@ final class SSHServices {
         return record
     }
 
+    /// Imports a private key from text another app handed over (Termius). The text stays in
+    /// memory; it is never written to disk.
+    func importKey(text: String, name: String?, policy: SigningPolicy, syncs: Bool = true) async throws -> SSHKeyRecord {
+        let record = try await requireKeyStore().importOpenSSHPrivateKey(text, name: name, policy: policy, syncs: syncs)
+        await keysDidChange()
+        return record
+    }
+
     /// Turns iCloud Keychain sync on or off for a key.
     func setSyncs(_ syncs: Bool, forKey id: UUID) async throws {
         try await requireKeyStore().setSyncs(id: id, syncs)

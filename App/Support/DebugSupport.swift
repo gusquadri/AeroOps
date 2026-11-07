@@ -174,6 +174,7 @@ enum DebugLaunchOptions {
         "sync": { _ in await SyncSelfTest().runAndQuit() },
         "workloads": { _ in await WorkloadsSelfTest().runAndQuit() },
         "host-search": { _ in HostSearchSelfTest().runAndQuit() },
+        "termius-import": { _ in await TermiusImportSelfTest().runAndQuit() },
     ]
 
     @MainActor

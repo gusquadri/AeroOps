@@ -21,6 +21,7 @@ let package = Package(
         // Shared by the app (through SSHKit and KeyAgent) and the `aeroops-askpass` helper.
         .library(name: "AskpassProtocol", targets: ["AskpassProtocol"]),
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
+        .library(name: "TermiusImport", targets: ["TermiusImport"]),
     ],
     dependencies: [
         // libghostty wrapper, pinned exactly. Linked by TerminalStyle, TerminalKit and
@@ -125,6 +126,8 @@ let package = Package(
             path: "Tests/BridgeHarness"
         ),
 
+        .target(name: "TermiusImport", dependencies: ["AeroCore"]),
+
         // Frutiger Aero design tokens and glossy components. Must NOT depend on AeroCore.
         // Logos/: the system logo SVGs for StatusBubble (Simple Icons, CC0).
         .target(name: "AeroTheme", resources: [.copy("Logos")]),
@@ -154,5 +157,6 @@ let package = Package(
         .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),
         .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit", "AeroTestSupport"]),
         .testTarget(name: "AeroThemeTests", dependencies: ["AeroTheme"]),
+        .testTarget(name: "TermiusImportTests", dependencies: ["TermiusImport", "AeroCore", "KeyAgent"]),
     ]
 )

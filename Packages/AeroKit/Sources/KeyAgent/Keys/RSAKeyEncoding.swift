@@ -8,7 +8,11 @@ struct DERReader {
 
     var isAtEnd: Bool { reader.isAtEnd }
 
-    private mutating func element(tag: UInt8, _ what: String) throws(SSHWireError) -> [UInt8] {
+    /// The next element's tag, without reading it.
+    var nextTag: UInt8? { reader.peek() }
+
+    /// The contents of the next element, which must have `tag`.
+    mutating func element(tag: UInt8, _ what: String) throws(SSHWireError) -> [UInt8] {
         guard try reader.next(what) == tag else { throw .malformed("DER \(what): unexpected tag") }
         var length = Int(try reader.next(what))
         if length & 0x80 != 0 {
@@ -41,6 +45,8 @@ struct DERCursor {
     init(_ bytes: [UInt8]) { self.bytes = bytes }
 
     var isAtEnd: Bool { index >= bytes.count }
+
+    func peek() -> UInt8? { index < bytes.count ? bytes[index] : nil }
 
     mutating func next(_ what: String) throws(SSHWireError) -> UInt8 {
         guard index < bytes.count else { throw .truncated("DER \(what)") }

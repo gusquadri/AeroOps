@@ -10,6 +10,7 @@ struct HostsSettingsPane: View {
     @State private var isCreating = false
     @State private var deletionCandidate: RemoteHost?
     @State private var isImporting = false
+    @State private var isImportingTermius = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -23,6 +24,10 @@ struct HostsSettingsPane: View {
         .background { Aero.sky.gradient.ignoresSafeArea() }
         .hostDeletionConfirmation($deletionCandidate)
         .sshConfigImportSheet(isPresented: $isImporting) { ids in
+            isCreating = false
+            selection = ids.first
+        }
+        .termiusImportSheet(isPresented: $isImportingTermius) { ids in
             isCreating = false
             selection = ids.first
         }
@@ -73,6 +78,8 @@ struct HostsSettingsPane: View {
                 Spacer()
                 Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down") { isImporting = true }
                     .help("Import hosts from ~/.ssh/config")
+                Button("Import from Termius…", systemImage: "arrow.down.app") { isImportingTermius = true }
+                    .help("Import hosts, keys and passwords from the Termius app")
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.aquaSecondary)
@@ -115,6 +122,8 @@ struct HostsSettingsPane: View {
                         .buttonStyle(.aqua)
                     if model.hosts.isEmpty {
                         Button("Import from ~/.ssh/config…", systemImage: "square.and.arrow.down") { isImporting = true }
+                            .buttonStyle(.aquaSecondary)
+                        Button("Import from Termius…", systemImage: "arrow.down.app") { isImportingTermius = true }
                             .buttonStyle(.aquaSecondary)
                     }
                 }

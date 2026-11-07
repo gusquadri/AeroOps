@@ -38,6 +38,7 @@ struct RootView: View {
         .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
             if let first = ids.first { model.selection = first }
         }
+        .termiusImportSheet(isPresented: $model.isImportingTermius) { ids in
             if let first = ids.first { model.selection = first }
         }
         // Closing the sheet any other way than its own buttons still counts as skipped.

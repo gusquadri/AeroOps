@@ -4,9 +4,9 @@ import TerminalKit
 
 /// Menu commands.
 ///
-/// - File: New Host… (⌘N), Import Hosts from ~/.ssh/config…, New Terminal Tab (⌘T), and
-///   Close (⌘W), which closes the shown terminal tab (asking first while it runs) or else
-///   the key window.
+/// - File: New Host… (⌘N), Import Hosts from ~/.ssh/config…, Import Hosts from Termius…,
+///   New Terminal Tab (⌘T), and Close (⌘W), which closes the shown terminal tab (asking
+///   first while it runs) or else the key window.
 /// - View: Dashboard…Activity (⌘1–⌘5).
 /// - Terminal: next / previous tab (⌃Tab / ⌃⇧Tab), Reconnect, font size (⌘+ / ⌘− / ⌘0) and
 ///   tabs 1…9 (⌘⌥1…⌘⌥9). They act while the main window shows terminal tabs.
@@ -28,6 +28,10 @@ struct AppCommands: Commands {
             Button("Import Hosts from ~/.ssh/config…") {
                 openWindow(id: AeroOpsApp.mainWindowID)
                 model.requestSSHConfigImport()
+            }
+            Button("Import Hosts from Termius…") {
+                openWindow(id: AeroOpsApp.mainWindowID)
+                model.requestTermiusImport()
             }
             Button("New Terminal Tab") {
                 guard let host = model.newTerminalTabHost else { return NSSound.beep() }
