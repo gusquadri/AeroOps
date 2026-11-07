@@ -23,7 +23,7 @@ Native macOS 26+ SwiftUI app: SSH-based server monitoring cards, Docker and Kube
 ## Commands
 - Generate project: `xcodegen generate`
 - Build: `xcodebuild -scheme AeroOps -destination 'platform=macOS' build`
-- Build iOS: `xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`
+- Build iOS: `xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build` (iOS 27.0 runtime; check the foldable layout on `name=iPhone Duo`, iOS 27.1)
 - Run iOS on sample data: `xcrun simctl launch booted app.aeroops.AeroOpsMobile -AeroOpsDemo` (add `-AeroOpsScreen host|terminal|files|add|edit|keys|newKey|key` to open a screen)
 - Tests: `swift test --package-path Packages/AeroKit`
 - Dev SSH server: `docker compose -f dev/compose.yml up -d` (dev@localhost:2222; the Simulator reaches it too)

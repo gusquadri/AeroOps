@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 SRC_DIRS="App Mobile Shared MCP Askpass Packages/AeroKit/Sources Packages/AeroKit/Tests Scripts"
 MAC_BUILD="xcodebuild -scheme AeroOps -destination 'platform=macOS' -allowProvisioningUpdates -derivedDataPath build/DerivedData-quality -quiet build"
-IOS_BUILD="xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/DerivedData-quality-ios -quiet build"
+IOS_BUILD="xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -derivedDataPath build/DerivedData-quality-ios -quiet build"
 
 changed_files() {
   { git diff --name-only --diff-filter=d HEAD; git ls-files -o --exclude-standard; } 2>/dev/null | sort -u

@@ -4,8 +4,8 @@ import Collectors
 import SSHKit
 import SwiftUI
 
-/// Dashboard tab: one card per host, fed live by ``MonitorService``, and the selected host's
-/// details in an inspector.
+/// Dashboard tab: one card per host matching the sidebar's search field, fed live by
+/// ``MonitorService``, and the selected host's details in an inspector.
 ///
 /// Each card observes only its own ``HostDisplayState``, so a poll result redraws one card.
 /// Selecting a host in the sidebar or double-clicking a card opens ``HostDetailView``;
@@ -79,9 +79,14 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HostStatusSummary(counts: model.statusCounts())
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                        ForEach(model.hosts) { host in
-                            card(for: host)
+                    let hosts = model.searchedHosts
+                    if hosts.isEmpty {
+                        NoMatchingHostsView(search: model.hostSearch)
+                    } else {
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                            ForEach(hosts) { host in
+                                card(for: host)
+                            }
                         }
                     }
                 }

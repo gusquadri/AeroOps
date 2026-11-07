@@ -2,13 +2,14 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// Every host's card; tap one for its details, or its buttons for its files and terminal. Pull
+/// Every host's card, filtered by the search field (name or address); tap one for its details, or its buttons for its files and terminal. Pull
 /// to poll every host now. The info menu links to the privacy policy and the source code.
 struct DashboardScreen: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
     @Environment(\.showSampleServers) private var showSampleServers
     @State private var editor: HostEditorScreen.Request?
+    @State private var search = ""
     /// Why turning a host's monitoring on or off could not be saved.
     @State private var monitoringFailure: String?
 
@@ -17,6 +18,7 @@ struct DashboardScreen: View {
         NavigationStack(path: $navigator.serverPath) {
             content
                 .background { SkyBackground() }
+                .searchable(text: $search, prompt: "Name or address")
                 .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
                 .toolbar {
                     if isShowingSamples, let showSampleServers {
@@ -71,9 +73,14 @@ struct DashboardScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     problems
                     HostStatusSummary(counts: model.statusCounts())
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
-                        ForEach(model.hosts) { host in
-                            card(for: host)
+                    let hosts = model.hosts.matching(search: search)
+                    if hosts.isEmpty {
+                        NoMatchingHostsView(search: search)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
+                            ForEach(hosts) { host in
+                                card(for: host)
+                            }
                         }
                     }
                 }
