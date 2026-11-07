@@ -173,6 +173,7 @@ enum DebugLaunchOptions {
         "files": { await FilesSelfTest(model: $0).runAndQuit() },
         "sync": { _ in await SyncSelfTest().runAndQuit() },
         "workloads": { _ in await WorkloadsSelfTest().runAndQuit() },
+        "host-search": { _ in HostSearchSelfTest().runAndQuit() },
     ]
 
     @MainActor

@@ -2,7 +2,7 @@
 #   xcodegen generate
 #   xcodebuild -scheme AeroOps -destination 'platform=macOS' build
 #   xcodebuild -scheme AeroOps -destination 'platform=macOS' test   # runs the AeroKit package tests
-#   xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+#   xcodebuild -scheme AeroOpsMobile -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build
 name: AeroOps
 
 options:

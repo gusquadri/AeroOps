@@ -35,6 +35,9 @@ final class AppModel {
     /// All hosts, in inventory order.
     var hosts: [RemoteHost] { hostStore.hosts }
 
+    var hostSearch = ""
+    var searchedHosts: [RemoteHost] { hosts.matching(search: hostSearch) }
+
     // MARK: Navigation
 
     /// The main window's tab.
@@ -257,6 +260,11 @@ final class AppModel {
     // MARK: - Terminals
 
     /// Whether Open SSH is available for the host: it exists, renders into `ssh_config`, is not
+    /// The first imported host is selected when it closes.
+        editorRequest = nil
+        isImportingSSHConfig = false
+    }
+
     /// blocked by a changed host key, and has its key with the agent running (or the system
     /// agent option is on).
     func canOpenSSH(_ id: RemoteHost.ID) -> Bool {

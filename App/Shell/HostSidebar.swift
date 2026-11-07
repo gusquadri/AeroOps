@@ -4,7 +4,7 @@ import SSHKit
 import SwiftUI
 import TerminalKit
 
-/// The main window's sidebar: every host with its status orb, name and tags, Add Host and
+/// The main window's sidebar: every host matching the search field (``AppModel/hostSearch``) with its status orb, name and tags, Add Host and
 /// update buttons, and a context menu per host. Under each host, its open terminal tabs (click one to
 /// show it in Terminals; the Terminals tab has no tab strip of its own) and a New Terminal row.
 struct HostSidebar: View {
@@ -16,7 +16,7 @@ struct HostSidebar: View {
     var body: some View {
         List(selection: selection) {
             Section("Hosts") {
-                ForEach(model.hosts) { host in
+                ForEach(model.searchedHosts) { host in
                     DisclosureGroup(isExpanded: isExpanded(host.id)) {
                         HostTerminalRows(host: host)
                     } label: {
@@ -34,8 +34,8 @@ struct HostSidebar: View {
             }
         }
         .overlay {
-            if model.hosts.isEmpty {
-                Text("No hosts yet")
+            if model.hosts.isEmpty || model.searchedHosts.isEmpty {
+                Text(model.hosts.isEmpty ? "No hosts yet" : "No matching hosts")
                     .font(Aero.font(.callout))
                     .foregroundStyle(Aero.text.secondary)
             }

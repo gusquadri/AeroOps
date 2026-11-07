@@ -21,6 +21,7 @@ struct RootView: View {
                 .background { SkyBackground() }
                 .environment(\.sidebarVisibility, $columnVisibility)
         }
+        .searchable(text: $model.hostSearch, placement: .sidebar, prompt: "Name or address")
         .navigationTitle("AeroOps")
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -35,6 +36,8 @@ struct RootView: View {
             HostEditorSheet(request: request)
         }
         .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
+            if let first = ids.first { model.selection = first }
+        }
             if let first = ids.first { model.selection = first }
         }
         // Closing the sheet any other way than its own buttons still counts as skipped.
