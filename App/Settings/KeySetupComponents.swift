@@ -15,7 +15,7 @@ import SwiftUI
 struct NewKeyDraft: Hashable {
     var name = ""
     var type: KeyGenerationType = .recommended
-    var policy: SigningPolicy = .oncePerSession
+    var policy: SigningPolicy = .always
 
     var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -61,7 +61,7 @@ struct KeyGenerationFields: View {
 @MainActor
 enum KeyFileImport {
     /// Touch ID policy for imported keys; it can be changed in Settings › Keys.
-    static let policy: SigningPolicy = .oncePerSession
+    static let policy: SigningPolicy = .always
 
     /// Shows the open panel. Returns the chosen files, or none when the user cancels. Files that
     /// are never private keys (`.pub`, `known_hosts`, `config`…) are greyed out.
