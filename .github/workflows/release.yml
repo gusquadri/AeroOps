@@ -283,6 +283,7 @@ jobs:
           mkdir -p release-assets
           cp build/release/run-*/"AeroOps-$VERSION.dmg" "$UPDATES_DIR/AeroOps-$VERSION.zip" \
             "$UPDATES_DIR/appcast.xml" release-assets/
+          cp "release-assets/AeroOps-$VERSION.dmg" release-assets/AeroOps.dmg
           (cd release-assets && shasum -a 256 AeroOps-*.dmg AeroOps-*.zip appcast.xml > SHA256SUMS && cat SHA256SUMS)
 
       - name: Upload release assets

@@ -15,7 +15,7 @@ struct ContainersScreen: View {
         NavigationStack(path: $navigator.containerPath) {
             content
                 .background { SkyBackground() }
-                .searchable(text: $search, prompt: "Name or address")
+                .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name or address")
                 .navigationTitle("Containers")
                 .navigationDestination(for: ContainersRoute.self) { ContainersDestination(route: $0) }
         }

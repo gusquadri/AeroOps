@@ -43,7 +43,7 @@ struct DashboardContent: View {
     var body: some View {
         content
             .background { SkyBackground() }
-            .tabSearchable(text: $search, prompt: "Name or address")
+            .tabSearchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name or address")
             .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
             .toolbar {
                 if showsAppItems {

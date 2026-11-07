@@ -13,7 +13,7 @@ struct FilesHostsScreen: View {
         NavigationStack(path: $navigator.filePath) {
             content
                 .background { SkyBackground() }
-                .searchable(text: $search, prompt: "Name or address")
+                .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name or address")
                 .navigationTitle("Files")
                 .navigationDestination(for: RemoteHost.ID.self) { FilesScreen(id: $0) }
         }
