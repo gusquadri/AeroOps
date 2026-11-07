@@ -6,10 +6,6 @@ import SwiftUI
 /// The split layout's sidebar, like the Mac's: every server with its status, its open terminals
 /// under it (tap one to show it in Terminals), Add Host and Keys at the bottom, and a context
 /// menu per server.
-///
-/// Add Host and Keys sit in a bar, not an inset, so the list scrolls under it behind the scroll
-/// edge effect; and they ignore the keyboard, which would lift them over the list while a
-/// terminal is typed in.
 struct SplitSidebar: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
@@ -119,9 +115,8 @@ private extension View {
     }
 }
 
-/// A strip astride the sidebar's trailing edge that resizes it, as the Mac's divider does: an
-/// iPhone's split view has none. It lies over both columns and the navigation bar, so a drag
-/// started just either side of the edge, at any height, takes it.
+/// A strip astride the sidebar's trailing edge, over both columns and the navigation bar, that
+/// resizes the sidebar when dragged.
 struct SidebarResizeHandle: View {
     private static let reach = 12.0
     @AppStorage(SidebarWidth.key) private var width = SidebarWidth.initial
@@ -158,9 +153,8 @@ private enum SidebarItem: Hashable {
     case terminal(MobileTerminal.ID)
 }
 
-/// A terminal under its server in the sidebar: its title over its state, like a server's name
-/// over its address, so a narrow sidebar never cuts the title short for the state. Its orb lines
-/// up with the server's name, past the server's own orb.
+/// A terminal under its server in the sidebar: its title over its state, its orb in line with
+/// the server's name.
 private struct SidebarTerminalRow: View {
     let title: String
     let state: EmbeddedTerminalSession.State

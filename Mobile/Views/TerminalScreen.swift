@@ -59,8 +59,7 @@ private struct TerminalSessionView: View {
             .onChange(of: isTabShown) { updateFocus() }
     }
 
-    /// Focuses the running shell while its tab is shown. A hidden one lets the keyboard go, which
-    /// would otherwise stay up over the other tabs for it.
+    /// Focuses the running shell while its tab is shown, and dismisses the keyboard while hidden.
     private func updateFocus() {
         if !isTabShown {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

@@ -2,7 +2,7 @@ import AeroCore
 import SwiftUI
 
 /// One host's details (the Mac inspector's ``HostDetailView``), with Edit, Terminal and Files.
-/// In the split layout Edit sits beside Refresh: there the navigation bar holds the tab switcher.
+/// In the split layout Edit sits beside Refresh.
 struct HostScreen: View {
     let id: RemoteHost.ID
     @Environment(MobileModel.self) private var model

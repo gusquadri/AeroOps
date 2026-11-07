@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The app's tabs, and the host key sheet any of them can ask for. A regular-width screen (an
-/// unfolded iPhone Duo, a Pro Max in landscape) gets ``SplitRootView``, the Mac app's layout,
-/// instead of the tab bar.
+/// The tab bar, or ``SplitRootView`` on a regular-width screen, and the host key sheet any
+/// screen can ask for.
 struct MobileRootView: View {
     @Environment(MobileModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -26,6 +25,7 @@ struct MobileRootView: View {
         }
         .environment(navigator)
         .onChange(of: isSplit, initial: true) { navigator.layoutChanged(isSplit: isSplit) }
+        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
         .task(openDebugScreen)
         .sheet(item: $model.trustRequest) { request in
             NavigationStack {

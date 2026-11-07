@@ -3,8 +3,8 @@ import AeroTheme
 import Collectors
 import SwiftUI
 
-/// The logs opened on `containers`, following while the container runs. Stops in the background,
-/// where iOS drops the connection, and while its tab is hidden, and reads again on return.
+/// The logs opened on `containers`, following while the container runs. Stops in the background
+/// and while its tab is hidden, and reads again on return.
 struct LogsScreen: View {
     let containers: HostContainersModel
 

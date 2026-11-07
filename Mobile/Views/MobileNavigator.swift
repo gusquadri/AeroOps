@@ -5,8 +5,7 @@ import Observation
 enum MobileSection: Hashable, Identifiable, SwitcherTab {
     case servers, terminals, files, containers, keys
 
-    /// The split layout's tab switcher, in the tab bar's order so folding an iPhone Duo keeps
-    /// every tab in its place. Keys opens from the sidebar.
+    /// The split layout's tab switcher, in the tab bar's order. Keys opens from the sidebar.
     static let switcherTabs: [MobileSection] = [.servers, .terminals, .files, .containers]
 
     var id: Self { self }
@@ -59,11 +58,7 @@ enum ContainersRoute: Hashable {
     }
 }
 
-/// The selected tab and each tab's stack, so a button in one tab can open a screen in another.
-///
-/// Both layouts read the same state, so folding or unfolding an iPhone Duo keeps what was shown:
-/// in the split layout a tab's stack holds the selected server's screen (the Servers stack is the
-/// server's details, the Terminals stack the terminal shown).
+/// The selected tab and each tab's stack, shared by the tab and split layouts.
 @MainActor
 @Observable
 final class MobileNavigator {
@@ -76,6 +71,9 @@ final class MobileNavigator {
     var selectedHost: RemoteHost.ID?
     /// Keys, a sheet in the split layout.
     var isShowingKeys = false
+
+    /// The tab the split layout's switcher selects: Keys is a sheet there, over Servers.
+    var switcherSection: MobileSection { section == .keys ? .servers : section }
 
     init(section: MobileSection = .servers) {
         self.section = section
@@ -128,7 +126,7 @@ final class MobileNavigator {
         case .files: filePath = [id]
         case .containers: showWorkloads(of: id)
         case .terminals: terminalPath = terminal.map { [$0] } ?? []
-        default: break
+        case .keys: break
         }
     }
 
@@ -147,8 +145,8 @@ final class MobileNavigator {
         if containerPath.first?.hostID != id { containerPath = [.host(id)] }
     }
 
-    /// Switches the split layout to `section`, showing the selected server there, as the Mac's
-    /// tabs all show the sidebar's host. `terminal` is as for ``select(host:terminal:opensDetails:)``.
+    /// Switches the split layout to `section`, showing the selected server there. `terminal` is
+    /// as for ``select(host:terminal:opensDetails:)``.
     func open(_ section: MobileSection, terminal: MobileTerminal.ID?) {
         self.section = section
         if let selectedHost {

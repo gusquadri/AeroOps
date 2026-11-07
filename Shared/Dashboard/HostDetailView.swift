@@ -25,8 +25,7 @@ struct HostDetailView: View {
     /// on the card). `nil` hides the button.
     var onOpenTerminal: (() -> Void)?
     var onBrowseFiles: (() -> Void)?
-    /// Edit the host, beside Refresh (the iOS split layout, whose navigation bar has no room left
-    /// for it). `nil` hides the button.
+    /// Edit the host, beside Refresh. `nil` hides the button.
     var onEdit: (() -> Void)?
 
     var body: some View {

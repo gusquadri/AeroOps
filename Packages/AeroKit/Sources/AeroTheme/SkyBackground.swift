@@ -119,9 +119,7 @@ private struct SkyPainting {
     let request: Request
     let surface: IOSurface
 
-    /// The last bitmaps painted, newest first, shared by every background. A background built
-    /// anew (a tab switched to, a screen pushed) at a size already painted shows its bitmap at
-    /// once, rather than drawing the canvas and then painting the sky again.
+    /// The last bitmaps painted, newest first, shared by every background.
     @MainActor private static var cache: [SkyPainting] = []
     private static let cacheLimit = 2
 

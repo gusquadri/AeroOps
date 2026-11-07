@@ -4,7 +4,6 @@ import SwiftUI
 
 /// The Servers tab: the dashboard, with a host's details or a folder pushed over it.
 struct DashboardScreen: View {
-    @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
 
     var body: some View {
@@ -13,7 +12,6 @@ struct DashboardScreen: View {
             DashboardContent(onOpen: { navigator.serverPath.append($0) })
                 .navigationDestination(for: ServerRoute.self, destination: screen)
         }
-        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
     }
 
     @ViewBuilder

@@ -16,10 +16,7 @@ extension SwitcherTab {
 
 /// The main window's tab switcher: one segment per tab, each with its SF Symbol and title.
 /// The selected tab is a lit gel pill (aqua by day, violet by night) that slides between tabs.
-/// The Mac app's toolbar and the iOS app's split layout (an unfolded iPhone Duo) both use it.
-///
-/// Custom rather than a segmented `Picker`: on macOS a segmented control shows a `Label`'s
-/// title or its icon, never both.
+/// The Mac app's toolbar and the iOS app's split layout both use it.
 struct TabSwitcher<Tab: SwitcherTab>: View {
     let tabs: [Tab]
     @Binding var selection: Tab
@@ -80,8 +77,6 @@ struct TabSwitcher<Tab: SwitcherTab>: View {
     private static var horizontalPadding: CGFloat { 12 }
     private static var verticalPadding: CGFloat { 5 }
     #else
-    /// Smaller than the body text an iPhone uses, so every title still fits beside a widened
-    /// sidebar; and taller, for a finger.
     private static var textStyle: Font.TextStyle { .subheadline }
     private static var horizontalPadding: CGFloat { 10 }
     private static var verticalPadding: CGFloat { 8 }

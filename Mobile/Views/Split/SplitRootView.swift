@@ -2,14 +2,9 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
-/// The layout of a regular-width screen (an unfolded iPhone Duo, a Pro Max in landscape), like the
-/// Mac app's window: the servers and their terminals in a sidebar, and the selected server's
-/// Servers, Containers, Terminals or Files tab beside it, picked with the Mac's tab switcher.
-/// Keys opens as a sheet from the sidebar. The sidebar sits beside the tab, as on the Mac, not
-/// over it as an iPhone lays it by default.
-///
-/// It keeps its state in ``MobileNavigator``'s stacks, so folding back to the tabs shows the same
-/// screens.
+/// The regular-width layout (an unfolded iPhone Duo, a Pro Max in landscape), like the Mac app's
+/// window: servers and their terminals in a sidebar, the selected server's tab beside it, and Keys
+/// as a sheet. Its state lives in ``MobileNavigator``, shared with the tab layout.
 struct SplitRootView: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
@@ -36,7 +31,6 @@ struct SplitRootView: View {
         .onChange(of: hostInSection) { syncSelection() }
         .onChange(of: model.hosts.map(\.id)) { prune() }
         .onChange(of: model.terminals.map(\.id)) { prune() }
-        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
     }
 
     /// The server the current tab's stack shows.
@@ -66,19 +60,14 @@ struct SplitRootView: View {
     }
 }
 
-/// The selected tab, each with the tab switcher in its navigation bar.
-///
-/// Every tab shown so far stays alive under the selected one, as a tab bar keeps its tabs:
-/// switching back is instant and keeps the tab's place, where building a tab's screens anew
-/// takes the main thread a tenth of a second. A hidden tab gets `isTabShown` false: it stops its
-/// work, and its screens hide their toolbar items (``SwiftUI/View/tabToolbar(_:)``), which would
-/// otherwise show in the selected tab's navigation bar. Not a `TabView` with its bar hidden: in
-/// the split view's detail column, its tabs lose their navigation bars.
+/// The selected tab, with every tab opened so far kept alive under it. A hidden tab gets
+/// `isTabShown` false.
 private struct SplitDetail: View {
     @Environment(MobileNavigator.self) private var navigator
     @State private var opened: Set<MobileSection> = []
 
     var body: some View {
+        let shown = navigator.switcherSection
         ZStack {
             ForEach(MobileSection.switcherTabs.filter { opened.contains($0) || $0 == shown }) { section in
                 let isShown = section == shown
@@ -92,11 +81,6 @@ private struct SplitDetail: View {
         .onChange(of: shown, initial: true) { opened.insert(shown) }
     }
 
-    /// Keys is a sheet here, so it shows the Servers tab under it.
-    private var shown: MobileSection {
-        navigator.section == .keys ? .servers : navigator.section
-    }
-
     @ViewBuilder
     private func tab(_ section: MobileSection) -> some View {
         switch section {
@@ -108,13 +92,8 @@ private struct SplitDetail: View {
     }
 }
 
-/// Every server's card; picking one (here or in the sidebar) shows its details in their place,
-/// as opening a folder shows its cards, and Back returns to the screen before. It shows the Servers tab's stack, so folding keeps it.
-///
-/// Not the Mac's inspector beside the cards: beside the sidebar there is no room for both (an
-/// iPhone's `.inspector` lays itself over the cards and dims them instead). And the details are
-/// the stack's root rather than pushed onto it, like the other tabs' screens: picking a row in
-/// the sidebar pops the detail column's stack, which would close them.
+/// Every server's card, or in their place the picked server's details or folder (the Servers
+/// stack's last screen); Back returns to the screen before.
 private struct SplitServers: View {
     @Environment(MobileNavigator.self) private var navigator
 
@@ -144,31 +123,29 @@ private struct SplitServers: View {
     }
 }
 
-/// The selected server's containers and pods; their screens push here.
-///
-/// Hidden, the tab pops its screens, and pushes them again when shown: pushed screens sit in
-/// the split view's detail column itself, over whichever tab is shown, not in the tab.
+/// The selected server's containers and pods, with their screens pushed over them while the
+/// tab is shown.
 private struct SplitContainers: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
     @Environment(\.isTabShown) private var isTabShown
 
     var body: some View {
-        if let id = navigator.containerPath.first?.hostID {
-            NavigationStack(path: pushed) {
-                HostWorkloadsScreen(containers: model.containers(for: id))
-                    .sectionSwitcher()
-                    .navigationDestination(for: ContainersRoute.self) { ContainersDestination(route: $0).sectionSwitcher() }
+        let id = navigator.containerPath.first?.hostID
+        NavigationStack(path: pushed) {
+            Group {
+                if let id {
+                    HostWorkloadsScreen(containers: model.containers(for: id))
+                } else {
+                    SelectServerView()
+                }
             }
-            .transaction(value: isTabShown) { $0.disablesAnimations = true }
-            .id(id)
-            .containersStack(navigator.containerPath, model: model)
-        } else {
-            NavigationStack {
-                SelectServerView()
-                    .sectionSwitcher()
-            }
+            .sectionSwitcher()
+            .navigationDestination(for: ContainersRoute.self) { ContainersDestination(route: $0).sectionSwitcher() }
         }
+        .transaction(value: isTabShown) { $0.disablesAnimations = true }
+        .id(id)
+        .containersStack(navigator.containerPath, model: model)
     }
 
     /// The Containers stack past its first screen, the server's workloads; none while hidden.
@@ -225,14 +202,15 @@ private struct SplitFiles: View {
 
     var body: some View {
         NavigationStack {
-            if let id = navigator.filePath.first {
-                FilesScreen(id: id)
-                    .id(id)
-                    .sectionSwitcher()
-            } else {
-                SelectServerView()
-                    .sectionSwitcher()
+            Group {
+                if let id = navigator.filePath.first {
+                    FilesScreen(id: id)
+                        .id(id)
+                } else {
+                    SelectServerView()
+                }
             }
+            .sectionSwitcher()
         }
     }
 }
@@ -254,11 +232,7 @@ private struct SelectServerView: View {
 }
 
 /// The tab switcher in place of the title, after a Back button to the cards when `back` is set.
-/// Where the bar has no room for every tab's title (an unfolded iPhone Duo held upright, whose
-/// status bar takes the bar's far end), only the selected tab shows its title.
-///
-/// Back sits beside the switcher rather than in its own leading item: beside the sidebar, the
-/// navigation bar has no room left for one and lays it below the bar, at the far edge.
+/// Where the bar has no room for every tab's title, only the selected tab shows its title.
 private struct SectionSwitcher: ViewModifier {
     let back: (() -> Void)?
     @Environment(MobileModel.self) private var model
@@ -286,7 +260,7 @@ private struct SectionSwitcher: ViewModifier {
 
     private var selection: Binding<MobileSection> {
         Binding(
-            get: { navigator.section == .keys ? .servers : navigator.section },
+            get: { navigator.switcherSection },
             set: { section in
                 let terminal = navigator.selectedHost.flatMap {
                     model.terminal(toShowOn: $0, current: navigator.terminalPath.last)
@@ -304,20 +278,17 @@ private extension View {
 }
 
 extension EnvironmentValues {
-    /// False while the split layout keeps this tab alive but hidden under another one. Screens
-    /// stop their work then, as a tab bar's hidden tab does when it disappears.
+    /// False while the split layout keeps this tab alive but hidden under another one.
     @Entry var isTabShown = true
 }
 
 extension View {
-    /// The screen's toolbar `items`, left out while its tab is hidden
-    /// (``EnvironmentValues/isTabShown``): the split layout's tabs share one navigation bar.
+    /// The screen's toolbar `items`, left out while its tab is hidden (``EnvironmentValues/isTabShown``).
     func tabToolbar<Items: ToolbarContent>(@ToolbarContentBuilder _ items: () -> Items) -> some View {
         modifier(TabToolbar(items: items()))
     }
 
-    /// `searchable`, left out while the screen's tab is hidden, as ``tabToolbar(_:)`` leaves out
-    /// its items. It sits on a view behind the screen, so leaving it out keeps the screen as it is.
+    /// `searchable`, left out while the screen's tab is hidden.
     func tabSearchable(text: Binding<String>, placement: SearchFieldPlacement = .automatic, prompt: LocalizedStringKey? = nil) -> some View {
         modifier(TabSearchable(text: text, placement: placement, prompt: prompt))
     }
