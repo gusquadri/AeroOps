@@ -136,7 +136,7 @@ targets:
         PRODUCT_NAME: AeroOps
         PRODUCT_BUNDLE_IDENTIFIER: app.aeroops.AeroOpsMobile
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "1.1"
         # One 1024 px icon in Mobile/Assets.xcassets; iOS applies the corner mask.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
