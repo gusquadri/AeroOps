@@ -36,21 +36,31 @@ struct ToolForwarder: Sendable {
         guard let tool = BridgeTool(rawValue: params.name) else {
             throw MCPError.invalidParams("Unknown tool \(String(reflecting: String(params.name.prefix(64)))). Call tools/list for the available tools.")
         }
-        let arguments = (params.arguments ?? [:]).mapValues(JSONValue.init(bridging:))
-        // Validate before touching the socket, so a bad call never starts AeroOps.
+        let arguments: [String: JSONValue]
         do {
-            _ = try ToolCall.parse(tool: tool, arguments: arguments)
+            arguments = try Self.validated(tool, (params.arguments ?? [:]).mapValues(JSONValue.init(bridging:)))
         } catch {
             return Self.failure(error.message)
         }
-        let client: BridgeClient
         switch bridge {
-        case .success(let bridge): client = bridge
-        case .failure(let error): return Self.failure("AeroOps is not reachable: \(error.description)")
+        case .success(let client):
+            return try result(await forward(tool, arguments, params, client), tool: tool)
+        case .failure(let error):
+            return Self.failure("AeroOps is not reachable: \(error.description)")
         }
+    }
 
-        // Progress lines from the app (e.g. "Running on staging") become
-        // notifications/progress when the client asked for them, in order, before the result.
+    static func validated(_ tool: BridgeTool, _ arguments: [String: JSONValue]) throws(ToolArgumentError) -> [String: JSONValue] {
+        guard case .files(let call) = try ToolCall.parse(tool: tool, arguments: arguments),
+              let localPath = try LocalFileAccess.authorize(call, workingDirectory: FileManager.default.currentDirectoryPath)
+        else { return arguments }
+        var resolved = arguments
+        resolved["localPath"] = .string(localPath)
+        return resolved
+    }
+
+    private func forward(_ tool: BridgeTool, _ arguments: [String: JSONValue], _ params: CallTool.Parameters,
+                         _ client: BridgeClient) async -> Result<BridgeReply, any Error> {
         let token = params._meta?.progressToken
         let (updates, sink) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(32))
         let server = self.server
@@ -65,31 +75,24 @@ struct ToolForwarder: Sendable {
                     .init(progressToken: token, progress: step, message: message)))
             }
         }
-
         let outcome: Result<BridgeReply, any Error>
         do {
-            let reply = try await client.call(
+            outcome = .success(try await client.call(
                 tool: tool.rawValue, arguments: arguments,
                 toolUseId: params._meta?["claudecode/toolUseId"]?.stringValue,
-                progress: { sink.yield($0) })
-            outcome = .success(reply)
+                progress: { sink.yield($0) }))
         } catch {
             outcome = .failure(error)
         }
         sink.finish()
         await forwarding.value
+        return outcome
+    }
 
+    private func result(_ outcome: Result<BridgeReply, any Error>, tool: BridgeTool) throws -> CallTool.Result {
         switch outcome {
-        case .success(let reply) where reply.ok:
-            return CallTool.Result(
-                content: (reply.content ?? []).map { .text(text: $0.text, annotations: nil, _meta: nil) },
-                structuredContent: reply.structuredContent.map(MCP.Value.init(bridging:)),
-                isError: false)
         case .success(let reply):
-            let error = reply.error ?? BridgeError(code: .internalError, message: "AeroOps could not complete \(tool.rawValue).")
-            if error.code == .unknownTool { throw MCPError.invalidParams(error.message) }
-            logger.info("\(tool.rawValue) failed in the app: \(error.code)")
-            return Self.failure(error.message)
+            return try result(reply, tool: tool)
         case .failure(let error) where error is CancellationError:
             logger.info("\(tool.rawValue) cancelled by the client")
             throw CancellationError()
@@ -100,6 +103,19 @@ struct ToolForwarder: Sendable {
             logger.error("\(tool.rawValue): unexpected \(String(describing: type(of: error)))")
             return Self.failure("Could not talk to AeroOps.")
         }
+    }
+
+    private func result(_ reply: BridgeReply, tool: BridgeTool) throws -> CallTool.Result {
+        guard !reply.ok else {
+            return CallTool.Result(
+                content: (reply.content ?? []).map { .text(text: $0.text, annotations: nil, _meta: nil) },
+                structuredContent: reply.structuredContent.map(MCP.Value.init(bridging:)),
+                isError: false)
+        }
+        let error = reply.error ?? BridgeError(code: .internalError, message: "AeroOps could not complete \(tool.rawValue).")
+        if error.code == .unknownTool { throw MCPError.invalidParams(error.message) }
+        logger.info("\(tool.rawValue) failed in the app: \(error.code)")
+        return Self.failure(error.message)
     }
 
     static func failure(_ message: String) -> CallTool.Result {

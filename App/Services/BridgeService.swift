@@ -113,7 +113,8 @@ final class BridgeService {
             socketURL: socketURL,
             handler: AppBridgeHandler(source: dataSource, runner: runner),
             executor: executor,
-            peerValidator: CodeSignaturePeerValidator.forApp()
+            peerValidator: CodeSignaturePeerValidator.forApp(),
+            files: RemoteFiles { [runner] in try await runner.sftp(to: $0) }
         )
         self.bridge = bridge
         self.executor = executor
@@ -474,6 +475,10 @@ final class BridgeCommandRunner: RemoteCommandRunner, HostCommandRunning, HostCo
     }
 
     private var runner: SSHRunner { current.withLock { $0 } }
+
+    func sftp(to host: RemoteHost) async throws -> SFTPClient {
+        try await SFTPClient.connect(using: runner, to: host)
+    }
 
     func run(_ remoteCommand: String, on host: RemoteHost, timeout: Duration, outputLimit: Int,
              output: @escaping @Sendable (CommandOutputChunk) -> Void) async throws -> RemoteCommandOutcome {

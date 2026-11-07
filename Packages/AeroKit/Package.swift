@@ -121,7 +121,7 @@ let package = Package(
         // Usage: the header comment of Tests/BridgeHarness/main.swift.
         .executableTarget(
             name: "BridgeHarness",
-            dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore"],
+            dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit"],
             path: "Tests/BridgeHarness"
         ),
 

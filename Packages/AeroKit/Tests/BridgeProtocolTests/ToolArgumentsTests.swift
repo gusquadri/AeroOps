@@ -18,14 +18,14 @@ struct ToolArgumentsTests {
     private let logs: [String: JSONValue] = ["host": "web", "kind": "pod", "name": "api-0"]
 
     @Test func validCallsParse() throws {
-        #expect(try ToolCall.parse(toolName: "list_hosts", arguments: [:]) == .listHosts(ListHostsArguments()))
-        #expect(try ToolCall.parse(toolName: "list_hosts", arguments: ["tag": "prod"]) == .listHosts(ListHostsArguments(tag: "prod")))
+        #expect(try ToolCall.parse(toolName: "list_hosts", arguments: [:]) == .monitoring(.listHosts(ListHostsArguments())))
+        #expect(try ToolCall.parse(toolName: "list_hosts", arguments: ["tag": "prod"]) == .monitoring(.listHosts(ListHostsArguments(tag: "prod"))))
         #expect(try ToolCall.parse(toolName: "get_host_metrics", arguments: ["host": "  web-1 "]) ==
-            .getHostMetrics(HostArguments(host: "web-1")))
+            .monitoring(.getHostMetrics(HostArguments(host: "web-1"))))
         #expect(try ToolCall.parse(toolName: "list_containers", arguments: ["host": "web", "all": "true"]) ==
-            .listContainers(ListContainersArguments(host: "web", all: true)))
+            .monitoring(.listContainers(ListContainersArguments(host: "web", all: true))))
         #expect(try ToolCall.parse(toolName: "list_pods", arguments: ["host": "web", "namespace": "kube-system"]) ==
-            .listPods(ListPodsArguments(host: "web", namespace: "kube-system")))
+            .monitoring(.listPods(ListPodsArguments(host: "web", namespace: "kube-system"))))
         #expect(try ToolCall.parse(toolName: "run_command", arguments: ["host": "web", "command": "df -h\nuptime", "reason": "disk"]) ==
             .runCommand(RunCommandArguments(host: "web", command: "df -h\nuptime", reason: "disk", timeoutSeconds: 60)))
     }
@@ -34,7 +34,7 @@ struct ToolArgumentsTests {
         let call = try ToolCall.parse(toolName: "get_logs", arguments: logs.merging([
             "namespace": "shop", "container": "app", "tail": "500", "since": "15m", "previous": true,
         ]) { $1 })
-        guard case .getLogs(let arguments) = call else {
+        guard case .monitoring(.getLogs(let arguments)) = call else {
             Issue.record("not get_logs")
             return
         }
@@ -49,11 +49,10 @@ struct ToolArgumentsTests {
         #expect(request.sinceSeconds == 900)
         #expect(!request.follow)
 
-        guard case .getLogs(let defaults) = try ToolCall.parse(toolName: "get_logs", arguments: logs) else { return }
+        guard case .monitoring(.getLogs(let defaults)) = try ToolCall.parse(toolName: "get_logs", arguments: logs) else { return }
         #expect(defaults.tail == 200)
         #expect(defaults.sinceSeconds == nil)
-        #expect(try ToolCall.parse(toolName: "get_logs", arguments: logs.merging(["tail": 2000.0, "since": 90]) { $1 })
-            .tool == .getLogs)
+        #expect(message("get_logs", logs.merging(["tail": 2000.0, "since": 90]) { $1 }) == nil)
     }
 
     @Test func limitMessages() {

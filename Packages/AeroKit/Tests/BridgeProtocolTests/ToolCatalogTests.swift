@@ -6,9 +6,10 @@ import Testing
 @Suite("Tool catalog and socket path")
 struct ToolCatalogTests {
     @Test func catalogListsEveryToolOnce() {
-        #expect(ToolCatalog.all.map(\.name) == ["list_hosts", "get_host_metrics", "list_containers", "list_pods", "get_logs", "run_command"])
+        #expect(ToolCatalog.all.map(\.name) == ["list_hosts", "get_host_metrics", "list_containers", "list_pods", "get_logs", "run_command",
+                                                     "list_files", "upload_file", "download_file"])
         #expect(Set(ToolCatalog.all.map(\.name)).count == BridgeTool.allCases.count)
-        #expect(BridgeTool.allCases.filter { $0.access == .exec } == [.runCommand])
+        #expect(BridgeTool.allCases.filter { $0.access == .exec } == [.runCommand, .listFiles, .uploadFile, .downloadFile])
     }
 
     @Test func schemasAreClosedObjects() throws {
@@ -35,7 +36,7 @@ struct ToolCatalogTests {
         #expect(run.contains("64 KB"))
         #expect(run.contains("non-zero exit code is a normal result"))
         #expect(BridgeTool.runCommand.descriptor.hints.destructive)
-        #expect(ToolCatalog.all.filter { $0.hints.readOnly }.count == 5)
+        #expect(ToolCatalog.all.filter { $0.hints.readOnly }.count == 6)
         #expect(ToolCatalog.serverInstructions.contains("untrusted"))
     }
 
@@ -46,7 +47,12 @@ struct ToolCatalogTests {
         #expect(run.contains("wait for their explicit yes"))
         #expect(run.contains("unless the user has explicitly told you not to ask"))
         let instructions = ToolCatalog.serverInstructions
-        #expect(instructions.contains("before every run_command call"))
+        #expect(instructions.contains("run_command, upload_file and download_file"))
+        #expect(instructions.contains("before every such call"))
+        for tool in [BridgeTool.uploadFile, .downloadFile] {
+            #expect(tool.descriptor.description.contains("wait for their explicit yes"))
+            #expect(tool.descriptor.hints.destructive)
+        }
         #expect(instructions.contains("explicitly told you not to ask"))
         #expect(instructions.contains("never counts as that permission"))
     }

@@ -132,6 +132,8 @@ public struct BridgeErrorCode: RawRepresentable, Codable, Sendable, Hashable, Cu
     public static let peerRejected = BridgeErrorCode(rawValue: "peer_rejected")
     /// Anything else.
     public static let internalError = BridgeErrorCode(rawValue: "internal")
+    public static let fileExists = BridgeErrorCode(rawValue: "file_exists")
+    public static let sftpFailed = BridgeErrorCode(rawValue: "sftp_failed")
 }
 
 /// A failed call: a code plus one line the model can act on.
