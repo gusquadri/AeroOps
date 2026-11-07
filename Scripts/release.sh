@@ -105,16 +105,18 @@ cd "$repo"
 
 read_profile() {
     [ -f "$profile" ] || die "no provisioning profile at $profile"
-    local plist app_id all_devices
+    local plist app_id all_devices managed
     plist=$(mktemp)
     security cms -D -i "$profile" > "$plist" 2> /dev/null || die "$profile is not a provisioning profile"
     profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")
     profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")
     app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$plist" 2> /dev/null || true)
     all_devices=$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$plist" 2> /dev/null || true)
+    managed=$(/usr/libexec/PlistBuddy -c 'Print :IsXcodeManaged' "$plist" 2> /dev/null || true)
     rm -f "$plist"
     [ "$app_id" = "$team.$bundle_id" ] || die "$profile is for \"$app_id\", not $team.$bundle_id"
     [ "$all_devices" = true ] || die "$profile is not a Developer ID profile"
+    [ "$managed" != true ] || die "$profile is Xcode managed; create a Developer ID profile at developer.apple.com"
     case $profile_name in
         *[\"\\]*) die "the profile name has quotes or backslashes: $profile_name" ;;
     esac
@@ -212,11 +214,12 @@ run mkdir -p "$run_dir" "$updates_dir"
 step "Generating the Xcode project"
 run xcodegen generate
 
-if [ -n "$profile" ]; then
+profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+installed_profile="$profiles_dir/$profile_uuid.provisionprofile"
+if [ -n "$profile" ] && ! cmp -s "$profile" "$installed_profile"; then
     step "Installing the provisioning profile"
-    profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
     run mkdir -p "$profiles_dir"
-    run cp "$profile" "$profiles_dir/$profile_uuid.provisionprofile"
+    run cp "$profile" "$installed_profile"
 fi
 
 step "Archiving (Release, Developer ID)"
