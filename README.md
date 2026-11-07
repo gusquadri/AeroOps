@@ -171,44 +171,6 @@ Set each host's tier in Settings › MCP or in the host editor. New hosts start 
   - `run_command` times out after at most 300 seconds.
   - A cancelled or timed-out command has its remote process group killed.
 
-## Project layout
-
-```text
-App/                    SwiftUI app: Dashboard, Containers, Terminals, Activity, Settings,
-                        Onboarding, Shell, Services, Model, Components, Support
-MCP/                    aeroops-mcp, the stdio MCP server that forwards to the app
-Packages/AeroKit/       Swift package with one target per module:
-  Sources/AeroCore        models, parsers, ShellQuote, HostStore, ssh config importer
-  Sources/SSHKit          system ssh, generated ssh_config, ControlMaster, host-key trust
-  Sources/KeyAgent        in-app ssh-agent, Keychain and Secure Enclave key store
-  Sources/Collectors      metrics, Docker and Kubernetes collectors, polling actors
-  Sources/TerminalKit     libghostty wrapper
-  Sources/BridgeProtocol  bridge.sock messages and client, shared with aeroops-mcp
-  Sources/AgentBridge     bridge server, PolicyEngine, run_command, SFTP file tools
-  Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusBubble, ...) and the system logos
-  Tests/                  one test target per module, plus BridgeHarness and test helpers
-Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)
-Scripts/release.sh      signed, notarized release build
-Scripts/verify-appcast.swift  checks a release's Sparkle signature against the app's public key
-.github/workflows/      release.yml: tag vX.Y.Z → tested, signed, notarized GitHub Release + appcast
-dev/                    dev servers, VM, fixtures and self-test helpers
-docs/screenshots/       README screenshots
-project.yml             XcodeGen spec
-```
-
-## Status
-
-Done: the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, the exec tier, ssh-config import and onboarding.
-
-Still open:
-
-- **Release signing.**
-  - Done: the hardened runtime, Sparkle wiring, `Scripts/release.sh` and the GitHub Actions release. Pushing a `vX.Y.Z` tag publishes a GitHub Release, and installed copies check its appcast every hour.
-  - Left: making the repository public so Sparkle can download the feed. A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
-- **Performance pass (in progress).** The target is that 20 polled hosts keep the app under 3% CPU.
-
-The backlog after v1 includes a hub for history and alerts, tmux-backed tabs, password auth and Podman.
-
 ## License
 
 AeroOps is released under the [MIT License](LICENSE). The operating system logos in `AeroTheme` remain trademarks of their owners.
