@@ -59,7 +59,8 @@ struct HostCard: View, Equatable {
         AeroCard(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer(minLength: 8)
                     GlossyGauge(value: metrics?.cpuPercent.map { $0 / 100 }, label: "CPU")
                         .help(cpuHelp(metrics))
                     Spacer(minLength: 8)
@@ -68,9 +69,10 @@ struct HostCard: View, Equatable {
                     Spacer(minLength: 8)
                     GlossyGauge(value: metrics?.cardDisk()?.usedFraction, label: "Disk")
                         .help(diskHelp(metrics))
+                    Spacer(minLength: 8)
                 }
                 .opacity(dimmed ? Self.staleOpacity : 1)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 16)
             }
         }

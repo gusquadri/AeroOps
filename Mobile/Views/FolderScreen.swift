@@ -6,6 +6,8 @@ import SwiftUI
 /// the folder, renames it or deletes it (its hosts move out).
 struct FolderScreen: View {
     let id: HostFolder.ID
+    /// Shows the details of the host with this ID.
+    let onSelect: (RemoteHost.ID) -> Void
 
     @Environment(MobileModel.self) private var model
     @State private var editor: HostEditorScreen.Request?
@@ -41,7 +43,7 @@ struct FolderScreen: View {
             }
         } else {
             ScrollView {
-                HostCardGrid(hosts: hosts, folder: id, isArranging: true) { folderRequest = .new(moving: $0) }
+                HostCardGrid(hosts: hosts, folder: id, isArranging: true, onSelect: onSelect) { folderRequest = .new(moving: $0) }
                     .padding(16)
             }
             .refreshable { model.refreshAll() }

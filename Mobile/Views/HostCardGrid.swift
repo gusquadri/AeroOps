@@ -10,6 +10,8 @@ struct HostCardGrid: View {
     /// The folder the grid shows (`nil`: the top level).
     let folder: HostFolder.ID?
     let isArranging: Bool
+    /// Shows the details of the host with this ID.
+    let onSelect: (RemoteHost.ID) -> Void
     /// Asks for a new folder that the host with this ID moves into.
     let onNewFolder: (RemoteHost.ID) -> Void
 
@@ -61,7 +63,7 @@ struct HostCardGrid: View {
             onOpenSSH: { navigator.show(terminal: model.currentTerminal(on: host.id).id) },
             onBrowseFiles: { navigator.showFiles(of: host.id) },
             keyBlock: model.hostKeyBlock(for: host),
-            onReviewKey: { navigator.serverPath.append(.host(host.id)) },
+            onReviewKey: { onSelect(host.id) },
             onTrustKey: { Task { await model.requestHostKeyTrust(for: host) } },
             isScanningKey: model.scanningHostIDs.contains(host.id),
             keyScanError: model.scanErrors[host.id],
@@ -69,7 +71,7 @@ struct HostCardGrid: View {
         )
         .equatable()
         .contentShape(.rect(cornerRadius: Aero.radius.card))
-        .onTapGesture { navigator.serverPath.append(.host(host.id)) }
+        .onTapGesture { onSelect(host.id) }
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows the server’s details")
     }

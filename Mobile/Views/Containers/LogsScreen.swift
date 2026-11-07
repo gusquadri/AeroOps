@@ -4,7 +4,7 @@ import Collectors
 import SwiftUI
 
 /// The logs opened on `containers`, following while the container runs. Stops in the background,
-/// where iOS drops the connection, and reads again on return.
+/// where iOS drops the connection, and while its tab is hidden, and reads again on return.
 struct LogsScreen: View {
     let containers: HostContainersModel
 
@@ -21,6 +21,7 @@ struct LogsScreen: View {
 private struct LogsView: View {
     @Bindable var viewer: LogViewerModel
     @Environment(MobileModel.self) private var model
+    @Environment(\.isTabShown) private var isTabShown
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,11 +37,12 @@ private struct LogsView: View {
         .navigationSubtitle(statusText)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(.hidden, for: .tabBar)
-        .searchable(text: $viewer.searchText, placement: .navigationBarDrawer(displayMode: .automatic))
-        .toolbar { toolbar }
+        .tabSearchable(text: $viewer.searchText, placement: .navigationBarDrawer(displayMode: .automatic))
+        .tabToolbar { toolbar }
         .onAppear { viewer.start() }
         .onDisappear { viewer.stop() }
-        .onChange(of: model.activity) { _, activity in resume(activity) }
+        .onChange(of: model.activity) { resume() }
+        .onChange(of: isTabShown) { resume() }
         .task(id: viewer.searchText) { await search() }
     }
 
@@ -79,8 +81,8 @@ private struct LogsView: View {
         }
     }
 
-    private func resume(_ activity: MonitorActivity) {
-        if activity == .paused {
+    private func resume() {
+        if model.activity == .paused || !isTabShown {
             viewer.stop()
         } else if viewer.follow {
             viewer.reload()

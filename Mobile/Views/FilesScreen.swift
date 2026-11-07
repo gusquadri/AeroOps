@@ -79,7 +79,7 @@ private struct FileBrowserView<Backend: FileTransferBackend>: View {
         .background { SkyBackground() }
         .navigationTitle(host.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
+        .tabToolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu("Actions", systemImage: "ellipsis.circle") {
                     Button("New Folder…", systemImage: "folder.badge.plus") {

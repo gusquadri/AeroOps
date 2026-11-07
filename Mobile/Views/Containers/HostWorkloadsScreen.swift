@@ -13,8 +13,8 @@ struct HostWorkloadsScreen: View {
             .background { SkyBackground() }
             .navigationTitle(containers.host?.name ?? "Containers")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: searchText)
-            .toolbar {
+            .tabSearchable(text: searchText)
+            .tabToolbar {
                 ToolbarItem(placement: .primaryAction) { filterMenu }
             }
             .safeAreaInset(edge: .top) { sectionPicker }

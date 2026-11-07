@@ -54,7 +54,7 @@ struct TerminalsScreen: View {
     }
 }
 
-private struct TerminalRow: View {
+struct TerminalRow: View {
     let title: String
     let summary: String?
     let state: EmbeddedTerminalSession.State
@@ -133,7 +133,7 @@ extension MobileModel {
     }
 }
 
-private extension EmbeddedTerminalSession.State {
+extension EmbeddedTerminalSession.State {
     var title: String {
         switch self {
         case .connecting: "Connecting"

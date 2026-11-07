@@ -2,10 +2,38 @@ import AeroCore
 import AeroTheme
 import SwiftUI
 
+/// The Servers tab: the dashboard, with a host's details or a folder pushed over it.
+struct DashboardScreen: View {
+    @Environment(MobileModel.self) private var model
+    @Environment(MobileNavigator.self) private var navigator
+
+    var body: some View {
+        @Bindable var navigator = navigator
+        NavigationStack(path: $navigator.serverPath) {
+            DashboardContent(onOpen: { navigator.serverPath.append($0) })
+                .navigationDestination(for: ServerRoute.self, destination: screen)
+        }
+        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
+    }
+
+    @ViewBuilder
+    private func screen(for route: ServerRoute) -> some View {
+        switch route {
+        case .host(let id): HostScreen(id: id)
+        case .folder(let id): FolderScreen(id: id, onSelect: { navigator.serverPath.append(.host($0)) })
+        }
+    }
+}
+
 /// The host folders, then every host in none; tap a folder to open it, a card for its details, or its buttons for its files and terminal.
 /// Long-press a card to drag it into place or onto a folder. The search field (name or address) lists every matching host instead. Pull
 /// to poll every host now. The + menu adds a host or a folder; the info menu links to the privacy policy and the source code.
-struct DashboardScreen: View {
+///
+/// It sits in the Servers tab's stack or the split layout's detail; `onOpen` shows a host's details or a folder.
+struct DashboardContent: View {
+    let onOpen: (ServerRoute) -> Void
+    /// Add, Exit Samples and About in the toolbar; the split layout has them in its sidebar.
+    var showsAppItems = true
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
     @Environment(\.showSampleServers) private var showSampleServers
@@ -15,24 +43,13 @@ struct DashboardScreen: View {
     @State private var folderDeletion: HostFolder?
 
     var body: some View {
-        @Bindable var navigator = navigator
-        NavigationStack(path: $navigator.serverPath) {
-            content
-                .background { SkyBackground() }
-                .searchable(text: $search, prompt: "Name or address")
-                .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
-                .toolbar {
-                    if isShowingSamples, let showSampleServers {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Exit Samples") { showSampleServers(false) }
-                        }
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu("About AeroOps", systemImage: "info.circle") {
-                            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
-                            Link("Source Code", destination: AppLinks.sourceCode)
-                        }
-                    }
+        content
+            .background { SkyBackground() }
+            .tabSearchable(text: $search, prompt: "Name or address")
+            .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
+            .toolbar {
+                if showsAppItems {
+                    AppToolbarItems(exitSamples: isShowingSamples ? showSampleServers : nil)
                     ToolbarItem(placement: .primaryAction) {
                         Menu("Add", systemImage: "plus") {
                             Button("New Host", systemImage: "server.rack") { editor = .new }
@@ -40,32 +57,22 @@ struct DashboardScreen: View {
                         }
                     }
                 }
-                .navigationDestination(for: ServerRoute.self, destination: screen)
-        }
-        .sheet(item: $editor) { request in
-            HostEditorScreen(request: request)
-        }
-        .folderNameSheet($folderRequest) { try model.saveFolder($0, name: $1) }
-        .folderDeletionConfirmation($folderDeletion) { model.deleteFolder($0) }
-        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
-        .task(openDebugScreen)
-        .alert(
-            "Couldn’t save the change",
-            isPresented: Binding(get: { model.layoutError != nil }, set: { if !$0 { model.layoutError = nil } }),
-            presenting: model.layoutError
-        ) { _ in
-            Button("OK") {}
-        } message: { error in
-            Text(error.localizedDescription)
-        }
-    }
-
-    @ViewBuilder
-    private func screen(for route: ServerRoute) -> some View {
-        switch route {
-        case .host(let id): HostScreen(id: id)
-        case .folder(let id): FolderScreen(id: id)
-        }
+            }
+            .sheet(item: $editor) { request in
+                HostEditorScreen(request: request)
+            }
+            .folderNameSheet($folderRequest) { try model.saveFolder($0, name: $1) }
+            .folderDeletionConfirmation($folderDeletion) { model.deleteFolder($0) }
+            .task(openDebugScreen)
+            .alert(
+                "Couldn’t save the change",
+                isPresented: Binding(get: { model.layoutError != nil }, set: { if !$0 { model.layoutError = nil } }),
+                presenting: model.layoutError
+            ) { _ in
+                Button("OK") {}
+            } message: { error in
+                Text(error.localizedDescription)
+            }
     }
 
     @ViewBuilder
@@ -102,7 +109,7 @@ struct DashboardScreen: View {
             HostFolderShelf(
                 folders: model.folders,
                 statuses: { id in model.hosts(inFolder: id).map { model.displayState(for: $0.id).status } },
-                onOpen: { navigator.serverPath.append(.folder($0.id)) },
+                onOpen: { onOpen(.folder($0.id)) },
                 onRename: { folderRequest = .rename($0) },
                 onDelete: { folderDeletion = $0 },
                 onDrop: { model.arrange($0, on: $1) }
@@ -119,12 +126,17 @@ struct DashboardScreen: View {
     }
 
     private func grid(_ hosts: [RemoteHost], isArranging: Bool) -> some View {
-        HostCardGrid(hosts: hosts, folder: nil, isArranging: isArranging) { folderRequest = .new(moving: $0) }
+        HostCardGrid(
+            hosts: hosts,
+            folder: nil,
+            isArranging: isArranging,
+            onSelect: { onOpen(.host($0)) },
+            onNewFolder: { folderRequest = .new(moving: $0) }
+        )
     }
 
-    /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews).
     private var isShowingSamples: Bool {
-        model.isPreview && showSampleServers != nil
+        model.isShowingSamples(canExit: showSampleServers != nil)
     }
 
     private func openDebugScreen() {
@@ -148,6 +160,34 @@ struct DashboardScreen: View {
         if let error = model.hostKeyError {
             ValidationMessage(text: error)
         }
+    }
+}
+
+/// Exit Samples (when `exitSamples` is set) and the About menu, at the leading edge of the
+/// Servers tab or the split layout's sidebar.
+struct AppToolbarItems: ToolbarContent {
+    let exitSamples: (@MainActor (Bool) -> Void)?
+
+    var body: some ToolbarContent {
+        if let exitSamples {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Exit Samples") { exitSamples(false) }
+            }
+        }
+        ToolbarItem(placement: .topBarLeading) {
+            Menu("About AeroOps", systemImage: "info.circle") {
+                Link("Privacy Policy", destination: AppLinks.privacyPolicy)
+                Link("Source Code", destination: AppLinks.sourceCode)
+            }
+        }
+    }
+}
+
+extension MobileModel {
+    /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews, where
+    /// there is no way out: `canExit` is false).
+    func isShowingSamples(canExit: Bool) -> Bool {
+        isPreview && canExit
     }
 }
 

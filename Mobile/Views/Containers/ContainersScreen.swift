@@ -17,10 +17,9 @@ struct ContainersScreen: View {
                 .background { SkyBackground() }
                 .searchable(text: $search, prompt: "Name or address")
                 .navigationTitle("Containers")
-                .navigationDestination(for: ContainersRoute.self, destination: destination)
+                .navigationDestination(for: ContainersRoute.self) { ContainersDestination(route: $0) }
         }
-        .modifier(WorkloadPrompts(containers: navigator.containerPath.first.map { model.containers(for: $0.hostID) }))
-        .onChange(of: navigator.containerPath, release)
+        .containersStack(navigator.containerPath, model: model)
     }
 
     @ViewBuilder
@@ -43,9 +42,14 @@ struct ContainersScreen: View {
             .overlay { if hosts.isEmpty { NoMatchingHostsView(search: search).padding(16) } }
         }
     }
+}
 
-    @ViewBuilder
-    private func destination(_ route: ContainersRoute) -> some View {
+/// A screen pushed in the Containers stack (here, or the split layout's Containers tab).
+struct ContainersDestination: View {
+    let route: ContainersRoute
+    @Environment(MobileModel.self) private var model
+
+    var body: some View {
         let containers = model.containers(for: route.hostID)
         switch route {
         case .host: HostWorkloadsScreen(containers: containers)
@@ -64,13 +68,20 @@ struct ContainersScreen: View {
             PodDescribeScreen(containers: containers)
         }
     }
+}
 
-    private func release(old: [ContainersRoute], new: [ContainersRoute]) {
-        guard let id = old.first?.hostID else { return }
-        let containers = model.containers(for: id)
-        if !new.contains(where: \.isLogs) { containers.logs = nil }
-        if !new.contains(where: \.isContainer) { containers.inspection = nil }
-        if !new.contains(where: \.isPod) { containers.selectedPodID = nil }
+extension View {
+    /// The prompts of the Containers stack's screens (`path`), and ending logs and inspections
+    /// when their screens close.
+    func containersStack(_ path: [ContainersRoute], model: MobileModel) -> some View {
+        modifier(WorkloadPrompts(containers: path.first.map { model.containers(for: $0.hostID) }))
+            .onChange(of: path) { old, new in
+                guard let id = old.first?.hostID else { return }
+                let containers = model.containers(for: id)
+                if !new.contains(where: \.isLogs) { containers.logs = nil }
+                if !new.contains(where: \.isContainer) { containers.inspection = nil }
+                if !new.contains(where: \.isPod) { containers.selectedPodID = nil }
+            }
     }
 }
 
@@ -132,17 +143,20 @@ private struct WorkloadPrompts: ViewModifier {
     }
 }
 
-/// Keeps `containers` refreshing while the screen is on and the app is active.
+/// Keeps `containers` refreshing while the screen is on, its tab shown and the app active.
 struct WorkloadPolling: ViewModifier {
     let containers: HostContainersModel
     @Environment(MobileModel.self) private var model
+    @Environment(\.isTabShown) private var isTabShown
 
     func body(content: Content) -> some View {
-        content.task(id: model.activity == .visible) {
-            guard model.activity == .visible else { return }
+        content.task(id: isPolling) {
+            guard isPolling else { return }
             await containers.poll()
         }
     }
+
+    private var isPolling: Bool { model.activity == .visible && isTabShown }
 }
 
 /// A label and value in a detail screen.
@@ -186,7 +200,7 @@ struct WorkloadTextScreen: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(.hidden, for: .tabBar)
-        .toolbar {
+        .tabToolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Copy", systemImage: "doc.on.doc") { LogTextSurface.copy(text) }
             }

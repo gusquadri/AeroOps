@@ -25,6 +25,9 @@ struct HostDetailView: View {
     /// on the card). `nil` hides the button.
     var onOpenTerminal: (() -> Void)?
     var onBrowseFiles: (() -> Void)?
+    /// Edit the host, beside Refresh (the iOS split layout, whose navigation bar has no room left
+    /// for it). `nil` hides the button.
+    var onEdit: (() -> Void)?
 
     var body: some View {
         let metrics = state.metrics
@@ -74,6 +77,12 @@ struct HostDetailView: View {
                 .controlSize(.small)
                 .disabled(!host.monitored)
                 .help(host.monitored ? "Poll \(host.name) now" : "Monitoring is off for \(host.name)")
+            if let onEdit {
+                Button("Edit", systemImage: "pencil", action: onEdit)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.aquaSecondary)
+                    .controlSize(.small)
+            }
         }
     }
 
