@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Lists the apps AeroOps can import hosts from, then shows the chosen one's import.
 struct ImportSheet: View {
-    enum Source { case termius }
+    enum Source { case sshConfig, termius }
 
     @Environment(\.dismiss) private var dismiss
     @State private var source: Source?
@@ -12,6 +12,7 @@ struct ImportSheet: View {
 
     var body: some View {
         switch source {
+        case .sshConfig: SSHConfigImportSheet(onImport: onImport)
         case .termius: TermiusImportSheet(onImport: onImport)
         case nil: chooser
         }
@@ -23,10 +24,15 @@ struct ImportSheet: View {
                 Text("Import Hosts")
                     .font(Aero.font(.title2, weight: .semibold))
                     .foregroundStyle(Aero.text.primary)
-                Text("Choose the app to import hosts from.")
+                Text("Choose where to import hosts from.")
                     .font(Aero.font(.callout))
                     .foregroundStyle(Aero.text.secondary)
             }
+            ImportSourceRow(
+                title: "SSH Config",
+                detail: "Hosts in ~/.ssh/config. AeroOps only reads the file and never opens key files.",
+                systemImage: "square.and.arrow.down"
+            ) { source = .sshConfig }
             ImportSourceRow(
                 title: "Termius",
                 detail: "Hosts saved in the Termius app on this Mac, with their keys and passwords.",
