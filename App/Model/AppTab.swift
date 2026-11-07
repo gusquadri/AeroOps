@@ -1,6 +1,6 @@
 /// The five main-window tabs. Shown with their symbols in the
 /// toolbar's tab switcher and bound to ⌘1–⌘5 in the View menu. ``activity`` is shown as "MCPs".
-enum AppTab: String, CaseIterable, Identifiable, Sendable {
+enum AppTab: String, CaseIterable, Identifiable, Sendable, SwitcherTab {
     case dashboard
     case containers
     case terminals
@@ -29,6 +29,8 @@ enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .activity: "point.3.filled.connected.trianglepath.dotted"
         }
     }
+
+    var help: String { "\(title) (⌘\(String(shortcutDigit)))" }
 
     /// The digit of the tab's ⌘-shortcut: ⌘1 for the first tab, and so on.
     var shortcutDigit: Character {

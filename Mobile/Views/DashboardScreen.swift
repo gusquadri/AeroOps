@@ -5,6 +5,23 @@ import SwiftUI
 /// Every host's card; tap one for its details, or its buttons for its files and terminal. Pull
 /// to poll every host now. The info menu links to the privacy policy and the source code.
 struct DashboardScreen: View {
+    @Environment(MobileNavigator.self) private var navigator
+
+    var body: some View {
+        @Bindable var navigator = navigator
+        NavigationStack(path: $navigator.serverPath) {
+            DashboardContent(onSelect: { navigator.serverPath.append($0) })
+                .navigationDestination(for: RemoteHost.ID.self) { HostScreen(id: $0) }
+        }
+    }
+}
+
+/// The dashboard's cards, toolbar and prompts, in the Servers tab's stack or the split layout's
+/// detail. `onSelect` shows a host's details.
+struct DashboardContent: View {
+    let onSelect: (RemoteHost.ID) -> Void
+    /// Add Host, Exit Samples and About in the toolbar; the split layout has them in its sidebar.
+    var showsAppItems = true
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
     @Environment(\.showSampleServers) private var showSampleServers
@@ -13,30 +30,18 @@ struct DashboardScreen: View {
     @State private var monitoringFailure: String?
 
     var body: some View {
-        @Bindable var navigator = navigator
-        NavigationStack(path: $navigator.serverPath) {
-            content
-                .background { SkyBackground() }
-                .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
-                .toolbar {
-                    if isShowingSamples, let showSampleServers {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Exit Samples") { showSampleServers(false) }
-                        }
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu("About AeroOps", systemImage: "info.circle") {
-                            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
-                            Link("Source Code", destination: AppLinks.sourceCode)
-                        }
-                    }
+        content
+            .background { SkyBackground() }
+            .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
+            .toolbar {
+                if showsAppItems {
+                    AppToolbarItems(exitSamples: isShowingSamples ? showSampleServers : nil)
                     ToolbarItem(placement: .primaryAction) {
                         Button("Add Host", systemImage: "plus") { editor = .new }
                     }
                 }
-                .navigationDestination(for: RemoteHost.ID.self) { HostScreen(id: $0) }
-        }
-        .sheet(item: $editor) { request in
+            }
+            .sheet(item: $editor) { request in
             HostEditorScreen(request: request)
         }
         .task(openDebugScreen)
@@ -83,9 +88,8 @@ struct DashboardScreen: View {
         }
     }
 
-    /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews).
     private var isShowingSamples: Bool {
-        model.isPreview && showSampleServers != nil
+        model.isShowingSamples(canExit: showSampleServers != nil)
     }
 
     private func openDebugScreen() {
@@ -127,7 +131,7 @@ struct DashboardScreen: View {
             onOpenSSH: { navigator.show(terminal: model.currentTerminal(on: host.id).id) },
             onBrowseFiles: { navigator.showFiles(of: host.id) },
             keyBlock: model.hostKeyBlock(for: host),
-            onReviewKey: { navigator.serverPath.append(host.id) },
+            onReviewKey: { onSelect(host.id) },
             onTrustKey: { Task { await model.requestHostKeyTrust(for: host) } },
             isScanningKey: model.scanningHostIDs.contains(host.id),
             keyScanError: model.scanErrors[host.id],
@@ -135,9 +139,37 @@ struct DashboardScreen: View {
         )
         .equatable()
         .contentShape(.rect(cornerRadius: Aero.radius.card))
-        .onTapGesture { navigator.serverPath.append(host.id) }
+        .onTapGesture { onSelect(host.id) }
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows the server’s details")
+    }
+}
+
+/// Exit Samples (when `exitSamples` is set) and the About menu, at the leading edge of the
+/// Servers tab or the split layout's sidebar.
+struct AppToolbarItems: ToolbarContent {
+    let exitSamples: (@MainActor (Bool) -> Void)?
+
+    var body: some ToolbarContent {
+        if let exitSamples {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Exit Samples") { exitSamples(false) }
+            }
+        }
+        ToolbarItem(placement: .topBarLeading) {
+            Menu("About AeroOps", systemImage: "info.circle") {
+                Link("Privacy Policy", destination: AppLinks.privacyPolicy)
+                Link("Source Code", destination: AppLinks.sourceCode)
+            }
+        }
+    }
+}
+
+extension MobileModel {
+    /// Sample servers the user chose to try (not `-AeroOpsDemo` screenshots or previews, where
+    /// there is no way out: `canExit` is false).
+    func isShowingSamples(canExit: Bool) -> Bool {
+        isPreview && canExit
     }
 }
 

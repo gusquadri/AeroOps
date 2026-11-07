@@ -34,6 +34,8 @@ private struct TerminalSessionView: View {
     let session: EmbeddedTerminalSession
     let onEnd: () -> Void
 
+    @Environment(\.isTabShown) private var isTabShown
+
     var body: some View {
         EmbeddedTerminalView(session: session)
             .clipShape(.rect(cornerRadius: Aero.radius.inner))
@@ -41,7 +43,7 @@ private struct TerminalSessionView: View {
             .padding(.bottom, 6)
             .overlay { overlay }
             .background { SkyBackground() }
-            .toolbar {
+            .tabToolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu("Session", systemImage: "ellipsis.circle") {
                         Button("Reconnect", systemImage: "arrow.clockwise") { session.reconnect() }
@@ -55,9 +57,18 @@ private struct TerminalSessionView: View {
                 // screen waits for Reconnect.
                 if session.connection == 0 { session.connect() }
             }
-            .onChange(of: session.state, initial: true) { _, state in
-                if state == .running { session.focus() }
-            }
+            .onChange(of: session.state, initial: true) { updateFocus() }
+            .onChange(of: isTabShown) { updateFocus() }
+    }
+
+    /// Focuses the running shell while its tab is shown. A hidden one lets the keyboard go, which
+    /// would otherwise stay up over the other tabs for it.
+    private func updateFocus() {
+        if !isTabShown {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        } else if session.state == .running {
+            session.focus()
+        }
     }
 
     @ViewBuilder

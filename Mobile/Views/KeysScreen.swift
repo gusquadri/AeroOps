@@ -7,6 +7,8 @@ import UIKit
 /// Enclave); only the public key is shown, copied or shared, to add to a server's
 /// authorized_keys.
 struct KeysScreen: View {
+    /// Closes the screen when it is a sheet (the split layout's).
+    var onDone: (() -> Void)?
     @Environment(MobileModel.self) private var model
     @State private var isCreating = false
     @State private var path: [SSHKeyRecord.ID] = []
@@ -17,6 +19,11 @@ struct KeysScreen: View {
                 .background { SkyBackground() }
                 .navigationTitle("Keys")
                 .toolbar {
+                    if let onDone {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done", action: onDone)
+                        }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("New Key", systemImage: "plus") { isCreating = true }
                             .disabled(!model.hasKeyStore)

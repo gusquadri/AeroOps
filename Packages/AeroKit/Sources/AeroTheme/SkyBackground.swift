@@ -57,7 +57,7 @@ public struct SkyBackground: View {
         let request = SkyPainting.Request(painter: painter, size: size, scale: displayScale)
         Color.clear
             .overlay {
-                if let painting, painting.request.painter == painter {
+                if let painting = SkyPainting.recent(request) ?? painting, painting.request.painter == painter {
                     SkySurfaceView(surface: painting.surface)
                 } else {
                     Canvas(opaque: true) { context, size in
@@ -67,10 +67,14 @@ public struct SkyBackground: View {
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .task(id: request) {
+                if let recent = SkyPainting.recent(request) {
+                    painting = recent
+                    return
+                }
                 guard painting?.request != request, request.size.width > 0, request.size.height > 0 else { return }
                 try? await Task.sleep(for: Self.settleDelay)
                 guard !Task.isCancelled, let surface = await request.paint(), !Task.isCancelled else { return }
-                painting = SkyPainting(request: request, surface: surface)
+                painting = SkyPainting.remember(SkyPainting(request: request, surface: surface))
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -115,6 +119,26 @@ private struct SkyPainting {
 
     let request: Request
     let surface: IOSurface
+
+    /// The last bitmaps painted, newest first, shared by every background. A background built
+    /// anew (a tab switched to, a screen pushed) at a size already painted shows its bitmap at
+    /// once, rather than drawing the canvas and then painting the sky again.
+    @MainActor private static var cache: [SkyPainting] = []
+    private static let cacheLimit = 2
+
+    /// The bitmap of `request`, if one was painted lately.
+    @MainActor
+    static func recent(_ request: Request) -> SkyPainting? {
+        cache.first { $0.request == request }
+    }
+
+    /// Keeps `painting` for backgrounds of its size to come, and returns it.
+    @MainActor
+    static func remember(_ painting: SkyPainting) -> SkyPainting {
+        cache.removeAll { $0.request == painting.request }
+        cache = Array(([painting] + cache).prefix(cacheLimit))
+        return painting
+    }
 }
 
 /// The sky's bitmap as an `IOSurface`, which a layer can show without the window server copying

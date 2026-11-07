@@ -1,5 +1,5 @@
 {
-  "originHash" : "0d24a6bb7955a160016031dbe2cbd6381ae323692b6696e99a8a3fd7ceea1060",
+  "originHash" : "c8b6cd89bcab5d27f856237ce4819b4b758b5f7c416d3713d699abec6420cdd9",
   "pins" : [
     {
       "identity" : "displaylink",
@@ -11,12 +11,30 @@
       }
     },
     {
+      "identity" : "eventsource",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattt/eventsource.git",
+      "state" : {
+        "revision" : "bb4b61273b5a976bb571859c17f903ebc3439df1",
+        "version" : "1.6.0"
+      }
+    },
+    {
       "identity" : "libghostty-spm",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Lakr233/libghostty-spm",
       "state" : {
         "revision" : "46a3e8f31efca1007198c7d5f43afa35026aaffb",
         "version" : "2.2.2026101003"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
       }
     },
     {
@@ -56,6 +74,15 @@
       }
     },
     {
+      "identity" : "swift-log",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-log",
+      "state" : {
+        "revision" : "e3da04078777e6a1b72ce19981fbd6539b0847d8",
+        "version" : "1.17.0"
+      }
+    },
+    {
       "identity" : "swift-nio",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio",
@@ -70,6 +97,15 @@
       "location" : "https://github.com/gusquadri/swift-nio-ssh",
       "state" : {
         "revision" : "7a9d8c39777f99927c3c2591b0246c1e06ec3dfe"
+      }
+    },
+    {
+      "identity" : "swift-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/modelcontextprotocol/swift-sdk",
+      "state" : {
+        "revision" : "a0ae212ebf6eab5f754c3129608bc5557637e605",
+        "version" : "0.12.1"
       }
     },
     {

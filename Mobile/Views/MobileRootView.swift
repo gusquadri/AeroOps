@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// The app's tabs, and the host key sheet any of them can ask for.
+/// The app's tabs, and the host key sheet any of them can ask for. A regular-width screen (an
+/// unfolded iPhone Duo, a Pro Max in landscape) gets ``SplitRootView``, the Mac app's layout,
+/// instead of the tab bar.
 struct MobileRootView: View {
     @Environment(MobileModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var navigator = MobileNavigator(section: Self.initialSection)
 
     private static var initialSection: MobileSection {
@@ -14,15 +17,15 @@ struct MobileRootView: View {
 
     var body: some View {
         @Bindable var model = model
-        @Bindable var navigator = navigator
-        TabView(selection: $navigator.section) {
-            Tab("Servers", systemImage: "server.rack", value: .servers) { DashboardScreen() }
-            Tab("Terminals", systemImage: "terminal", value: .terminals) { TerminalsScreen() }
-            Tab("Files", systemImage: "folder", value: .files) { FilesHostsScreen() }
-            Tab("Containers", systemImage: "shippingbox", value: .containers) { ContainersScreen() }
-            Tab("Keys", systemImage: "key.horizontal", value: .keys) { KeysScreen() }
+        Group {
+            if isSplit {
+                SplitRootView()
+            } else {
+                tabs
+            }
         }
         .environment(navigator)
+        .onChange(of: isSplit, initial: true) { navigator.layoutChanged(isSplit: isSplit) }
         .task(openDebugScreen)
         .sheet(item: $model.trustRequest) { request in
             NavigationStack {
@@ -35,6 +38,23 @@ struct MobileRootView: View {
             }
             .presentationDetents([.large])
         }
+    }
+
+    private var isSplit: Bool { sizeClass == .regular }
+
+    private var tabs: some View {
+        @Bindable var navigator = navigator
+        return TabView(selection: $navigator.section) {
+            tab(.servers) { DashboardScreen() }
+            tab(.terminals) { TerminalsScreen() }
+            tab(.files) { FilesHostsScreen() }
+            tab(.containers) { ContainersScreen() }
+            tab(.keys) { KeysScreen() }
+        }
+    }
+
+    private func tab(_ section: MobileSection, @ViewBuilder content: () -> some View) -> some TabContent<MobileSection> {
+        Tab(section.title, systemImage: section.systemImage, value: section, content: content)
     }
 
     private func openDebugScreen() {
