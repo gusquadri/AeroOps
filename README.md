@@ -48,7 +48,7 @@ Xcode resolves the Swift packages. Most are pinned to exact versions:
 
 | Package | Version |
 | --- | --- |
-| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) | 2.2.2026101003 |
+| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) | 2.2.2026103001 |
 | [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) | 0.12.1 |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.10.0 |
 | [swift-log](https://github.com/apple/swift-log) | 1.5.0 or later |
