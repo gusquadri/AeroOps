@@ -21,6 +21,10 @@ In dark mode the app switches to Nightly Frutiger Aero:
 
 The screenshots show the app's built-in demo data and the dev VM described below.
 
+## Install
+
+Download `AeroOps-<version>.dmg` from the [latest release](https://github.com/gusquadri/AeroOps/releases/latest), open it and drag AeroOps to Applications. It needs macOS 26 or later. Releases are signed with Developer ID and notarized, and the app updates itself through Sparkle. `SHA256SUMS` in each release lists the checksums of its files.
+
 ## Features
 
 - **Monitoring cards.** Each host has a card with CPU, memory and disk gauges, uptime and load average. A glossy status bubble shows the host's state as a colour, with its system's logo inside (Ubuntu, Debian, Alpine, Red Hat, Proxmox, FreeBSD, macOS and about 30 more, from os-release and `uname`). The state can be online, stale, offline, blocked by a changed host key, waiting for a host key to be trusted, or running an unsupported OS. Hover the bubble for the error or the distribution and kernel. Every card is the same size in every state, so the grid stays even. Hosts are polled every 5 s while the window is on screen and every 30 s otherwise. Polling stops while the Mac sleeps and backs off when a host is unreachable. Each poll is a single POSIX `sh` script (`Scripts/remote/metrics.sh`) sent over the host's SSH ControlMaster connection. It also runs on BusyBox. The host detail view lists every mount, plus memory and swap.
@@ -53,11 +57,13 @@ Xcode resolves the Swift packages. Most are pinned to exact versions:
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.10.0 |
 | [swift-log](https://github.com/apple/swift-log) | 1.5.0 or later |
 
+`AeroOps.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` is checked in and pins every package, including transitive ones. CI and releases build with `-onlyUsePackageVersionsFromResolvedFile`.
+
 The system logos on the cards are [Simple Icons](https://simpleicons.org) 16.35.0 (CC0), bundled in `Packages/AeroKit/Sources/AeroTheme/Logos/`.
 
 ## Build and test
 
-The Xcode project is generated from `project.yml`. `AeroOps.xcodeproj` is git-ignored: edit `project.yml`, never the project.
+The Xcode project is generated from `project.yml`. `AeroOps.xcodeproj` is git-ignored except its `Package.resolved`: edit `project.yml`, never the project.
 
 ```sh
 xcodegen generate

@@ -18,7 +18,7 @@ Native macOS 26+ SwiftUI app: SSH-based server monitoring cards, Docker and Kube
 - Swift 6 strict concurrency: UI on `@MainActor`, per-host state in actors.
 - Views use `AeroTheme` tokens only; no hard-coded colours, radii or fonts.
 - Never pass `CharacterSet.contains` as a function value (`allSatisfy(set.contains)`); write a closure `{ set.contains($0) }`. Swift 6.4 -O miscompiles it, and only release builds break.
-- Edit `project.yml`, never the `.xcodeproj` (generated and git-ignored).
+- Edit `project.yml`, never the `.xcodeproj` (generated and git-ignored, except its `Package.resolved`, which pins every Swift package; commit it when packages change).
 
 ## Commands
 - Generate project: `xcodegen generate`
