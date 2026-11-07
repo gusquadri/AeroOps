@@ -149,9 +149,9 @@ struct SSHConfigImportSheet: View {
 
     private var hostList: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 GlassSection("\(importer.candidates.count) \(importer.candidates.count == 1 ? "host" : "hosts")", systemImage: "list.bullet.rectangle") {
-                    VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(importer.candidates.enumerated()), id: \.element.id) { index, candidate in
                             if index > 0 { Divider().padding(.leading, 44) }
                             HostImportRow(
