@@ -23,6 +23,8 @@ extension SwitcherTab {
 struct TabSwitcher<Tab: SwitcherTab>: View {
     let tabs: [Tab]
     @Binding var selection: Tab
+    /// Only the selected tab shows its title; the others show their symbol alone.
+    var isCompact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var highlight
 
@@ -44,8 +46,7 @@ struct TabSwitcher<Tab: SwitcherTab>: View {
         return Button {
             selection = tab
         } label: {
-            Label(tab.title, systemImage: tab.systemImage)
-                .labelStyle(.titleAndIcon)
+            label(tab, showsTitle: isSelected || !isCompact)
                 .font(Aero.font(Self.textStyle, weight: .medium))
                 .foregroundStyle(isSelected ? Aero.text.onAccent : Aero.text.primary)
                 .padding(.horizontal, Self.horizontalPadding)
@@ -61,6 +62,17 @@ struct TabSwitcher<Tab: SwitcherTab>: View {
         .buttonStyle(.plain)
         .help(tab.help)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func label(_ tab: Tab, showsTitle: Bool) -> some View {
+        if showsTitle {
+            Label(tab.title, systemImage: tab.systemImage)
+                .labelStyle(.titleAndIcon)
+        } else {
+            Label(tab.title, systemImage: tab.systemImage)
+                .labelStyle(.iconOnly)
+        }
     }
 
     #if os(macOS)

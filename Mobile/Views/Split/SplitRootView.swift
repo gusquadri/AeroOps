@@ -241,6 +241,8 @@ private struct SelectServerView: View {
 }
 
 /// The tab switcher in place of the title, after a Back button to the cards when `back` is set.
+/// Where the bar has no room for every tab's title (an unfolded iPhone Duo held upright, whose
+/// status bar takes the bar's far end), only the selected tab shows its title.
 ///
 /// Back sits beside the switcher rather than in its own leading item: beside the sidebar, the
 /// navigation bar has no room left for one and lays it below the bar, at the far edge.
@@ -260,7 +262,10 @@ private struct SectionSwitcher: ViewModifier {
                                 .labelStyle(.iconOnly)
                                 .buttonStyle(.aquaSecondary)
                         }
-                        TabSwitcher(tabs: MobileSection.switcherTabs, selection: selection)
+                        ViewThatFits(in: .horizontal) {
+                            TabSwitcher(tabs: MobileSection.switcherTabs, selection: selection)
+                            TabSwitcher(tabs: MobileSection.switcherTabs, selection: selection, isCompact: true)
+                        }
                     }
                 }
             }
