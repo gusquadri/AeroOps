@@ -293,7 +293,6 @@ private struct SidebarTerminalRow: View {
             }
         }
         .help(help)
-        // Terminals shows the confirmations and sheets these can lead to.
         .contextMenu {
             Button("Reconnect", systemImage: "arrow.clockwise") {
                 model.selectedTab = .terminals

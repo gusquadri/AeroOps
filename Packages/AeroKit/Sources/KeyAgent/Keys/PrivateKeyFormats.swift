@@ -51,7 +51,7 @@ extension OpenSSHPrivateKey {
     }
 
     static func ed25519(seed: [UInt8], comment: String) throws -> OpenSSHPrivateKey {
-        guard seed.count == 32 else { throw KeyImportError.malformed("ed25519 seed length") }
+        guard seed.count == ed25519KeySize else { throw KeyImportError.malformed("ed25519 seed length") }
         let key = Ed25519SigningKey(privateKey: try .init(rawRepresentation: seed))
         return try checked(.ed25519, secret: Data(seed), key: key, comment: comment)
     }

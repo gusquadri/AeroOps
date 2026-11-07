@@ -156,7 +156,6 @@ struct SSHConfigWriterTests {
             let paths = AeroPaths(dotDirectory: URL(filePath: dot, directoryHint: .isDirectory))
             return SSHConfigWriter(context: SSHContext(paths: paths))
         }
-        // `/tmp/<61>/cm` + `/` + 16-hex name + `.` + 16 random is 103 bytes, the most sun_path holds.
         #expect(try writer(61).render([Self.hostA]).included == [Self.hostA.id])
         #expect(throws: SSHConfigError.self) {
             try writer(62).render([Self.hostA])
@@ -191,7 +190,6 @@ struct SSHConfigWriterTests {
         #expect(result.stdout.contains("\nsendenv LANG\n"))
         #expect(result.stdout.contains("\nsendenv COLORTERM\n"))
         #expect(options["identityagent"]?.contains(dot + "/agent.sock") == true, "\(options["identityagent"] ?? "-")")
-        // -G prints IdentityFile unexpanded; ssh percent-expands it (%% -> %) when loading the key.
         #expect(options["identityfile"]?.contains(scratch.path + "/a b%%c/pub/key-1.pub") == true, "\(options["identityfile"] ?? "-")")
         #expect(options["userknownhostsfile"]?.contains(dot + "/synced_known_hosts") == true)
 
@@ -212,7 +210,6 @@ struct SSHConfigWriterTests {
         #expect(mode(paths.controlMasterDirectory) == 0o700)
         #expect(mode(paths.publicKeysDirectory) == 0o700)
 
-        // Rewriting replaces the file and leaves no temporaries behind.
         try writer.write([])
         #expect(try String(contentsOf: paths.sshConfig, encoding: .utf8) == SSHConfigWriter.header + "\n")
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: paths.dotDirectory.filePath)
@@ -238,8 +235,6 @@ struct SSHConfigWriterTests {
         let command = context.terminalCommand(for: Self.hostA, sharesConnection: false)
         #expect(command.argv == ["/usr/bin/ssh", "-F", paths.sshConfig.filePath, "-o", "ControlPath=none", Self.hostA.sshAlias])
 
-        // ssh takes the first value it sees: the command line beats the config's ControlPath, and
-        // with no path there is no socket to multiplex over.
         let shared = try await runTool("/usr/bin/ssh", ["-G"] + context.terminalCommand(for: Self.hostA).arguments)
         let own = try await runTool("/usr/bin/ssh", ["-G"] + command.arguments)
         #expect(shared.status == 0 && own.status == 0, "\(shared.stderr) \(own.stderr)")
@@ -265,7 +260,6 @@ struct SSHConfigWriterTests {
         #expect(context.environmentOverrides.isEmpty)
         #expect(context.terminalCommand(for: Self.hostA).environment.isEmpty)
 
-        // ssh resolves the token from its own environment.
         let result = try await runTool(
             "/usr/bin/env", ["SSH_AUTH_SOCK=/tmp/sys-agent.sock", "/usr/bin/ssh", "-G", "-F", paths.sshConfig.filePath, Self.hostA.sshAlias]
         )
@@ -273,7 +267,6 @@ struct SSHConfigWriterTests {
         #expect(result.stdout.contains("\nidentityagent SSH_AUTH_SOCK\n") || result.stdout.contains("\nidentityagent /tmp/sys-agent.sock\n"), "\(result.stdout)")
         #expect(result.stdout.contains("\nidentitiesonly no\n"))
 
-        // Key ids are still validated, so a bad one cannot hide while the fallback is on.
         let bad = RemoteHost.test(keyId: "../x")
         #expect(throws: SSHConfigError.invalidKeyID("../x")) { try writer.validate(bad) }
     }

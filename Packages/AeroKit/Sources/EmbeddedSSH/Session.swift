@@ -217,7 +217,6 @@ final class SessionHandler: ChannelInboundHandler {
         case let signal as SSHChannelRequestEvent.ExitSignal:
             state.exited(EmbeddedSSHErrors.exitCode(forSignal: signal.signalName))
         case let event as ChannelEvent where event == .inputClosed:
-            // The server's EOF. The exit status usually follows it.
             break
         default:
             context.fireUserInboundEventTriggered(event)

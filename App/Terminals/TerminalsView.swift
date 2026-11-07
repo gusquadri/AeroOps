@@ -28,13 +28,10 @@ struct TerminalsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // ⌘W, ⌃Tab, ⌘⌥1…9 and the font size items act on these tabs while they are shown.
         .focusedSceneValue(\.terminalTabs, terminals.sessions.isEmpty ? nil : terminals)
         .modifier(TerminalPrompts())
     }
 }
-
-// MARK: - Empty state
 
 private struct TerminalsEmptyState: View {
     @Environment(AppModel.self) private var model
@@ -77,8 +74,6 @@ private struct OpenSSHMenu: View {
     }
 }
 
-// MARK: - Status
-
 extension TerminalService.Status.Tone {
     var orbTone: OrbTone {
         switch self {
@@ -90,8 +85,6 @@ extension TerminalService.Status.Tone {
     }
 }
 
-// MARK: - Session pane
-
 /// The selected session's surface in a glass frame, with the exit banner once it ends.
 private struct TerminalPane: View {
     @Environment(AppModel.self) private var model
@@ -100,7 +93,6 @@ private struct TerminalPane: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Aero.radius.inner, style: .continuous)
         ZStack(alignment: .bottom) {
-            // Clipboard prompts are shown by ``TerminalPrompts`` as an Aero sheet.
             TerminalSurfaceView(session: session, presentsClipboardPrompts: false)
                 .clipShape(shape)
             if session.state.isFinished {
@@ -149,7 +141,6 @@ private struct TerminalProgressBar: View {
             } else if progress.state == .indeterminate {
                 ProgressView()
             } else {
-                // Failed or paused with no percentage: a full bar in the state's colour.
                 ProgressView(value: 1)
             }
         }
@@ -258,8 +249,6 @@ struct TerminalExitBanner: View {
         .frame(maxWidth: 680)
     }
 }
-
-// MARK: - Sheets and confirmations
 
 /// Trust sheet for first contact, the close confirmation, clipboard prompts and open errors.
 private struct TerminalPrompts: ViewModifier {
@@ -414,8 +403,6 @@ struct TerminalClipboardSheet: View {
         return prompt.contents.count > limit ? String(prompt.contents.prefix(limit)) + "…" : prompt.contents
     }
 }
-
-// MARK: - Focus
 
 extension FocusedValues {
     /// The terminal tabs while the main window shows a non-empty Terminals tab; the menu

@@ -27,8 +27,8 @@ enum ProcessTable {
         for _ in 0..<4 {
             var size = 0
             guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
-            // Room for processes started between the two calls.
-            var buffer = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 64)
+            let roomForProcessesSpawnedMeanwhile = 64
+            var buffer = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + roomForProcessesSpawnedMeanwhile)
             size = buffer.count * stride
             if sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0 {
                 return buffer.prefix(size / stride).map(ProcessEntry.init)

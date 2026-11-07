@@ -41,7 +41,6 @@ enum AeroOpsMCP {
     }
 
     static func main() async {
-        // A closed stdout or socket must surface as EPIPE, not kill the process.
         signal(SIGPIPE, SIG_IGN)
 
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -84,7 +83,6 @@ enum AeroOpsMCP {
             title: "AeroOps",
             instructions: ToolCatalog.serverInstructions,
             capabilities: .init(tools: .init(listChanged: false)),
-            // Not strict: strict mode leaves Claude Code's server/discover probe unanswered.
             configuration: .default)
         let forwarder = ToolForwarder(bridge: bridge, server: server, logger: logger)
         await server.withMethodHandler(ListTools.self) { _ in
@@ -106,10 +104,6 @@ enum AeroOpsMCP {
             logger.critical("could not start: \(error)")
             exit(1)
         }
-        // Returns when stdin hits EOF (the client closed the pipe). Requests read before that
-        // still get their responses for a short while (a piped script reads them); then closing
-        // the bridge connection makes the app cancel whatever this session still had in flight,
-        // such as a running command nobody would see the result of.
         await server.waitUntilCompleted()
         let unanswered = await transport.drain(timeout: .seconds(2))
         if case .success(let bridge) = bridge { await bridge.close() }
@@ -136,7 +130,6 @@ enum AppLauncher {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/open")
         process.arguments = ["-g", "-b", bundleIdentifier]
-        // Never inherit stdout: it carries JSON-RPC.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()

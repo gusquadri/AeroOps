@@ -116,8 +116,6 @@ public struct SSHClientConfig: Sendable {
         (path as NSString).standardizingPath
     }
 
-    // MARK: - Tree
-
     /// The parsed structure. `Include` is expanded at parse time, but the matching state is only
     /// known per host, so resolving walks the tree.
     indirect enum Node: Sendable {
@@ -142,8 +140,6 @@ public struct SSHClientConfig: Sendable {
         /// The single argument (or, for the proxy keywords, the raw remainder of the line).
         var value: String
     }
-
-    // MARK: - Pattern matching
 
     /// OpenSSH's `match_pattern`: `*` matches any run, `?` any one character, everything else
     /// itself, case-sensitively.
@@ -242,8 +238,6 @@ public enum SSHConfigLoadError: Error, Sendable, Hashable, LocalizedError {
     }
 }
 
-// MARK: - Parser
-
 private struct Parser {
     let locations: SSHConfigLocations
     let files: any SSHConfigFileReading
@@ -267,7 +261,6 @@ private struct Parser {
             return []
         }
         var nodes: [SSHClientConfig.Node] = []
-        // Split on scalars: as Characters, "\r\n" is one grapheme and would never match "\n".
         for (index, line) in text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
             let number = index + 1
             if line.contains("\0") {
@@ -279,7 +272,6 @@ private struct Parser {
                 directive = parsed
             } catch {
                 report(error, path, number)
-                // A broken Host line still ends the previous block, and matches nothing.
                 if error.keyword == "host" { nodes.append(.host([])) }
                 if error.keyword == "match" { nodes.append(.match) }
                 continue
@@ -315,11 +307,9 @@ private struct Parser {
             guard let keyword = SSHClientConfig.Setting.Keyword(rawValue: directive.keyword) else { return nil }
             switch keyword {
             case .proxyjump:
-                // OpenSSH reads the raw text up to any "#".
                 let value = directive.rawValue.prefix { $0 != "#" }.trimmingCharacters(in: .whitespaces)
                 return .setting(.init(keyword: keyword, value: value))
             case .proxycommand:
-                // The rest of the line, verbatim: it is a shell command.
                 return .setting(.init(keyword: keyword, value: directive.rawValue))
             case .hostname, .user, .port, .identityfile:
                 guard arguments.count == 1 else {
@@ -344,8 +334,6 @@ private struct Parser {
         aliases.append(alias)
     }
 
-    // MARK: Include
-
     private mutating func include(_ arguments: [String], from path: String, line: Int, chain: [String]) -> [[SSHClientConfig.Node]] {
         var included: [[SSHClientConfig.Node]] = []
         for argument in arguments where !argument.isEmpty {
@@ -360,7 +348,6 @@ private struct Parser {
                     issue(path, line, "“\(name)” is included in a loop; it was read only once.")
                     continue
                 }
-                // `Include *` in ~/.ssh would match the keys next to the config: never open them.
                 if Self.looksLikeKeyFileName(name) {
                     issue(path, line, "“\(name)” looks like a key file; it was skipped unread.")
                     continue
@@ -395,8 +382,6 @@ private struct Parser {
         if argument.hasPrefix("/") { return argument }
         return locations.sshDirectory + "/" + argument
     }
-
-    // MARK: Issues
 
     private mutating func issue(_ path: String, _ line: Int?, _ message: String) {
         issues.append(.init(file: path, line: line, message: message))
@@ -443,8 +428,6 @@ private struct Parser {
         return name.hasPrefix("id_") || [".pem", ".key", ".ppk", ".p12", ".pfx"].contains { name.hasSuffix($0) }
     }
 }
-
-// MARK: - Resolver
 
 private struct Resolver {
     let alias: String

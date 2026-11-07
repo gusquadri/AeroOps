@@ -175,7 +175,7 @@ struct KeyStoreTests {
         let key = try #require(await reloaded.key(id: record.id))
         #expect(key.name == "New")
         #expect(key.policy == .everySignature)
-        #expect(key.comment == "Old") // The comment is part of the published key line and stays.
+        #expect(key.comment == "Old")
         await #expect(throws: KeyStoreError.keyNotFound(UUID(uuidString: "00000000-0000-0000-0000-000000000000")!)) {
             try await store.rename(id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!, to: "x")
         }
@@ -231,7 +231,7 @@ struct KeyStoreTests {
         #expect(!record.syncs && !record.canSync)
         #expect(keyItems(keychain).map(\.syncs) == [false])
         let handle = try #require(keychain.secret(for: record.id.uuidString))
-        #expect(handle.count > 64) // a wrapped blob, not a raw 32-byte scalar
+        #expect(handle.count > 64)
         await #expect(throws: KeyStoreError.deviceBound(record.id)) { try await store.setSyncs(id: record.id, true) }
 
         let reloaded = try makeKeyStore(dir, keychain: keychain)

@@ -81,7 +81,6 @@ struct DockerCommandTests {
         let dir = FileManager.default.temporaryDirectory.appending(path: "aero-docker-stub-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        // A stub docker that prints its arguments, one per line, prefixed with the subcommand.
         let stub = dir.appending(path: "docker")
         try "#!/bin/sh\nfor a in \"$@\"; do printf '%s|%s\\n' \"$1\" \"$a\"; done\n".write(to: stub, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)

@@ -78,7 +78,6 @@ struct KittyGraphicsFilterTests {
         let long = String(repeating: "a", count: KittyGraphicsFilter.maxControlBytes + 10)
         #expect(run("\(esc)_G\(long);x\(esc)\\ok").output == "ok")
         #expect(run("\(esc)_Gt=f\u{18}ok").output == "\u{18}ok")
-        // A blocked command that ends without its terminator does not swallow what follows.
         #expect(run("\(esc)_Gt=f;AAAA\(esc)[31mred").output == "\(esc)[31mred")
     }
 }

@@ -23,6 +23,7 @@ public actor SFTPClient {
     /// Largest read or write per request, whatever the server allows (OpenSSH's own client
     /// uses up to 255 KiB).
     static let maxChunkSize = 255 * 1024
+    static let packetFramingOverhead: UInt64 = 1024
 
     private let channel: any RemoteByteChannel
     private var nextID: UInt32 = 0
@@ -93,8 +94,6 @@ public actor SFTPClient {
     /// Why the session ended, if it did.
     public var disconnectError: SFTPError? { failure }
 
-    // MARK: - Paths and attributes
-
     /// The canonical absolute form of `path` (`.` is the login directory).
     public func realPath(_ path: SFTPPath) async throws -> SFTPPath {
         let response = try await request(.realpath) { $0.string(path.bytes) }
@@ -132,8 +131,6 @@ public actor SFTPClient {
         }
         try Self.check(response)
     }
-
-    // MARK: - Directories
 
     /// The entries of `directory`, without `.` and `..`. Entries whose names could not be used
     /// as a path component (with `/` or NUL) are left out.
@@ -225,8 +222,6 @@ public actor SFTPClient {
         try await removeDirectory(path)
     }
 
-    // MARK: - Files
-
     func open(_ path: SFTPPath, flags: SFTPWire.OpenFlags, attributes: SFTPAttributes = SFTPAttributes()) async throws -> SFTPFileHandle {
         let response = try await request(.open) { writer in
             writer.string(path.bytes)
@@ -288,8 +283,6 @@ public actor SFTPClient {
         sendUnanswered(.remove) { $0.string(path.bytes) }
     }
 
-    // MARK: - Session
-
     private func handshake(timeout: Duration) async throws {
         startReader()
         let watchdog = Task { [channel] in
@@ -326,8 +319,7 @@ public actor SFTPClient {
     static func chunkSize(limit: UInt64, packetLimit: UInt64) -> Int {
         var size = UInt64(maxChunkSize)
         if limit > 0 { size = min(size, limit) }
-        // Room for the packet header, handle and offset.
-        if packetLimit > 1024 { size = min(size, packetLimit - 1024) }
+        if packetLimit > packetFramingOverhead { size = min(size, packetLimit - packetFramingOverhead) }
         return max(Int(size), 4096)
     }
 
@@ -422,8 +414,6 @@ public actor SFTPClient {
         fill(&writer)
         channel.send(writer.framed)
     }
-
-    // MARK: - Replies
 
     private static func check(_ response: SFTPWire.Response) throws(SFTPError) {
         guard case .status(let code, let message) = response else {

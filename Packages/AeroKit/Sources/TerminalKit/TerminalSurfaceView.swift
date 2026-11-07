@@ -116,8 +116,6 @@ final class SurfaceContainerView: NSView {
             releaseSurface()
             return
         }
-        // Only a container in a window builds a surface: a hidden tab does not get its freed
-        // surface back.
         guard let surfaceView = window != nil ? session.surfaceView() : session.terminalView else {
             updateVisibility()
             return
@@ -130,9 +128,6 @@ final class SurfaceContainerView: NSView {
         updateVisibility()
     }
 
-    // The surface is sized explicitly rather than with an autoresizing mask: SwiftUI hands the
-    // container a zero size first, and autoresizing from a zero-sized superview leaves the
-    // surface at 0x0 (libghostty then never creates the surface, so the program never starts).
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
         fitSurface()
@@ -159,7 +154,6 @@ final class SurfaceContainerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
-            // Rebuilds a surface freed while this container was out of a window.
             adoptSurface()
         } else {
             updateVisibility()
@@ -183,7 +177,6 @@ final class SurfaceContainerView: NSView {
     private func focusIfPending() {
         guard focusPending, window != nil, let session else { return }
         focusPending = false
-        // After the current layout pass, so the surface has its size and is first-responder ready.
         Task { @MainActor [weak self, weak session] in
             guard let self, let session, session.terminalView?.superview === self else { return }
             session.focus()

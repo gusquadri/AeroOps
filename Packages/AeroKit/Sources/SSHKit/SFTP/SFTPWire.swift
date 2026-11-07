@@ -106,7 +106,6 @@ enum SFTPWire {
         switch type {
         case .status:
             let code = SFTPStatusCode(rawValue: try reader.u32())
-            // Servers implementing older drafts may omit the message and language tag.
             let message = reader.isAtEnd ? Data() : try reader.string()
             response = .status(code, message: String(decoding: message, as: UTF8.self))
         case .handle:
@@ -115,7 +114,6 @@ enum SFTPWire {
             response = .data(try reader.string())
         case .name:
             let count = try reader.u32()
-            // Each entry is at least 12 bytes, which bounds `count` by the packet size.
             guard Int(count) <= reader.remaining / 12 else { throw .protocolError("NAME count \(count) exceeds the packet") }
             var entries: [NameEntry] = []
             entries.reserveCapacity(Int(count))
@@ -135,8 +133,6 @@ enum SFTPWire {
         }
         return .response(id: id, response)
     }
-
-    // MARK: - Writing
 
     /// Builds one framed packet.
     struct Writer {
@@ -194,8 +190,6 @@ enum SFTPWire {
             return packet
         }
     }
-
-    // MARK: - Reading
 
     /// Reads fields from a packet body.
     struct Reader {

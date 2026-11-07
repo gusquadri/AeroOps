@@ -129,14 +129,12 @@ public final class TerminalSession: Identifiable {
             return
         }
 
-        // Checked once here; the first surface uses this controller.
         let controller = Self.makeController(appearance: appearance, term: spec.term)
         if let issue = controller.lastConfigurationIssue {
             state = .failed(message: "terminal configuration rejected: \(issue)")
             return
         }
         self.controller = controller
-        // Events arrive on the process's queues; main.async keeps their order.
         process = TerminalProcess(spec: spec) { [weak self] event in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -159,8 +157,6 @@ public final class TerminalSession: Identifiable {
         )
     }
 
-    // MARK: - Surface
-
     /// The surface view, created on first use and again after ``suspend()``; `nil` once
     /// closed or when the session failed to start. The program starts once the first
     /// surface's size has settled.
@@ -178,14 +174,11 @@ public final class TerminalSession: Identifiable {
         bridge.session = self
         let view = SessionTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         view.usesLineEditingKeys = { [weak process] in process?.usesLineEditingKeys ?? false }
-        // Delegate before controller and configuration, so the surface's first callbacks land.
         view.delegate = bridge
         view.configuration = TerminalSurfaceOptions(
             backend: .inMemory(io),
-            // A zoom carries over to the rebuilt surface.
             fontSize: fontSize == appearance.clampedFontSize ? nil : fontSize
         )
-        // The surface starts once the view is in a window with a size.
         view.controller = controller
 
         self.controller = controller
@@ -218,7 +211,6 @@ public final class TerminalSession: Identifiable {
         process?.detach(token: surfaceToken)
         if let terminalView {
             terminalView.delegate = nil
-            // Synchronous: tears down and frees the surface.
             terminalView.controller = nil
             terminalView.removeFromSuperview()
         }
@@ -230,7 +222,6 @@ public final class TerminalSession: Identifiable {
         surfaceIO = nil
         isFocused = false
         hoveredLink = nil
-        // A rebuilt surface starts at the bottom.
         scrollPosition = nil
         pendingScrollPosition = nil
     }
@@ -247,8 +238,6 @@ public final class TerminalSession: Identifiable {
         guard let window = terminalView?.window else { return false }
         return window.isKeyWindow && NSApplication.shared.isActive
     }
-
-    // MARK: - Commands
 
     public func increaseFontSize() {
         performBindingAction("increase_font_size:1")
@@ -346,11 +335,8 @@ public final class TerminalSession: Identifiable {
         _ = terminalView?.performBindingAction(action)
     }
 
-    // MARK: - Surface callbacks (via SurfaceDelegateBridge)
-
     fileprivate func surfaceAttached(_ surface: TerminalSurface) {
         self.surface = surface
-        // A new surface reports the end of an exited program again.
         programEndedCloseSeen = false
         if let surfaceIO {
             process?.attach(surfaceIO, token: surfaceToken)
@@ -410,7 +396,6 @@ public final class TerminalSession: Identifiable {
         case .commandStarted:
             commandStartedAt = .now
         case let .commandFinished(exitCode):
-            // A shell also marks the end of an empty command line; only a started one counts.
             guard let commandStartedAt else { return }
             self.commandStartedAt = nil
             raise(.commandFinished(exitCode: exitCode, duration: .now - commandStartedAt))
@@ -445,9 +430,6 @@ public final class TerminalSession: Identifiable {
 
     fileprivate func closeRequested(processAlive: Bool) {
         guard !isClosed else { return }
-        // While the program runs this is the close binding. After it ended, libghostty asks
-        // once when it ends and again on each key press: those are the user's. Both come from
-        // inside libghostty's key handling, so act once it has returned.
         if processAlive || programEndedCloseSeen {
             Task { [weak self] in
                 guard let self, !isClosed else { return }
@@ -459,9 +441,6 @@ public final class TerminalSession: Identifiable {
             }
             return
         }
-        // The program ended. Keep the surface so its last output stays readable. The exit
-        // event reaches the main thread on its own path, so it can come after this close:
-        // give it a moment before settling without a code.
         programEndedCloseSeen = true
         guard !state.isFinished else { return }
         Task { [weak self] in
@@ -481,7 +460,6 @@ public final class TerminalSession: Identifiable {
 
     fileprivate func gridResized(_ metrics: TerminalGridMetrics) {
         let size = TerminalGridSize(columns: Int(metrics.columns), rows: Int(metrics.rows))
-        // Arrives during AppKit layout, possibly inside a SwiftUI update: publish next turn.
         Task { [weak self] in
             guard let self, gridSize != size else { return }
             gridSize = size
@@ -527,8 +505,6 @@ public final class TerminalSession: Identifiable {
     fileprivate func scrollbarChanged(_ scrollbar: TerminalScrollbar) {
         let position = TerminalScrollPosition(total: scrollbar.total, offset: scrollbar.offset, visibleRows: scrollbar.len)
         pendingScrollPosition = position
-        // Leaving or reaching the bottom shows at once; the row count while output comes in
-        // at most a few times a second.
         if (position == nil) != (scrollPosition == nil) {
             scrollPosition = position
             return
@@ -562,8 +538,6 @@ public final class TerminalSession: Identifiable {
         }
     }
 }
-
-// MARK: - Self-test hooks
 
 /// Drive a session without a keyboard. SPI, so only code that opts in with
 /// `@_spi(AeroSelfTest) import TerminalKit` (the package self-test and the app's DEBUG

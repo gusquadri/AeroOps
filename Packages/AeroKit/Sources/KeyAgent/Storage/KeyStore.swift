@@ -39,7 +39,6 @@ public struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
 
     /// The public key, e.g. for display.
     public var publicKey: SSHPublicKey {
-        // The blob was validated when the record was created or loaded.
         (try? SSHPublicKey(blob: publicKeyBlob)) ?? SSHPublicKey(unchecked: publicKeyBlob, keyType: algorithm.keyType)
     }
 
@@ -131,8 +130,6 @@ public actor KeyStore {
         }
     }
 
-    // MARK: Reading
-
     /// All keys, oldest first.
     public var keys: [SSHKeyRecord] { records }
 
@@ -149,8 +146,6 @@ public actor KeyStore {
     public nonisolated func publicKeyFileURL(for id: UUID) -> URL {
         publicKeysDirectory.appending(path: "\(id.uuidString).pub")
     }
-
-    // MARK: Creating
 
     /// Generates a key. Ed25519 keys are stored in the Keychain and sync when `syncs` is set; Secure
     /// Enclave keys never leave the enclave, and only their wrapped handle is stored, on this device.
@@ -253,8 +248,6 @@ public actor KeyStore {
         records.append(record)
     }
 
-    // MARK: Changing
-
     public func rename(id: UUID, to name: String) throws {
         try update(id) { $0.name = name }
     }
@@ -331,8 +324,6 @@ public actor KeyStore {
         return true
     }
 
-    // MARK: Agent
-
     /// The keys the agent offers, in order.
     func identities() -> [SSHKeyRecord] { records }
 
@@ -362,8 +353,6 @@ public actor KeyStore {
         guard key.publicKeyBlob.elementsEqual(record.publicKeyBlob) else { throw KeyStoreError.secretMismatch(record.id) }
         return key
     }
-
-    // MARK: Embedded SSH client
 
     /// A stored key's private part for AeroKit's in-process SSH client (EmbeddedSSH, used on iOS
     /// where there is no `/usr/bin/ssh`). `package`, so it never reaches the app: the key only
@@ -396,8 +385,6 @@ public actor KeyStore {
         default: throw ClientKeyError.unsupportedAlgorithm(record.algorithm)
         }
     }
-
-    // MARK: Files
 
     private func record(_ id: UUID) throws -> SSHKeyRecord {
         guard let record = key(id: id) else { throw KeyStoreError.keyNotFound(id) }

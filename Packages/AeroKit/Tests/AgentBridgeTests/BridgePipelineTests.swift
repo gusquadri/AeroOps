@@ -47,8 +47,6 @@ struct BridgePipelineTests {
         return arguments
     }
 
-    // MARK: Read tools
-
     @Test func listHostsHidesHostsSetToOff() async throws {
         let fixture = try Fixture()
         let reply = try #require(await fixture.call("list_hosts"))
@@ -121,8 +119,6 @@ struct BridgePipelineTests {
         #expect(reply.error == BridgeError(code: .unavailable, message: "Docker is not installed on staging."))
     }
 
-    // MARK: run_command
-
     @Test func readTierRejectsRunCommand() async throws {
         let fixture = try Fixture()
         let reply = try #require(await fixture.call("run_command", Self.run("uptime", on: "prod")))
@@ -141,7 +137,6 @@ struct BridgePipelineTests {
         let call = try #require(fixture.runner.calls.first)
         #expect(call.remoteCommand == RunCommandScript.remoteCommand("df -h /", timeoutSeconds: 20) && call.timeout == .seconds(20))
 
-        // sudo and the like are up to the agent and the user too.
         let sudo = try #require(await fixture.call("run_command", Self.run("sudo systemctl restart nginx")))
         #expect(sudo.ok)
         #expect(fixture.runner.calls.count == 2)

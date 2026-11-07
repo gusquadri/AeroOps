@@ -230,12 +230,10 @@ private struct DebugSnapshotter {
             await captureOnboarding(over: main)
             return NSApp.terminate(nil)
         }
-        // The whole dashboard grid, before a selection opens the inspector.
         model.selection = nil
         model.selectedTab = .dashboard
         await pause(0.8)
         await capture(main, name: "\(prefix)-dashboard-grid")
-        // Wide enough for three columns, so every sample card state is on screen at once.
         let frame = main.frame
         main.setFrame(NSRect(x: frame.minX, y: frame.maxY - 820, width: 1560, height: 820), display: true)
         await pause(0.8)
@@ -255,7 +253,6 @@ private struct DebugSnapshotter {
         model.selectedTab = .dashboard
         await pause(0.8)
         await capture(main, name: "\(prefix)-dashboard-again")
-        // The inspector for a live host and for a stale one.
         for (index, label) in [(0, "online"), (1, "stale")] where model.hosts.count > index {
             model.selection = model.hosts[index].id
             await pause(0.8)
@@ -304,11 +301,9 @@ private struct DebugSnapshotter {
             onCancel: {}
         )
         await captureStandalone(sheet, title: "Trust host key", name: "\(prefix)-trust-sheet")
-        // The editor of a blocked host, full size (sheets capture small and dimmed).
         if let blocked = model.hosts.first(where: { model.hostKeyBlock(for: $0.id) != nil }) {
             await captureStandalone(HostEditorSheet(request: .edit(blocked.id)), title: "Edit \(blocked.name)", name: "\(prefix)-editor-blocked")
         }
-        // Settings › Keys tall enough to show the agent section without scrolling.
         await captureStandalone(KeysSettingsPane().frame(width: 780, height: 940), title: "Keys", name: "\(prefix)-keys-full")
     }
 
@@ -360,8 +355,6 @@ private struct DebugSnapshotter {
             await captureOnboarding(done, on: model, name: "5-done")
         }
 
-        // The real sheet. Only with a data directory: dismissing it marks onboarding completed,
-        // which must not reach the real UserDefaults.
         guard DebugLaunchOptions.dataDirectory != nil else { return }
         NSApp.activate()
         main.makeKeyAndOrderFront(nil)
@@ -441,8 +434,6 @@ private struct DebugSnapshotter {
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
             write(image, name: name)
         } catch {
-            // Sheets can't always be captured as independent windows; draw the view tree instead
-            // (no glass or materials, but controls and layout are faithful).
             log("capture \(name) failed (\(error.localizedDescription)); drawing the view instead")
             guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)

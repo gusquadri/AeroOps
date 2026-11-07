@@ -93,8 +93,6 @@ struct HostMonitorIntegrationTests {
         let rendering = try writer.write(servers.map(\.host) + [closed])
         #expect(rendering.rejected.isEmpty)
 
-        // Pin each server's Ed25519 key (one keyscan connection each). Nothing listens on the
-        // closed port, so any pin lets it past the monitor's unknown-key check.
         let store = HostKeyStore(context: context, keychain: InMemoryKeychain())
         for server in servers {
             try await store.trust(try await scanEd25519(server.host), for: server.host)
@@ -122,7 +120,6 @@ struct HostMonitorIntegrationTests {
         }
         defer { watchdog.cancel() }
 
-        // Phase 1: the three servers, visible (5 s cadence).
         var started = ContinuousClock.now
         var seen = Observations()
         var phase = 1
@@ -133,7 +130,6 @@ struct HostMonitorIntegrationTests {
             if abortsRun(update) { break }
             if phase == 1 {
                 if seen.recordOnline(update, elapsed: elapsed, serverCount: servers.count) {
-                    // Phase 2: a host on a closed port must go offline within 30 s.
                     phase = 2
                     started = ContinuousClock.now
                     coordinator.setHosts(servers.map(\.host) + [closed])
@@ -205,8 +201,6 @@ struct HostMonitorIntegrationTests {
         #expect(vm?.status == 0, "could not de-authorize the test key on aeroops-vm: \(vm?.stderr ?? "-")")
     }
 }
-
-// MARK: - Helpers
 
 /// A private `/tmp/aero-m-XXXXXX` directory (short, for ControlMaster socket paths), removed on deinit.
 final class MonitorScratchDirectory: Sendable {

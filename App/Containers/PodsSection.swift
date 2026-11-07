@@ -38,8 +38,6 @@ struct PodsSection: View {
             .help("Namespace")
             WorkloadSearchField(prompt: "Filter pods", text: $containers.podSearch)
             Spacer(minLength: 8)
-            // The tag, count and button keep their size; the search field gives way when the
-            // inspector narrows the column.
             if crashLooping > 0 {
                 AeroTag("\(crashLooping) crash-looping", tone: .error)
                     .fixedSize()
@@ -49,8 +47,6 @@ struct PodsSection: View {
                 .foregroundStyle(Aero.text.secondary)
                 .monospacedDigit()
                 .fixedSize()
-            // With the inspector open the button only closes it, so it gives its title's width
-            // to the column.
             Button {
                 containers.inspectorPresented.toggle()
             } label: {
@@ -164,7 +160,6 @@ private struct PodTable: View {
         let rows = containers.filteredPods
         let layout = layout(width: width)
         AeroCard(padding: 0) {
-            // The table is created once its width is known, so it starts out filled.
             if width > 0 {
                 table(rows, layout: layout)
             } else {
@@ -187,7 +182,6 @@ private struct PodTable: View {
             namespacePicked: containers.namespace != nil,
             wideStatus: longest > PodColumn.regularStatusLength,
             metrics: containers.pods.contains(where: \.hasUsage),
-            // With the inspector open, clicking a row shows its details, so the row button goes.
             detailButton: !containers.inspectorPresented
         )
     }
@@ -204,7 +198,6 @@ private struct PodTable: View {
                     .foregroundStyle(Aero.text.secondary)
                     .help(pod.namespace)
             }
-            // At most its ideal width: spare width goes to Name.
             .width(min: PodColumn.namespaceWidths.min, ideal: layout.width(.namespace), max: PodColumn.namespaceWidths.ideal)
             .layoutColumn(PodColumn.namespace)
             TableColumn("Name", value: \.name) { pod in
@@ -241,7 +234,6 @@ private struct PodTable: View {
             }
             .width(PodColumn.restartsWidth)
             .layoutColumn(PodColumn.restarts)
-            // Grouped here and below: the column builder takes at most ten columns.
             Group {
                 TableColumn("CPU", sortUsing: KeyPathComparator(\PodInfo.cpuMillicores, order: .reverse)) { (pod: PodInfo) in
                     Text(pod.cpuText)
@@ -393,8 +385,6 @@ private struct PodTable: View {
     }
 }
 
-// MARK: - Inspector
-
 /// Events and `kubectl describe` for the selected pod.
 struct PodInspectorView: View {
     @Bindable var containers: HostContainersModel
@@ -423,8 +413,6 @@ struct PodInspectorView: View {
             }
         }
         .padding(14)
-        // Zero minimums: the inspector column's minimum must not follow its content (see
-        // HostContainersView).
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .background { SkyBackground() }
@@ -458,7 +446,6 @@ struct PodInspectorView: View {
                     AeroTag("Gone", tone: .neutral)
                 }
             }
-            // The pod table hides its Node column while the inspector is open.
             if let node = containers.selectedPod?.nodeName {
                 Label(node, systemImage: "server.rack")
                     .font(Aero.font(.caption))
@@ -467,7 +454,6 @@ struct PodInspectorView: View {
                     .truncationMode(.middle)
                     .help("Node")
             }
-            // On its own row so the inspector's minimum width stays within its column minimum.
             if let pod = containers.selectedPod, pod.restarts > 0 {
                 Button("Previous Logs", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
                     containers.showPreviousLogs(pod)

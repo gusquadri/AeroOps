@@ -116,7 +116,6 @@ public enum LogText {
                     if value == 0x5C {
                         state = .text
                     } else {
-                        // The string ended at that ESC; it starts a new escape sequence.
                         state = .escape
                         pending = current
                     }

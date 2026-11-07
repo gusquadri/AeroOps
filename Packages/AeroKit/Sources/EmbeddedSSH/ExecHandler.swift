@@ -51,7 +51,6 @@ final class ExecHandler: ChannelInboundHandler {
             buffer.writeBytes(stdin)
             context.write(wrapOutboundOut(SSHChannelData(type: .channel, data: .byteBuffer(buffer))), promise: nil)
         }
-        // EOF after stdin, like ssh with stdin redirected; the command sees end of input.
         context.close(mode: .output, promise: nil)
         context.flush()
         context.fireChannelActive()
@@ -79,7 +78,6 @@ final class ExecHandler: ChannelInboundHandler {
         case let signal as SSHChannelRequestEvent.ExitSignal:
             events.yield(.exitSignal(signal.signalName))
         case let event as ChannelEvent where event == .inputClosed:
-            // The server's EOF. The exit status usually follows it.
             break
         default:
             context.fireUserInboundEventTriggered(event)

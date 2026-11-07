@@ -21,8 +21,12 @@ struct DockerParserTests {
     func psAndStats() throws {
         let rows = try fixtureContainers()
         #expect(rows.map(\.name) == ["demo-exited", "demo-logger", "demo-web"])
+        expectExited(rows[0])
+        expectLogger(rows[1])
+        expectWeb(rows[2])
+    }
 
-        let exited = rows[0]
+    private func expectExited(_ exited: ContainerInfo) {
         #expect(exited.id == exitedID)
         #expect(exited.image == "alpine:3.22")
         #expect(exited.state == .exited)
@@ -34,29 +38,30 @@ struct DockerParserTests {
         #expect(exited.ports == nil)
         #expect(exited.runningFor == "7 minutes ago")
         #expect(exited.restartCount == nil)
-        // "2026-10-11 03:55:30 -0300 -03" is 06:55:30Z.
         #expect(exited.createdAt == Date(timeIntervalSince1970: day + 6 * 3600 + 55 * 60 + 30))
         #expect(exited.health == .failing)
+    }
 
-        let logger = rows[1]
+    private func expectLogger(_ logger: ContainerInfo) {
         #expect(logger.id == loggerID)
         #expect(logger.image == "busybox:1.36")
         #expect(logger.state == .running)
         #expect(logger.status == "Up 7 minutes")
         #expect(logger.healthCheck == nil)
         #expect(logger.cpuPercent == 0.03)
-        #expect(logger.memUsedBytes == 208_896)          // 204 KiB
-        #expect(logger.memLimitBytes == 3_125_662_450)   // 2.911 GiB, rounded
+        #expect(logger.memUsedBytes == 208_896)
+        #expect(logger.memLimitBytes == 3_125_662_450)
         #expect(logger.createdAt == Date(timeIntervalSince1970: day + 6 * 3600 + 55 * 60 + 29))
         #expect(logger.health == .healthy)
+    }
 
-        let web = rows[2]
+    private func expectWeb(_ web: ContainerInfo) {
         #expect(web.id == webID)
         #expect(web.image == "nginx:1.27-alpine")
         #expect(web.status == "Up 7 minutes (healthy)")
         #expect(web.healthCheck == .healthy)
         #expect(web.cpuPercent == 0)
-        #expect(web.memUsedBytes == 9_699_328)          // 9.25 MiB
+        #expect(web.memUsedBytes == 9_699_328)
         #expect(web.memLimitBytes == 3_125_662_450)
         #expect(web.ports == "0.0.0.0:8080->80/tcp, [::]:8080->80/tcp")
         #expect(web.createdAt == Date(timeIntervalSince1970: day + 6 * 3600 + 55 * 60 + 27))
@@ -113,7 +118,7 @@ struct DockerParserTests {
         #expect(web.exitCode == 0)
         let started = try #require(web.startedAt)
         #expect(abs(started.timeIntervalSince1970 - (day + 6 * 3600 + 55 * 60 + 29.352732321)) < 1e-5)
-        #expect(web.finishedAt == nil)                  // 0001-01-01T00:00:00Z means never
+        #expect(web.finishedAt == nil)
         #expect(web.restartPolicy == "unless-stopped")
         #expect(web.ports == ["0.0.0.0:8080->80/tcp", "[::]:8080->80/tcp"])
     }
@@ -137,8 +142,6 @@ struct DockerParserTests {
         #expect(DockerParser.parseInspect(Data()).isEmpty)
     }
 
-    // MARK: - Errors
-
     @Test("permission denied fixture is a typed error with a hint")
     func permissionDenied() throws {
         let text = try Fixtures.string("docker/error-permission-denied.txt")
@@ -148,7 +151,6 @@ struct DockerParserTests {
         #expect(error.hint?.contains("sudo -n") == true)
         #expect(error.errorDescription == "Permission denied on the Docker socket (unix:///var/run/docker.sock).")
 
-        // Merged into stdout, the text makes parseContainers throw the same error.
         #expect(throws: DockerError.permissionDenied(socket: "unix:///var/run/docker.sock")) {
             try DockerParser.parseContainers(ps: text)
         }
@@ -188,8 +190,6 @@ struct DockerParserTests {
         let ps = "WARNING: something\n" + (try Fixtures.string("docker/ps-a.jsonl")) + "\n{not json}\n[1,2]\n{}\n"
         #expect(try DockerParser.parseContainers(ps: ps).count == 3)
     }
-
-    // MARK: - Fields
 
     @Test("old Docker without State: derived from Status; names cleaned")
     func stateFromStatus() throws {

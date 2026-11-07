@@ -193,7 +193,6 @@ Scripts/verify-appcast.swift  checks a release's Sparkle signature against the a
 .github/workflows/      release.yml: tag vX.Y.Z → tested, signed, notarized GitHub Release + appcast
 dev/                    dev servers, VM, fixtures and self-test helpers
 docs/screenshots/       README screenshots
-spikes/                 Phase 0 throwaway spikes
 project.yml             XcodeGen spec
 ```
 

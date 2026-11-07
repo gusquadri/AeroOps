@@ -30,16 +30,13 @@ struct SVGPathTests {
 
     @Test("after Z, relative commands start from the subpath's first point")
     func closeResetsCurrentPoint() throws {
-        // Second triangle starts at (10, 10) again, so it reaches x = 13.
         #expect(approx(try bounds("M10 10l1 0 0 1z l3 0 0 3z"), CGRect(x: 10, y: 10, width: 3, height: 3)))
     }
 
     @Test("arcs: a full circle from two half arcs, packed flags, zero radius is a line")
     func arcs() throws {
         #expect(approx(try bounds("M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0"), CGRect(x: 2, y: 2, width: 20, height: 20)))
-        // Same circle with the flags packed into the numbers ("0 1020 0").
         #expect(approx(try bounds("M2 12a10 10 0 1020 0a10 10 0 10-20 0"), CGRect(x: 2, y: 2, width: 20, height: 20)))
-        // Radii too small are scaled up: a half circle of radius 5 above the chord (sweep 1).
         #expect(approx(try bounds("M0 5A1 1 0 0 1 10 5"), CGRect(x: 0, y: 0, width: 10, height: 5)))
         #expect(approx(try bounds("M0 0A0 4 0 0 1 4 4"), CGRect(x: 0, y: 0, width: 4, height: 4)))
     }
@@ -70,7 +67,6 @@ struct SystemLogoTests {
         #expect(!artwork.title.isEmpty)
         let box = artwork.path.boundingRect
         #expect(box.minX >= -0.05 && box.minY >= -0.05 && box.maxX <= 24.05 && box.maxY <= 24.05, "\(logo): \(box)")
-        // Simple Icons fill the box along at least one axis.
         #expect(max(box.width, box.height) > 22, "\(logo): \(box)")
         #expect(SystemLogo.artwork[logo] != nil)
     }
@@ -119,7 +115,6 @@ struct SystemLogoTests {
         #expect(SystemLogo.match(id: "debian", kernel: "Linux 6.6.51+rpt-rpi-v8 aarch64") == .raspberryPi)
         #expect(SystemLogo.match(id: "debian", kernel: "Linux 6.6.44-production+truenas x86_64") == .trueNAS)
         #expect(SystemLogo.match(id: "slackware", kernel: "Linux 6.1.106-Unraid x86_64") == .unraid)
-        // Ubuntu on a Pi keeps Ubuntu's logo.
         #expect(SystemLogo.match(id: "ubuntu", kernel: "Linux 6.8.0-1012-raspi aarch64") == .ubuntu)
         #expect(SystemLogo.match(id: nil, kernel: "Darwin 27.0.0 arm64") == .apple)
         #expect(SystemLogo.match(id: nil, kernel: "FreeBSD 14.1-RELEASE amd64") == .freeBSD)

@@ -15,8 +15,6 @@ struct AeroEmptyState<Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
-        // Centred in the available space, but inside a scroll view: wrapped text must never
-        // raise the window's minimum height (it once grew the split view past the window).
         GeometryReader { proxy in
             ScrollView {
                 card

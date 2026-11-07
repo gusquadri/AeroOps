@@ -45,7 +45,6 @@ struct GhosttyKeybindingTests {
     @Test("libghostty accepts the whole configuration")
     @MainActor
     func accepted() {
-        // A rejected line (e.g. an unknown key name) fails the session instead of starting it.
         for environment in [[:], ["TERM": "xterm-ghostty"]] {
             let spec = TerminalLaunchSpec(executable: "/usr/bin/true", environment: environment, title: "true")
             let session = TerminalSession(spec: spec, appearance: .aero)

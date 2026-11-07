@@ -86,7 +86,6 @@ public struct CodeSignaturePeerValidator: BridgePeerValidator {
         case .ownSignature: Self.ownTeamIdentifier()
         case .explicit(let value): value
         }
-        // Only a well-formed team ID goes into the requirement string.
         teamIdentifier = candidate.flatMap { $0.wholeMatch(of: /[A-Z0-9]{10}/) != nil ? $0 : nil }
         let identifier = requiredIdentifier.flatMap { $0.wholeMatch(of: /[A-Za-z0-9.\-]+/) != nil ? $0 : nil }
         self.requiredIdentifier = identifier

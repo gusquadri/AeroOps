@@ -77,7 +77,23 @@ struct OpenSSHPrivateKey: Sendable {
         }
     }
 
+    private typealias DecodedKey = (algorithm: SSHKeyAlgorithm, secret: Data, signingKey: any SSHSigningKey)
+
     private static func parseUnchecked(_ binary: [UInt8]) throws -> OpenSSHPrivateKey {
+        var (filePublicBlob, p) = try readEnvelope(binary)
+        let decoded = try readKey(&p)
+        let comment = try p.text("comment")
+        try checkPadding(p.rest())
+        guard decoded.signingKey.publicKeyBlob == filePublicBlob else {
+            throw KeyImportError.inconsistentKey("private key does not match the file's public key")
+        }
+        try selfTest(decoded.signingKey)
+        return OpenSSHPrivateKey(
+            algorithm: decoded.algorithm, comment: comment, publicKeyBlob: filePublicBlob,
+            secret: decoded.secret, signingKey: decoded.signingKey)
+    }
+
+    private static func readEnvelope(_ binary: [UInt8]) throws -> (publicBlob: [UInt8], privateSection: SSHReader) {
         guard binary.starts(with: magic) else { throw KeyImportError.malformed("missing openssh-key-v1 magic") }
         var r = SSHReader(Array(binary.dropFirst(magic.count)))
         let cipher = try r.text("cipher name")
@@ -88,73 +104,75 @@ struct OpenSSHPrivateKey: Sendable {
         guard count == 1 else { throw KeyImportError.multipleKeys(Int(count)) }
         let filePublicBlob = try r.string("public key")
         var p = SSHReader(try r.string("private section"))
-
-        // Matching check integers; with "none" they are plain, so a mismatch means corruption.
         guard try p.uint32("checkint") == (try p.uint32("checkint")) else { throw KeyImportError.malformed("check integers differ") }
+        return (filePublicBlob, p)
+    }
 
+    private static func readKey(_ p: inout SSHReader) throws -> DecodedKey {
         let keyType = try p.text("key type")
-        let algorithm: SSHKeyAlgorithm
-        let secret: Data
-        let signingKey: any SSHSigningKey
         switch keyType {
-        case "ssh-ed25519":
-            let publicKey = try p.string("ed25519 public key")
-            let privateKey = try p.string("ed25519 private key") // seed(32) || public(32)
-            guard publicKey.count == 32, privateKey.count == 64 else { throw KeyImportError.malformed("ed25519 key lengths") }
-            guard Array(privateKey[32...]) == publicKey else { throw KeyImportError.inconsistentKey("ed25519 public half differs") }
-            let seed = Data(privateKey[0..<32])
-            let key = Ed25519SigningKey(privateKey: try .init(rawRepresentation: seed))
-            guard Array(key.privateKey.publicKey.rawRepresentation) == publicKey else {
-                throw KeyImportError.inconsistentKey("ed25519 seed does not produce the stored public key")
-            }
-            (algorithm, secret, signingKey) = (.ed25519, seed, key)
-
-        case "ecdsa-sha2-nistp256":
-            let curve = try p.text("curve")
-            let q = try p.string("ecdsa public point")
-            let scalar = try p.unsignedMPInt("ecdsa private scalar")
-            guard curve == "nistp256" else { throw KeyImportError.unsupportedKeyType("ecdsa-sha2-\(curve)") }
-            guard let raw = fixedWidth(scalar, 32) else { throw KeyImportError.malformed("ecdsa private scalar too long") }
-            let key = P256SigningKey(privateKey: try .init(rawRepresentation: raw))
-            guard Array(key.privateKey.publicKey.x963Representation) == q else {
-                throw KeyImportError.inconsistentKey("ecdsa private scalar does not produce the stored public point")
-            }
-            (algorithm, secret, signingKey) = (.ecdsaP256, Data(raw), key)
-
-        case "ssh-rsa":
-            let components = RSAPrivateComponents(
-                modulus: try p.unsignedMPInt("rsa n"),
-                publicExponent: try p.unsignedMPInt("rsa e"),
-                privateExponent: try p.unsignedMPInt("rsa d"),
-                iqmp: try p.unsignedMPInt("rsa iqmp"),
-                prime1: try p.unsignedMPInt("rsa p"),
-                prime2: try p.unsignedMPInt("rsa q"))
-            let bits = BigUInt(bigEndian: components.modulus).bitWidth
-            guard bits >= 1024 else { throw KeyImportError.rsaKeyTooSmall(bits: bits) }
-            let der = Data(try components.pkcs1DER())
-            let key: RSASigningKey
-            do {
-                key = try RSASigningKey(pkcs1DER: der)
-            } catch {
-                throw KeyImportError.malformed("Security.framework rejected the RSA key: \(error)")
-            }
-            (algorithm, secret, signingKey) = (.rsa, der, key)
-
-        default:
-            throw KeyImportError.unsupportedKeyType(keyType)
+        case "ssh-ed25519": return try readEd25519(&p)
+        case "ecdsa-sha2-nistp256": return try readP256(&p)
+        case "ssh-rsa": return try readRSA(&p)
+        default: throw KeyImportError.unsupportedKeyType(keyType)
         }
+    }
 
-        let comment = try p.text("comment")
-        // Padding is 1, 2, 3, … up to the cipher block size.
-        let padding = p.rest()
+    static let ed25519KeySize = 32
+
+    private static func readEd25519(_ p: inout SSHReader) throws -> DecodedKey {
+        let publicKey = try p.string("ed25519 public key")
+        let seedThenPublicKey = try p.string("ed25519 private key")
+        let size = ed25519KeySize
+        guard publicKey.count == size, seedThenPublicKey.count == 2 * size else {
+            throw KeyImportError.malformed("ed25519 key lengths")
+        }
+        guard Array(seedThenPublicKey.suffix(size)) == publicKey else {
+            throw KeyImportError.inconsistentKey("ed25519 public half differs")
+        }
+        let seed = Data(seedThenPublicKey.prefix(size))
+        let key = Ed25519SigningKey(privateKey: try .init(rawRepresentation: seed))
+        guard Array(key.privateKey.publicKey.rawRepresentation) == publicKey else {
+            throw KeyImportError.inconsistentKey("ed25519 seed does not produce the stored public key")
+        }
+        return (.ed25519, seed, key)
+    }
+
+    private static func readP256(_ p: inout SSHReader) throws -> DecodedKey {
+        let curve = try p.text("curve")
+        let q = try p.string("ecdsa public point")
+        let scalar = try p.unsignedMPInt("ecdsa private scalar")
+        guard curve == "nistp256" else { throw KeyImportError.unsupportedKeyType("ecdsa-sha2-\(curve)") }
+        guard let raw = fixedWidth(scalar, 32) else { throw KeyImportError.malformed("ecdsa private scalar too long") }
+        let key = P256SigningKey(privateKey: try .init(rawRepresentation: raw))
+        guard Array(key.privateKey.publicKey.x963Representation) == q else {
+            throw KeyImportError.inconsistentKey("ecdsa private scalar does not produce the stored public point")
+        }
+        return (.ecdsaP256, Data(raw), key)
+    }
+
+    private static func readRSA(_ p: inout SSHReader) throws -> DecodedKey {
+        let components = RSAPrivateComponents(
+            modulus: try p.unsignedMPInt("rsa n"),
+            publicExponent: try p.unsignedMPInt("rsa e"),
+            privateExponent: try p.unsignedMPInt("rsa d"),
+            iqmp: try p.unsignedMPInt("rsa iqmp"),
+            prime1: try p.unsignedMPInt("rsa p"),
+            prime2: try p.unsignedMPInt("rsa q"))
+        let bits = BigUInt(bigEndian: components.modulus).bitWidth
+        guard bits >= 1024 else { throw KeyImportError.rsaKeyTooSmall(bits: bits) }
+        let der = Data(try components.pkcs1DER())
+        do {
+            return (.rsa, der, try RSASigningKey(pkcs1DER: der))
+        } catch {
+            throw KeyImportError.malformed("Security.framework rejected the RSA key: \(error)")
+        }
+    }
+
+    private static func checkPadding(_ padding: [UInt8]) throws {
         guard padding.count < 256, padding.enumerated().allSatisfy({ $0.element == UInt8(truncatingIfNeeded: $0.offset + 1) }) else {
             throw KeyImportError.malformed("bad padding")
         }
-        guard signingKey.publicKeyBlob == filePublicBlob else {
-            throw KeyImportError.inconsistentKey("private key does not match the file's public key")
-        }
-        try selfTest(signingKey)
-        return OpenSSHPrivateKey(algorithm: algorithm, comment: comment, publicKeyBlob: filePublicBlob, secret: secret, signingKey: signingKey)
     }
 
     /// Signs a random message and verifies it, which catches wrong RSA CRT parameters.

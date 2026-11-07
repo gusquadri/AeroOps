@@ -3,7 +3,6 @@ import Dispatch
 import Foundation
 import Synchronization
 
-// Serves only the macOS agent and askpass sockets.
 #if os(macOS)
 
 /// A private Unix socket that serves each connection on its own thread. Shared by the agent
@@ -45,8 +44,6 @@ final class UnixSocketListener: Sendable {
 
     var isRunning: Bool { state.withLock { $0.listenFD >= 0 } }
 
-    // MARK: Start and stop
-
     /// Creates the socket and starts accepting. Does nothing if already running.
     ///
     /// - Parameters:
@@ -56,8 +53,8 @@ final class UnixSocketListener: Sendable {
     func start(serve: @escaping Serve, onOverflow: @escaping @Sendable () -> Void) throws(AgentServerError) {
         guard !isRunning else { return }
         let directory = (socketPath as NSString).deletingLastPathComponent
-        let tempPath = (directory as NSString).appendingPathComponent(".\(name)-\(String(UInt32.random(in: 0...UInt32.max), radix: 16)).tmp")
-        for path in [socketPath, tempPath] where path.utf8.count >= MemoryLayout.size(ofValue: sockaddr_un().sun_path) {
+        let stagingPath = (directory as NSString).appendingPathComponent(".\(name)-\(String(UInt32.random(in: 0...UInt32.max), radix: 16)).tmp")
+        for path in [socketPath, stagingPath] where path.utf8.count >= MemoryLayout.size(ofValue: sockaddr_un().sun_path) {
             throw .socketPathTooLong(path)
         }
         try Self.preparePrivateDirectory(directory)
@@ -69,17 +66,15 @@ final class UnixSocketListener: Sendable {
         defer {
             if !keepFD {
                 close(fd)
-                unlink(tempPath)
+                unlink(stagingPath)
             }
         }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        // Bind to a temporary name, restrict it, then rename into place: the socket is never
-        // reachable with looser permissions, and no process-wide umask change is needed.
-        guard Self.withAddress(tempPath, { bind(fd, $0, $1) }) == 0 else { throw .system(operation: "bind", errno: errno) }
-        guard chmod(tempPath, 0o600) == 0 else { throw .system(operation: "chmod", errno: errno) }
+        guard Self.withAddress(stagingPath, { bind(fd, $0, $1) }) == 0 else { throw .system(operation: "bind", errno: errno) }
+        guard chmod(stagingPath, 0o600) == 0 else { throw .system(operation: "chmod", errno: errno) }
         guard listen(fd, 16) == 0 else { throw .system(operation: "listen", errno: errno) }
         guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw .system(operation: "fcntl", errno: errno) }
-        guard rename(tempPath, socketPath) == 0 else { throw .system(operation: "rename", errno: errno) }
+        guard rename(stagingPath, socketPath) == 0 else { throw .system(operation: "rename", errno: errno) }
         var info = stat()
         guard lstat(socketPath, &info) == 0 else { throw .system(operation: "stat", errno: errno) }
         keepFD = true
@@ -103,7 +98,6 @@ final class UnixSocketListener: Sendable {
                 state.acceptSource = nil
                 state.socketNode = nil
             }
-            // Wake every connection thread; each closes its own descriptor.
             for fd in state.connections.values { shutdown(fd, SHUT_RDWR) }
             return (state.acceptSource, state.socketNode, state.listenFD >= 0)
         }
@@ -115,10 +109,7 @@ final class UnixSocketListener: Sendable {
         }
     }
 
-    // MARK: Socket file helpers
-
     private static func preparePrivateDirectory(_ path: String) throws(AgentServerError) {
-        // Only the last component is created (the parent is the home directory, or a test root).
         if mkdir(path, 0o700) != 0, errno != EEXIST { throw .system(operation: "mkdir \(path)", errno: errno) }
         var info = stat()
         guard stat(path, &info) == 0 else { throw .system(operation: "stat \(path)", errno: errno) }
@@ -151,17 +142,14 @@ final class UnixSocketListener: Sendable {
         }
     }
 
-    // MARK: Connections
-
     private func acceptPending(_ listenFD: Int32, serve: @escaping Serve, onOverflow: @Sendable () -> Void) {
         while true {
             let fd = accept(listenFD, nil, nil)
             if fd < 0 {
                 if errno == EINTR { continue }
-                return // EAGAIN: drained; other errors: try again on the next event.
+                return
             }
             _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            // Accepted sockets inherit O_NONBLOCK on macOS; connection threads want blocking I/O.
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
             var on: Int32 = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))

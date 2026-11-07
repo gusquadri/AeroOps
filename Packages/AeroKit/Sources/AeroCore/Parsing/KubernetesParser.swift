@@ -291,8 +291,6 @@ public enum KubectlError: Error, Sendable, Hashable, LocalizedError {
     }
 }
 
-// MARK: - JSON shapes
-
 /// `{"kind": "List", "items": [...]}`. `items` is `nil` when the key is missing (not a list).
 private struct ListJSON<Item: Decodable>: Decodable {
     var items: LossyArray<Item>?
@@ -553,7 +551,6 @@ private struct ContainerStatusJSON: Decodable {
             restartCount: max(0, restartCount ?? 0),
             waitingReason: state?.waiting?.reason.flatMap { $0.isEmpty ? nil : $0 },
             terminatedReason: terminated?.reason.flatMap { $0.isEmpty ? nil : $0 },
-            // A terminated state always has an exit code; default to 0 if a reason came without one.
             exitCode: terminated.map { $0.exitCode ?? 0 }
         )
     }

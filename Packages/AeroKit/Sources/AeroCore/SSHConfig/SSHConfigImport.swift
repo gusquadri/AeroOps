@@ -100,7 +100,6 @@ public enum SSHConfigImport {
                 identityFiles: resolved.identityFiles,
                 usesLocalUser: resolved.user == nil
             )
-            // Unsupported hosts are never added, so they neither take a name nor count as earlier.
             if candidate.isSelectable {
                 candidate.host.name = uniqueName(for: resolved.alias, taken: &takenNames)
                 earlier.append((resolved.alias, candidate.host))
@@ -114,8 +113,6 @@ public enum SSHConfigImport {
     public static func isSameTarget(_ a: RemoteHost, _ b: RemoteHost) -> Bool {
         a.port == b.port && a.user == b.user && folded(a.address) == folded(b.address)
     }
-
-    // MARK: - Rules
 
     private static func unsupportedReason(_ resolved: SSHConfigHost, host: RemoteHost) -> String? {
         if let issue = nameIssue(resolved.alias) { return issue }

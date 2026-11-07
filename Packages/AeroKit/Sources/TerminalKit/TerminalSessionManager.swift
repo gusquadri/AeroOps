@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-// The appearance types live in TerminalStyle, shared with iOS; callers keep getting them here.
 @_exported import TerminalStyle
 
 /// The open terminal tabs, in tab order.
@@ -101,8 +100,6 @@ public final class TerminalSessionManager {
         sessions.move(fromOffsets: source, toOffset: destination)
     }
 
-    // MARK: - Surface LRU
-
     private func visibilityChanged(_ session: TerminalSession, visible: Bool) {
         if visible {
             recency.removeAll { $0 == session.id }
@@ -131,7 +128,6 @@ public final class TerminalSessionManager {
         var live = sessions.filter(\.hasSurface)
         let limit = max(1, liveSurfaceLimit)
         guard live.count > limit else { return }
-        // Never shown sessions first (their surface was built but not used), then by recency.
         live.sort { rank($0.id) < rank($1.id) }
         var excess = live.count - limit
         for session in live where excess > 0 && !session.isOnScreen {

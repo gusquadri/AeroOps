@@ -2,8 +2,6 @@ import AeroTheme
 import Foundation
 import SwiftUI
 
-// MARK: - Items
-
 extension FileItem {
     var symbol: String {
         switch kind {
@@ -54,8 +52,6 @@ extension FileItem {
         return text
     }
 }
-
-// MARK: - Transfers
 
 extension FileTransfer {
     var symbol: String {

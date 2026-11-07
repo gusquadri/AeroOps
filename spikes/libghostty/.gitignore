@@ -1,7 +1,0 @@
-# Generated and build outputs for the libghostty spike
-*.xcodeproj
-build/
-DerivedData/
-.build/
-.swiftpm/
-results/

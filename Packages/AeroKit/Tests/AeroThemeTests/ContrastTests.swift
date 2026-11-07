@@ -35,7 +35,6 @@ struct ContrastTests {
         if variant == .day {
             list.append(("white (brightest possible)", RGB(.white, variant)))
         }
-        // Wells: opaque, so the backdrop does not matter; the top edge carries the inner shade.
         let solid = RGB(Aero.glass.solidFill, variant)
         for (tint, color) in Self.tints {
             let well = RGB(color.opacity(AeroWellFill.tintOpacity), over: solid, variant)
@@ -48,16 +47,13 @@ struct ContrastTests {
             list.append(("glass.fill over \(name)", glass))
             list.append(("glass gloss peak over \(name)",
                          RGB(Aero.sheen.opacity(GlassTokens.glossPeak), over: glass, variant)))
-            // Tags: the glass base plus a tint wash, for every tint the app uses.
             let tagBase = RGB(AeroTagFill.base, over: sky, variant)
             for (tint, color) in Self.tints {
                 list.append(("\(tint) tag over \(name)",
                              RGB(color.opacity(AeroTagFill.tintOpacity), over: tagBase, variant)))
-                // Card and section headers: the tint wash at its peak over plain glass.
                 list.append(("\(tint) header wash over glass over \(name)",
                              RGB(color.opacity(AeroHeaderWash.peak), over: glass, variant)))
             }
-            // Gauge centre bubble at its most transparent.
             list.append(("gauge bubble over glass over \(name)",
                          RGB(Aero.base.opacity(GaugeBubble.edgeOpacity), over: glass, variant)))
         }
@@ -163,7 +159,6 @@ struct ContrastTests {
     func secondaryButtonLabel(variant: AeroVariant) {
         let label = RGB(AquaGlassFill.label, variant)
         for (name, backdrop) in Self.backdrops(variant) {
-            // The label's band: under the gloss, which spans the top half of the capsule.
             let fill = RGB(AquaGlassFill.bottom, over: backdrop, variant)
             let ratio = RGB.contrast(label, fill)
             #expect(ratio >= Self.minimum, "\(variant) secondary label over \(name): \(ratio.formatted2):1")

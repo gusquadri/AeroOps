@@ -36,8 +36,6 @@ struct HostMonitorTests {
         #expect(runner.calls.count == count, sourceLocation: sourceLocation)
     }
 
-    // MARK: - CPU
-
     @Test("The first poll has no CPU %; the second has the delta between both samples")
     func cpuDeltaAcrossPolls() async throws {
         let first = try fixture("devcontainer-1")
@@ -84,8 +82,6 @@ struct HostMonitorTests {
         await monitor.stop()
     }
 
-    // MARK: - Failures
-
     @Test("A poll that hits the 8 s timeout makes the host stale and keeps the last snapshot")
     func staleAfterTimeout() async throws {
         runner.enqueue(.output(try fixture("devcontainer-1")), .hangUntilTimeout, for: host)
@@ -96,7 +92,6 @@ struct HostMonitorTests {
         clock.advance(to: .seconds(5))
         try await runner.waitForCalls(2)
         #expect(runner.calls[1].timeout == .seconds(8))
-        // The only pending sleep is the runner's deadline: no poll timer while a poll runs.
         #expect(try await clock.nextDeadline() == .seconds(13))
         clock.advance(to: .seconds(13))
 
@@ -107,7 +102,6 @@ struct HostMonitorTests {
         #expect(stale.snapshot == online.snapshot)
         #expect(stale.lastSuccessAt == online.lastSuccessAt)
         #expect(stale.message == SSHError.timeout.errorDescription)
-        // 5 s after the timed-out poll started has passed: the next one keeps the 1 s minimum gap.
         #expect(try await clock.nextDeadline() == .seconds(14))
         await monitor.stop()
     }
@@ -150,18 +144,15 @@ struct HostMonitorTests {
                 clock.advance(to: due)
             }
         }
-        // 5 s while stale; then 10, 20, 40, 60, 60 s once offline.
         #expect(starts == [.zero, .seconds(5), .seconds(10), .seconds(20), .seconds(40), .seconds(80), .seconds(140)])
         #expect(try await clock.nextDeadline() == .seconds(200))
         #expect(runner.calls.map(\.startedAt) == starts)
 
-        // Refresh polls immediately, without waiting for the backoff.
         runner.enqueue(.output(try fixture("devcontainer-1")), for: host)
         monitor.refresh()
         let recovered = try await updates.next("recovery") { $0.status == .online }
         #expect(recovered.consecutiveFailures == 0)
         #expect(runner.calls.last?.startedAt == .seconds(140))
-        // Back to the normal cadence.
         #expect(try await clock.nextDeadline() == .seconds(145))
         await monitor.stop()
     }
@@ -234,8 +225,6 @@ struct HostMonitorTests {
         await monitor.stop()
     }
 
-    // MARK: - Unsupported OS
-
     @Test("A host without /proc/stat is unsupported and polled at the background interval")
     func unsupportedOS() async throws {
         runner.enqueue(.output(try fixture("nonlinux-darwin")), for: host)
@@ -251,8 +240,6 @@ struct HostMonitorTests {
         #expect(try await clock.nextDeadline() == .seconds(30))
         await monitor.stop()
     }
-
-    // MARK: - Overlap
 
     @Test("Polls never overlap: refreshes and timers during a poll queue one follow-up poll")
     func noOverlappingPolls() async throws {
@@ -297,8 +284,6 @@ struct HostMonitorTests {
         #expect(try await clock.nextDeadline() == .seconds(8))
         await monitor.stop()
     }
-
-    // MARK: - Activity
 
     @Test("Pause stops polling; resuming polls at once when overdue; background polls every 30 s")
     func pauseAndResume() async throws {
@@ -351,8 +336,6 @@ struct HostMonitorTests {
         try await monitorEventually("the visible timer") { clock.pendingDeadlines == [.seconds(105)] }
         await monitor.stop()
     }
-
-    // MARK: - Host keys
 
     @Test("A host with no pinned key is held as unknown until the key is trusted")
     func hostKeyUnknown() async throws {
@@ -421,7 +404,6 @@ struct HostMonitorTests {
         clock.advance(to: .seconds(120))
         try await expectNoNewCalls(2)
 
-        // Refreshing while still blocked re-reports the block without connecting.
         monitor.refresh()
         try await updates.next("still held") { $0.hostKeyIssue != nil }
         try await expectNoNewCalls(2)
@@ -443,8 +425,6 @@ struct HostMonitorTests {
         #expect(held.hostKeyIssue == .changed(nil))
         await monitor.stop()
     }
-
-    // MARK: - Lifecycle
 
     @Test("stop() cancels a running poll, finishes the stream and ignores later calls")
     func stopCancelsPoll() async throws {

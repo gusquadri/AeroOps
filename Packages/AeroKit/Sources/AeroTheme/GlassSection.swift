@@ -54,7 +54,6 @@ public struct GlassSection<Content: View, Accessory: View>: View {
                 .padding(.vertical, 11)
                 .background { AeroHeaderWash() }
 
-                // Etched divider: an ink line over a line of sheen.
                 VStack(spacing: 0) {
                     Rectangle().fill(Aero.ink.opacity(accessibility.increaseContrast ? 0.35 : 0.12))
                     Rectangle().fill(Aero.sheen.opacity(0.7))
@@ -76,8 +75,6 @@ extension GlassSection where Accessory == EmptyView {
         self.init(title, systemImage: systemImage, content: content, accessory: { EmptyView() })
     }
 }
-
-// MARK: - Previews
 
 #Preview("GlassSection") {
     VStack(spacing: 20) {

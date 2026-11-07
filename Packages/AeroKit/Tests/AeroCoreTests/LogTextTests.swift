@@ -7,8 +7,6 @@ import AeroTestSupport
 struct LogTextTests {
     private let esc = "\u{1B}"
 
-    // MARK: - Fixtures
-
     @Test("demo-logger: colours removed, text and UTF-8 kept")
     func loggerFixture() throws {
         let raw = try Fixtures.string("docker/logs-demo-logger.txt")
@@ -17,7 +15,7 @@ struct LogTextTests {
         #expect(!clean.contains(esc))
         #expect(clean.utf8.count == 3607)
         let lines = clean.split(separator: "\n", omittingEmptySubsequences: false)
-        #expect(lines.count == 51)            // 50 lines plus the empty string after the final \n
+        #expect(lines.count == 51)
         #expect(lines[0] == "2026-10-11T07:02:42.893066459Z WARN  slow query took 746ms (threshold 500ms)")
         #expect(lines[1] == "2026-10-11T07:02:43.393546094Z DEBUG cache hit ratio=0.59 entries=2577")
         #expect(lines[2] == "2026-10-11T07:02:43.895904365Z plain line 860 without colour codes")
@@ -43,7 +41,7 @@ struct LogTextTests {
         #expect(small.truncated)
         #expect(small.text.utf8.count <= 200)
         #expect(clean.hasSuffix(small.text))
-        #expect(clean.hasSuffix("\n" + small.text))     // starts at a line boundary
+        #expect(clean.hasSuffix("\n" + small.text))
         #expect(small.text.hasPrefix("2026-10-11T"))
     }
 
@@ -54,8 +52,6 @@ struct LogTextTests {
         #expect(LogText.prepare(raw) == CappedText(text: raw, truncated: false))
         #expect(LogText.capLines(raw, maxLines: 1).text == "2026-10-11T06:55:30.580619277Z fatal: /etc/job/config.yaml not found\n")
     }
-
-    // MARK: - ANSI edge cases
 
     @Test("CSI sequences: SGR, private modes, truecolour, cursor moves, 8-bit CSI")
     func csi() {
@@ -75,9 +71,7 @@ struct LogTextTests {
         #expect(LogText.stripANSI("\(esc)P1$r0m\(esc)\\ok") == "ok")
         #expect(LogText.stripANSI("\(esc)_app command\u{07}ok") == "ok")
         #expect(LogText.stripANSI("\(esc)^privacy\(esc)\\ok\(esc)Xsos\u{9C}!") == "ok!")
-        // Ended by the next escape sequence instead of a terminator.
         #expect(LogText.stripANSI("\(esc)]0;title\(esc)[1mB") == "B")
-        // An unterminated string never swallows the following lines.
         #expect(LogText.stripANSI("\(esc)]0;title\nnext line\n") == "\nnext line\n")
         #expect(LogText.stripANSI("\(esc)]0;title\r\nnext") == "\nnext")
     }
@@ -113,8 +107,6 @@ struct LogTextTests {
         #expect(LogText.stripANSI("\(esc)[1m👍🏽\(esc)[0m") == "👍🏽")
     }
 
-    // MARK: - Caps
-
     @Test("capLines keeps head or tail, with or without a final newline")
     func capLines() {
         #expect(LogText.capLines("a\nb\nc\n", maxLines: 2) == CappedText(text: "b\nc\n", truncated: true))
@@ -147,19 +139,17 @@ struct LogTextTests {
         #expect(LogText.capBytes(text, maxBytes: 11, keep: .head) == CappedText(text: "aaaa\nbbbb\n", truncated: true))
         #expect(LogText.capBytes(text, maxBytes: 15) == CappedText(text: text, truncated: false))
         #expect(LogText.capBytes(text, maxBytes: 0) == CappedText(text: "", truncated: true))
-        // One long line: cut at a character boundary.
         #expect(LogText.capBytes("日本語", maxBytes: 4) == CappedText(text: "語", truncated: true))
         #expect(LogText.capBytes("日本語", maxBytes: 4, keep: .head) == CappedText(text: "日", truncated: true))
         #expect(LogText.capBytes("👍", maxBytes: 3, keep: .head) == CappedText(text: "", truncated: true))
         #expect(LogText.capBytes("👍", maxBytes: 3) == CappedText(text: "", truncated: true))
-        // The only newline is the last byte: keep the partial line rather than nothing.
         #expect(LogText.capBytes("xxxxxxxx\n", maxBytes: 5) == CappedText(text: "xxxx\n", truncated: true))
         #expect(LogText.defaultMaxBytes == 1_048_576)
     }
 
     @Test("prepare on a huge single line respects the byte cap")
     func hugeLine() {
-        let text = String(repeating: "é", count: 700_000)    // 1.4 MB, no newline
+        let text = String(repeating: "é", count: 700_000)
         let capped = LogText.prepare(text)
         #expect(capped.truncated)
         #expect(capped.text.utf8.count <= LogText.defaultMaxBytes)

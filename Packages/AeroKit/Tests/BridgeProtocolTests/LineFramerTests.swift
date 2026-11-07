@@ -34,10 +34,8 @@ struct LineFramerTests {
         var framer = LineFramer(maxLineBytes: 5)
         #expect(framer.append(Data("1234".utf8)).isEmpty)
         #expect(framer.append(Data("56".utf8)) == [.oversized(bytes: 6)])
-        // The rest of the long line is dropped without buffering it.
         #expect(framer.append(Data(String(repeating: "x", count: 10_000).utf8)).isEmpty)
         #expect(framer.bufferedByteCount == 0)
-        // The next line is fine again.
         #expect(framer.append(Data("yy\nok\n".utf8)) == [.line(Data("ok".utf8))])
     }
 

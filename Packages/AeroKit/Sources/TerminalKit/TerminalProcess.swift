@@ -76,7 +76,6 @@ final class TerminalProcess: @unchecked Sendable {
     private let readQueue = DispatchQueue(label: "aeroops.terminal.output", qos: .userInitiated)
     private let ioQueue = DispatchQueue(label: "aeroops.terminal.input", qos: .userInitiated)
 
-    // readQueue only.
     private var history = TerminalHistory()
     private var graphicsFilter = KittyGraphicsFilter()
     private var reportedWorkingDirectory: String?
@@ -85,7 +84,6 @@ final class TerminalProcess: @unchecked Sendable {
     private var reaped = false
     private var exitCode: Int32?
 
-    // ioQueue only.
     private var writeFD: Int32 = -1
     private var viewport: InMemoryTerminalViewport?
     private var spawnAttempted = false
@@ -95,7 +93,6 @@ final class TerminalProcess: @unchecked Sendable {
     /// The surface whose replay waits for its grid size.
     private var pendingReplay: PendingReplay?
 
-    // Guarded by lock.
     private let lock = NSLock()
     private var nextToken = 0
     /// The attached surface's token: only it may write and resize.
@@ -117,8 +114,6 @@ final class TerminalProcess: @unchecked Sendable {
         self.spec = spec
         self.onEvent = onEvent
     }
-
-    // MARK: - Surfaces
 
     /// A token for the next surface's I/O, passed back to every call it makes.
     func makeToken() -> Int {
@@ -147,7 +142,6 @@ final class TerminalProcess: @unchecked Sendable {
             self?.setReadPaused(backlogged, token: token)
         }
         ioQueue.async { [self] in
-            // Before the program started there is nothing to replay.
             guard spawnAttempted else {
                 pendingReplay = nil
                 replay(into: io, token: token)
@@ -193,8 +187,6 @@ final class TerminalProcess: @unchecked Sendable {
     private func replay(into io: InMemoryTerminalSession, token: Int) {
         readQueue.async { [self] in
             let replay = history.isEmpty ? Data() : history.replay()
-            // A full-screen program whose first frames were dropped draws only changes from
-            // here on: make it repaint.
             let redraw = history.replayNeedsRepaint
             let (attached, exit): (Bool, Exit?) = lock.withLock {
                 guard activeToken == token, !terminated else { return (false, nil) }
@@ -259,8 +251,6 @@ final class TerminalProcess: @unchecked Sendable {
             }
         }
     }
-
-    // MARK: - Input and size
 
     /// Whether the program wants the macOS line-editing keys as the bytes a shell reads
     /// (Ctrl-A, Ctrl-E, Ctrl-U, Meta-b, Meta-f) rather than encoded keys: it is on the main
@@ -349,8 +339,6 @@ final class TerminalProcess: @unchecked Sendable {
         )
     }
 
-    // MARK: - Spawn
-
     private func spawn(_ viewport: InMemoryTerminalViewport) {
         guard !lock.withLock({ terminated }) else { return }
         guard access(spec.executable, X_OK) == 0 else {
@@ -382,7 +370,6 @@ final class TerminalProcess: @unchecked Sendable {
         readSource.setCancelHandler {
             close(master)
         }
-        // Keeps self alive until the child is reaped, even after the session let go.
         let processSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: readQueue)
         processSource.setEventHandler { [self] in
             reapChild(pid)
@@ -395,11 +382,9 @@ final class TerminalProcess: @unchecked Sendable {
             self.processSource = processSource
             return terminated
         }
-        // Before the exit source can fire, so the session hears `started` first.
         onEvent(.started(pid))
         readSource.resume()
         processSource.resume()
-        // The child may have exited before the source was watching.
         readQueue.async { [self] in
             reapChild(pid)
         }
@@ -427,8 +412,6 @@ final class TerminalProcess: @unchecked Sendable {
             !(name.hasPrefix("GHOSTTY_") || name.hasPrefix("TERM_PROGRAM") || name.hasPrefix("ITERM_")
                 || ["TERMINFO", "TERMINFO_DIRS", "COLUMNS", "LINES", "TMUX", "TMUX_PANE"].contains(name))
         }
-        // ssh forwards LANG and LC_* (SendEnv). A bare charset such as Terminal.app's
-        // LC_CTYPE=UTF-8 is a macOS-only value that breaks the locale on Linux.
         environment = environment.filter { name, value in
             !(name == "LANG" || name.hasPrefix("LC_")) || isPortableLocale(value)
         }
@@ -460,14 +443,11 @@ final class TerminalProcess: @unchecked Sendable {
         return string.withCString(body)
     }
 
-    // MARK: - Output and exit (readQueue)
-
     private func readAvailable(_ fd: Int32) {
         let count = readBuffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
         if count > 0 {
             deliver(Data(readBuffer[0..<count]))
         } else if count == 0 || (errno != EAGAIN && errno != EINTR) {
-            // EIO: every process on the terminal closed it.
             endOfOutput()
         }
     }
@@ -532,12 +512,13 @@ final class TerminalProcess: @unchecked Sendable {
         }
     }
 
+    private static let shortestReportableRuntime: UInt64 = 1
+
     private func reportExit() {
         let (sink, exit): (InMemoryTerminalSession?, Exit?) = lock.withLock {
             guard self.exit == nil else { return (nil, nil) }
             let elapsed = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
-            // At least 1 ms: libghostty treats a 0 ms run as abnormal and reports nothing.
-            let exit = Exit(code: exitCode, runtimeMilliseconds: max(1, elapsed))
+            let exit = Exit(code: exitCode, runtimeMilliseconds: max(Self.shortestReportableRuntime, elapsed))
             self.exit = exit
             return (self.sink, exit)
         }
@@ -557,8 +538,6 @@ final class TerminalProcess: @unchecked Sendable {
         return signal == 0 ? (status >> 8) & 0xFF : 128 + signal
     }
 
-    // MARK: - End
-
     /// Detaches every surface, hangs up the terminal (SIGHUP to the program's process group,
     /// then the terminal closes). The child is still reaped once it exits.
     func terminate() {
@@ -575,7 +554,6 @@ final class TerminalProcess: @unchecked Sendable {
 
     private func hangUp(pid: pid_t) {
         readQueue.async { [self] in
-            // Once reaped the pid may belong to someone else.
             if !reaped {
                 kill(-pid, SIGHUP)
                 kill(pid, SIGHUP)

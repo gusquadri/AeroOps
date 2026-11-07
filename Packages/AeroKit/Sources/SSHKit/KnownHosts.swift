@@ -42,7 +42,6 @@ public struct KnownHostsFile: Sendable, Hashable {
             let line = raw.hasSuffix("\r") ? String(raw.dropLast()) : String(raw)
             return Self.parse(line).map(Line.entry) ?? .other(line)
         }
-        // A trailing newline produces one empty element; it is re-added by `text`.
         if case .other("")? = lines.last { lines.removeLast() }
     }
 
@@ -120,8 +119,6 @@ public struct KnownHostsFile: Sendable, Hashable {
     static func isPlainName(_ name: String) -> Bool {
         !name.isEmpty && !name.contains { "*?!,|#@".contains($0) || $0.isWhitespace }
     }
-
-    // MARK: - Parsing and matching
 
     static func parse(_ line: String) -> Entry? {
         var fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)

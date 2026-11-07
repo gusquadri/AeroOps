@@ -171,8 +171,6 @@ private struct FileBrowserView<Backend: FileTransferBackend>: View {
         }
     }
 
-    // MARK: Location
-
     private var locationRow: some View {
         HStack(spacing: 10) {
             Button("Up", systemImage: "arrow.up") { pane.goUp() }
@@ -193,8 +191,6 @@ private struct FileBrowserView<Backend: FileTransferBackend>: View {
             }
         }
     }
-
-    // MARK: Items
 
     @ViewBuilder
     private var items: some View {
@@ -256,8 +252,6 @@ private struct FileBrowserView<Backend: FileTransferBackend>: View {
     private var deleteTitle: String {
         deleting.count == 1 ? "Delete “\(deleting[0].name)”?" : "Delete \(deleting.count) items?"
     }
-
-    // MARK: Transfers
 
     private var transfersHeader: some View {
         HStack {

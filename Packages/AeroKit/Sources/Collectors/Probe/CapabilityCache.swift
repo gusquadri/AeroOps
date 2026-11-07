@@ -65,8 +65,6 @@ public actor CapabilityCache {
         entries.removeAll()
     }
 
-    // MARK: - Private
-
     private func probe(_ host: RemoteHost) async throws -> HostCapabilities {
         generation += 1
         let token = generation

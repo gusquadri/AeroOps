@@ -41,7 +41,6 @@ struct ToolCatalogTests {
     }
 
     @Test func agentsAreToldToAskBeforeRunningCommands() {
-        // AeroOps runs commands without asking, so the agent must ask in its own conversation.
         let run = BridgeTool.runCommand.descriptor.description
         #expect(run.contains("without asking the user"))
         #expect(run.contains("wait for their explicit yes"))
@@ -58,7 +57,6 @@ struct ToolCatalogTests {
     }
 
     @Test func eachSchemaPropertyIsAcceptedByTheValidator() {
-        // An unknown-argument error must never name a property the schema advertises.
         for descriptor in ToolCatalog.all {
             let keys = descriptor.inputSchema["properties"]?.objectValue.map { Array($0.keys) } ?? []
             for key in keys {
@@ -83,7 +81,6 @@ struct ToolCatalogTests {
     }
 
     @Test func socketPathLimits() throws {
-        // 103 bytes fit (plus NUL = 104); 104 do not.
         let root103 = "/" + String(repeating: "a", count: 103 - 1 - "/bridge.sock".count)
         let fits = try BridgeSocketPath.socketURL(root: URL(filePath: root103, directoryHint: .isDirectory))
         #expect(fits.path(percentEncoded: false).utf8.count == 103)
@@ -97,7 +94,6 @@ struct ToolCatalogTests {
         let override = try BridgeSocketPath.resolve(environment: ["AEROOPS_BRIDGE_SOCKET": "/tmp/aero-test.sock"],
                                                      home: URL(filePath: "/Users/x"))
         #expect(override == BridgeSocketPath.Resolved(path: "/tmp/aero-test.sock", isOverride: true))
-        // Multi-byte characters count in bytes.
         let wide = "/" + String(repeating: "é", count: 51) + "/b"
         #expect(throws: BridgeSocketPath.PathError.tooLong(path: wide, bytes: 105)) { try BridgeSocketPath.validate(wide) }
     }

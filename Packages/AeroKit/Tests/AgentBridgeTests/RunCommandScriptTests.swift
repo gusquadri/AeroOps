@@ -25,7 +25,6 @@ struct RunCommandScriptTests {
         let remote = RunCommandScript.remoteCommand("echo 'a b'; uptime", timeoutSeconds: 30, heartbeatSeconds: 3)
         #expect(remote.hasPrefix("sh -c " + ShellQuote.quote(RunCommandScript.body) + " aeroops-run "))
         #expect(remote.hasSuffix(" aeroops-run " + ShellQuote.quote("echo 'a b'; uptime") + " 36 3"))
-        // Clamped: at least one second and one-second heartbeats.
         #expect(RunCommandScript.remoteCommand("true", timeoutSeconds: 0, heartbeatSeconds: 0).hasSuffix(" 'true' 3 1"))
     }
 

@@ -63,7 +63,6 @@ struct SSHRunnerTests {
         let empty = try await runner.run("cat; echo done", alias: "aero-test")
         #expect(empty.stdoutString == "done\n")
 
-        // A child that never reads stdin must not wedge the writer.
         let ignored = try await runner.run("exit 0", alias: "aero-test", stdin: payload)
         #expect(ignored.exitCode == 0)
     }
@@ -78,7 +77,6 @@ struct SSHRunnerTests {
                 chunks.withLock { $0.append((stream, data)) }
             }
         }
-        // Both pieces arrive before the command ends.
         #expect(await eventually(timeout: .seconds(5)) {
             chunks.withLock { list in
                 list.contains { $0.0 == .stdout && $0.1 == Data("first\n".utf8) }
@@ -117,14 +115,12 @@ struct SSHRunnerTests {
     func timeoutKillsGroup() async throws {
         let pidFile = scratch.file("child.pid").filePath
         let start = ContinuousClock.now
-        // Generous timeout: the first exec of a freshly written script can be slow while macOS
-        // assesses it, and the trap must be in place before the deadline for this test to mean anything.
         let result = try await runner.run(
             "trap '' TERM; sleep 30 & echo $! > \(ShellQuote.quote(pidFile)); wait",
             alias: "aero-test", timeout: .milliseconds(1500)
         )
         #expect(result.timedOut)
-        #expect(result.signal == SIGKILL) // SIGTERM was ignored, so the escalation had to kill it
+        #expect(result.signal == SIGKILL)
         #expect(result.transportError == .timeout)
         #expect(throws: SSHError.timeout) { try result.checked() }
         #expect(ContinuousClock.now - start < .seconds(5))
@@ -137,7 +133,6 @@ struct SSHRunnerTests {
         let spec = ChildSpec(executable: "/bin/sh", arguments: ["-c", "exit 7"], environment: [:])
         let outcome = try await ChildProcess.run(spec)
         #expect(outcome.termination == .exited(7))
-        // kill(pid, 0) succeeds on a zombie; ESRCH means it was reaped.
         #expect(kill(outcome.pid, 0) == -1 && errno == ESRCH)
 
         let timed = try await ChildProcess.run(ChildSpec(
@@ -150,16 +145,12 @@ struct SSHRunnerTests {
 
     @Test("an exit reported before the child is waitable still reaps it")
     func exitReportedEarly() async throws {
-        // The kernel posts NOTE_EXIT, once, before the exiting child becomes a waitable zombie.
-        // Report the exit while the child is certainly still running, with no process source to
-        // report it again: the child must still be reaped and the completion must run.
         let outcome = Mutex<ChildOutcome?>(nil)
         let spec = ChildSpec(executable: "/bin/sh", arguments: ["-c", "sleep 1; exit 5"], environment: [:])
         let child = try ChildProcess.launch(spec, watchesExit: false) { result in outcome.withLock { $0 = result } }
         child.reportExitForTesting()
         let finished = await eventually(timeout: .seconds(15)) { outcome.withLock { $0 != nil } }
         if !finished {
-            // The report was lost; clean up so the failure leaves no zombie behind.
             kill(-child.pid, SIGKILL)
             var status: Int32 = 0
             waitpid(child.pid, &status, 0)
@@ -221,8 +212,6 @@ struct SSHRunnerTests {
             guard case .launchFailed = error else { Issue.record("unexpected \(error)"); return }
         }
     }
-
-    // MARK: - Streaming
 
     @Test("streams stdout lines and finishes on exit 0")
     func streamLines() async throws {
@@ -292,10 +281,6 @@ struct SSHRunnerTests {
 
     @Test("stream timeout ends with SSHError.timeout")
     func streamTimeout() async throws {
-        // The deadline runs from spawn. Under a loaded full-suite run, a 300 ms budget was
-        // occasionally spent before the fake ssh had even printed its first line, so give the
-        // child ample time to start and prove the timeout by the elapsed time instead: the
-        // stream must end with `.timeout` long before `sleep 30` could finish on its own.
         let start = ContinuousClock.now
         let stream = try runner.stream("echo first; sleep 30", alias: "aero-test", timeout: .seconds(3))
         var lines: [String] = []

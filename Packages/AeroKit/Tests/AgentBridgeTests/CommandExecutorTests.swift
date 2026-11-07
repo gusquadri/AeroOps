@@ -21,7 +21,6 @@ struct CommandExecutorTests {
         #expect(calls[0].timeout == .seconds(300))
         #expect(calls[1].timeout == .seconds(1))
         #expect(calls[0].host == "staging")
-        // Room for the heartbeat bytes on top of the 64 KB cap.
         #expect(calls[0].outputLimit > BridgeLimits.maxCommandOutputBytes)
         #expect(calls[0].outputLimit < BridgeLimits.maxCommandOutputBytes + 1024)
     }
@@ -134,7 +133,6 @@ struct CommandExecutorTests {
         let executor = CommandExecutor(runner: ChattyRunner(chunks: 1000))
         let activity = executor.activity()
         let id = UUID()
-        // Nothing reads the feed until the command is over.
         let result = try await executor.execute("seq 1000", on: host, timeoutSeconds: 5, id: id)
         var events: [CommandActivity] = []
         for await event in activity {

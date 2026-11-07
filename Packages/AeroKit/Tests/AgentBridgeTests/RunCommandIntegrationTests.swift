@@ -79,7 +79,6 @@ struct RunCommandIntegrationTests {
         let host = server.host
         let executor = CommandExecutor(runner: SSHCommandRunner(runner: runner), heartbeatSeconds: 1)
 
-        // Normal runs: output (heartbeats removed), stderr, exit status, quoting.
         let normal = try await executor.execute("echo hi; sleep 2; echo bye", on: host, timeoutSeconds: 30)
         #expect(normal.stdout == "hi\nbye\n" && normal.exitCode == 0, "\(server): \(normal)")
         #expect(normal.durationMs >= 2000)

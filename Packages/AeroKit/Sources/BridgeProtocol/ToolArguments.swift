@@ -232,8 +232,6 @@ struct ArgumentReader {
         }
     }
 
-    // MARK: Primitive readers
-
     func string(_ key: String) throws(ToolArgumentError) -> String? {
         guard let value = arguments[key] else { return nil }
         guard let text = value.stringValue else {
@@ -272,8 +270,6 @@ struct ArgumentReader {
             throw ToolArgumentError("Argument '\(key)' must be true or false (got \(got)).")
         }
     }
-
-    // MARK: Domain readers
 
     /// Optional free text: no control or invisible characters, at most `maxLength` characters.
     func text(_ key: String, maxLength: Int) throws(ToolArgumentError) -> String? {
@@ -367,8 +363,6 @@ struct ArgumentReader {
         try Self.checkCharacters(command, key: "command", allowNewlines: true)
         return command
     }
-
-    // MARK: Helpers
 
     /// Rejects C0/C1 controls (except tab, and newline when allowed), DEL, and invisible or
     /// direction-changing characters that could make the Activity tab show something other

@@ -191,7 +191,6 @@ public struct LocalAuthenticationVerifier: UserPresenceVerifier {
             return AppLock.Outcome(failure: error)
         }
         let timeout = timeout
-        // invalidate() makes a pending evaluatePolicy fail with LAError.appCancel.
         let timer = Task {
             try? await Task.sleep(for: timeout)
             if !Task.isCancelled { box.context.invalidate() }

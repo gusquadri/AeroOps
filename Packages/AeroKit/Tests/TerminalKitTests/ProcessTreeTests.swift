@@ -15,7 +15,6 @@ struct ProcessTreeTests {
 
     @Test("reaps a tree that ignores SIGHUP and SIGTERM")
     func reapStubbornTree() throws {
-        // sh (root) -> sleep, both ignoring TERM: the reaper must escalate to SIGKILL.
         let process = Process()
         process.executableURL = URL(filePath: "/bin/sh")
         process.arguments = ["-c", "trap '' TERM HUP; /bin/sleep 30 & wait"]

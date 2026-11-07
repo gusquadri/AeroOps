@@ -66,9 +66,6 @@ struct WorkloadTableLayout<Column: Hashable & CaseIterable & RawRepresentable> w
             shown.removeAll { $0.column == column }
         }
 
-        // Everything at its minimum; spare width to Name up to its comfort width, then to the
-        // other columns up to their ideal width (in proportion), then the rest to Name. Hidden
-        // columns keep their ideal width for when they are shown.
         var widths = Dictionary(uniqueKeysWithValues: columns.map { ($0.column, $0.ideal) })
         for spec in shown { widths[spec.column] = spec.min }
         let nameMin = shown.first { $0.column == name }?.min ?? 0

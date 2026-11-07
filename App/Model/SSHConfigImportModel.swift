@@ -61,8 +61,6 @@ final class SSHConfigImportModel {
     /// Hosts that use the local account name because the config has no `User`.
     var localUserName: String { NSUserName() }
 
-    // MARK: - Loading
-
     /// Reads and plans the import against `existingHosts`. Safe to call again to re-read.
     func load(existingHosts: [RemoteHost]) async {
         phase = .loading
@@ -127,8 +125,6 @@ final class SSHConfigImportModel {
         return refused
     }
 
-    // MARK: - Selection
-
     func isSelected(_ candidate: SSHConfigImportCandidate) -> Bool {
         candidate.isSelectable && selection.contains(candidate.id)
     }
@@ -150,8 +146,6 @@ final class SSHConfigImportModel {
     func selectNone() {
         selection = []
     }
-
-    // MARK: - Import
 
     /// Adds the checked hosts to `model`, in config order, and returns their ids. Stops at the
     /// first store error (the Keychain refused the write); hosts whose name was taken

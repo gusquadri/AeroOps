@@ -51,8 +51,6 @@ final class FileService: HostInventoryObserver {
         appModel = model
     }
 
-    // MARK: - Hosts
-
     /// The host's pane (and SFTP session), created on first use. Nothing connects until the
     /// pane lists its first folder.
     func remotePane(for host: RemoteHost) -> FilePaneModel<RemoteFileBackend> {
@@ -101,8 +99,6 @@ final class FileService: HostInventoryObserver {
         trustRequest = nil
         conflict = nil
     }
-
-    // MARK: - Connecting
 
     private func connect(_ host: RemoteHost) async throws -> SFTPClient {
         if let reason = unavailableReason(host) { throw FileBrowserError.unavailable(reason) }
@@ -157,8 +153,6 @@ final class FileService: HostInventoryObserver {
             return .known
         }
     }
-
-    // MARK: - Transfers
 
     /// Downloads remote items into a local folder, asking first if any already exist there.
     func download(_ sources: [SFTPPath], from host: RemoteHost, into directory: String) {

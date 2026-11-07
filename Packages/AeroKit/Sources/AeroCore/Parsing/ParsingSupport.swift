@@ -1,9 +1,5 @@
 import Foundation
 
-// Shared helpers for the parsers in this folder. Everything here is pure: no I/O, no shell.
-
-// MARK: - Lenient JSON decoding
-
 /// A JSON array decoded element by element; elements that fail to decode are dropped
 /// instead of failing the whole array (one odd pod must not hide every other pod).
 struct LossyArray<Element: Decodable>: Decodable {
@@ -18,7 +14,6 @@ struct LossyArray<Element: Decodable>: Decodable {
                 result.append(value)
                 continue
             }
-            // A failed decode may or may not advance the container; make sure it does.
             if container.currentIndex == before {
                 if (try? container.decodeNil()) == true { continue }
                 if (try? container.decode(Discarded.self)) == nil { break }
@@ -62,8 +57,6 @@ func decodeJSONTolerantly<T: Decodable>(_ type: T.Type, from data: Data) -> T? {
     return nil
 }
 
-// MARK: - Command error text
-
 /// Helpers for classifying the stderr of a failed remote command.
 enum CommandErrorText {
     /// Non-empty, trimmed lines, without the `[exit status N]` markers that `dev/fixtures/capture.sh`
@@ -105,8 +98,6 @@ enum CommandErrorText {
         return stride(from: 1, to: parts.count - 1, by: 2).map { String(parts[$0]) }
     }
 }
-
-// MARK: - Timestamps
 
 /// Timestamp parsing for remote output. Manual and locale-free, so it is fast, `Sendable` and
 /// never depends on the Mac's calendar settings.
@@ -230,8 +221,6 @@ private struct ByteScanner {
         return era * 146_097 + dayOfEra - 719_468
     }
 }
-
-// MARK: - Age
 
 /// Short age strings for list columns, like kubectl's AGE: `45s`, `5m`, `3h`, `2d`, `3y`.
 public enum AgeFormat {

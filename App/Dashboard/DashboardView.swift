@@ -169,11 +169,7 @@ struct DashboardView: View {
             keyScanError: model.monitoring.scanErrors[host.id],
             onToggleMonitoring: { toggleMonitoring(host) }
         )
-        // Closures make cards unequal to SwiftUI, so without this every card would redraw
-        // whenever the Dashboard does, e.g. for each new selection.
         .equatable()
-        // Two gestures that recognise together: the first click selects at once instead of
-        // waiting out the double-click interval, and the second also opens the inspector.
         .gesture(
             TapGesture(count: 1)
                 .onEnded { select(host.id, fromCard: true) }

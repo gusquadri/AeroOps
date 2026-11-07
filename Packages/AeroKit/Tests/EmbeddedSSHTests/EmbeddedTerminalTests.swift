@@ -72,7 +72,6 @@ struct EmbeddedTerminalTests {
         link.write(Data("exit\r".utf8))
         try await waitFor(session) { $0.isOver }
         #expect(session.state == .ended(exitStatus: 7))
-        // An unchanged size is not sent again.
         #expect(fixture.server.log.windowChanges == [
             PseudoTerminalSize(columns: 120, rows: 40, pixelWidth: 960, pixelHeight: 800),
             PseudoTerminalSize(columns: 100, rows: 30),
@@ -95,7 +94,6 @@ struct EmbeddedTerminalTests {
         try await waitFor(session) { $0 == .running }
         let first = session.connection
         session.link?.resize(PseudoTerminalSize(columns: 90, rows: 20))
-        // connect() is a no-op while running.
         session.connect()
         #expect(session.connection == first)
 
@@ -121,7 +119,6 @@ struct EmbeddedTerminalTests {
         ])
         session.close()
         #expect(session.state == .disconnected)
-        // Keys after close go nowhere.
         session.link?.write(Data("exit\r".utf8))
         await fixture.tearDown()
     }
@@ -185,7 +182,6 @@ struct EmbeddedTerminalTests {
         #expect(attempts.value == 1)
 
         let channel = FakeChannel()
-        // An opener that finishes even when cancelled, like a connection that was already up.
         let slow = EmbeddedTerminalSession { _ in
             try? await Task.sleep(for: .milliseconds(200))
             return channel

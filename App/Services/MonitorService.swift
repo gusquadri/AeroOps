@@ -84,8 +84,6 @@ final class MonitorService {
         displayState = states
     }
 
-    // MARK: - Lifecycle
-
     /// Starts monitoring the current hosts. Call after ``SSHServices/start()``. Idempotent.
     func start() {
         guard isEnabled, !isShutDown, coordinator == nil else { return }
@@ -135,8 +133,6 @@ final class MonitorService {
         }
     }
 
-    // MARK: - Actions
-
     /// Polls every host now (the dashboard's Refresh, ⌘R).
     func refreshAll() {
         coordinator?.refreshAll()
@@ -175,8 +171,6 @@ final class MonitorService {
         if trustRequest?.id == request.id { trustRequest = nil }
     }
 
-    // MARK: - Updates
-
     private func receive(_ update: HostMonitorUpdate) {
         pending[update.hostID] = update
         guard flushTask == nil else { return }
@@ -193,8 +187,6 @@ final class MonitorService {
         let updates = Array(pending.values)
         pending = [:]
         var blocksChanged = false
-        // Off screen (minimised, hidden or covered) the cards still re-render; skip the gauge
-        // animations there, which would otherwise run at the display rate for no one.
         var transaction = Transaction()
         transaction.disablesAnimations = !Self.mainWindowIsVisible()
         withTransaction(transaction) {
@@ -207,7 +199,6 @@ final class MonitorService {
             }
         }
         if blocksChanged {
-            // The store blocked the host (or lifted the block); mirror it for the banner.
             Task { await ssh.refreshHostKeyBlocks() }
         }
         didApplyUpdates?(updates)
@@ -230,11 +221,7 @@ final class MonitorService {
         coordinator.refresh(id)
     }
 
-    // MARK: - Hosts
-
     private func applyHosts() {
-        // Monitoring off shows on the card whether or not the service runs (demo launches too),
-        // without old numbers; turned back on, the host waits for its first poll.
         for host in hosts {
             guard let state = displayState(host.id) else { continue }
             if !host.monitored {
@@ -249,7 +236,6 @@ final class MonitorService {
             guard let reason = rejected[host.id] else { continue }
             displayState(host.id)?.reset(status: .offline, message: "Not monitored: \(reason)")
         }
-        // The coordinator skips hosts with monitoring off.
         coordinator.setHosts(hosts.filter { rejected[$0.id] == nil })
     }
 
@@ -267,8 +253,6 @@ final class MonitorService {
             }
         }
     }
-
-    // MARK: - Activity
 
     /// The activity for the current app, window and sleep state.
     private func currentActivity() -> MonitorActivity {

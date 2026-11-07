@@ -93,6 +93,8 @@ struct RSAPrivateComponents: Sendable {
     var prime1: [UInt8]
     var prime2: [UInt8]
 
+    private static let twoPrimeVersion: [UInt8] = []
+
     /// PKCS#1 `RSAPrivateKey` DER, as `SecKeyCreateWithData` expects.
     ///
     /// OpenSSH files carry no CRT exponents, so `dP = d mod (p-1)` and `dQ = d mod (q-1)` are
@@ -105,7 +107,7 @@ struct RSAPrivateComponents: Sendable {
         let dP = d.remainder(dividingBy: p.subtractingOne())
         let dQ = d.remainder(dividingBy: q.subtractingOne())
         return DERWriter.sequence([
-            DERWriter.integer(unsigned: []), // version 0 (two-prime)
+            DERWriter.integer(unsigned: Self.twoPrimeVersion),
             DERWriter.integer(unsigned: modulus),
             DERWriter.integer(unsigned: publicExponent),
             DERWriter.integer(unsigned: privateExponent),

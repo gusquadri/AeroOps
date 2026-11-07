@@ -66,8 +66,6 @@ struct Phase7SelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -257,8 +255,6 @@ struct Phase7SelfTest {
         }
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         let report = await run()
         if let url = Phase2SelfTest.outputURL {
@@ -273,7 +269,6 @@ struct Phase7SelfTest {
         if report.ok {
             NSApp.terminate(nil)
         } else {
-            // Services are already shut down; skip the quit path so the exit status reports failure.
             exit(1)
         }
     }
@@ -296,12 +291,10 @@ struct Phase7SelfTest {
                "agent running, monitoring started, bridge listening on \(socket) (\(socket.utf8.count) bytes, limit 104)")
         guard let script = executableDriveScript(r) else { return await finish(r, key: nil) }
 
-        // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
         guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 7 self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
 
-        // 2. Authorize it on every dev server.
         if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
             await checkHosts(key, script: script, socket: socket, r)
         }
@@ -319,7 +312,6 @@ struct Phase7SelfTest {
     }
 
     private func checkHosts(_ key: SSHKeyRecord, script: URL, socket: String, _ r: Recorder) async {
-        // 3. Hosts, one per tier; trust first-contact keys; wait until all are online.
         let keyID = key.id.uuidString
         let devContainer = RemoteHost(name: "dev-container", address: "localhost", port: 2222, user: "dev", keyId: keyID, mcpTier: .read)
         let alpine = RemoteHost(name: "alpine", address: "localhost", port: 2223, user: "dev", keyId: keyID, mcpTier: .off)
@@ -373,7 +365,6 @@ struct Phase7SelfTest {
 
     private func driveAndCheck(staging: RemoteHost, script: URL, socket: String, _ r: Recorder) async {
         let agents = model.agents
-        // 4. The driver, with the cancel wired in.
         let canceller = Canceller(agents: agents, runner: model.ssh.runner, host: staging)
         agents.didReceiveCommandActivity = { canceller.receive($0) }
         defer { agents.didReceiveCommandActivity = nil }
@@ -383,7 +374,7 @@ struct Phase7SelfTest {
         r.report.driveExitStatus = status
         r.step("driver", status == 0, "\(script.lastPathComponent) exited \(status) after \(Self.rounded(Date.now.timeIntervalSince(driveStart))) s")
         await waitUntil(seconds: 30) { !canceller.started || canceller.done }
-        try? await Task.sleep(for: .milliseconds(500))  // let the last events land
+        try? await Task.sleep(for: .milliseconds(500))
         copyDriveOutput(results)
 
         let steps = DriveStep.load(results)
@@ -396,8 +387,6 @@ struct Phase7SelfTest {
         checkClaude(r, byName)
         checkActivity(r)
     }
-
-    // MARK: - Driver
 
     /// Runs the driver script; its output goes to `drive.log` in `results`. Killed after
     /// ``driveLimit``.
@@ -412,7 +401,6 @@ struct Phase7SelfTest {
         let process = Process()
         process.executableURL = URL(filePath: "/bin/sh")
         process.arguments = [script.path(percentEncoded: false), MCPClientConfig.executablePath, results.path(percentEncoded: false)]
-        // A self-test started from a Claude Code session must not look nested to `claude -p`.
         var environment = ProcessInfo.processInfo.environment.filter { key, _ in
             key != "CLAUDECODE" && !key.hasPrefix("CLAUDE_CODE_")
         }
@@ -446,8 +434,6 @@ struct Phase7SelfTest {
         try? FileManager.default.removeItem(at: destination)
         try? FileManager.default.copyItem(at: results, to: destination)
     }
-
-    // MARK: - Checks
 
     private func checkReadTools(_ r: Recorder, _ steps: [String: DriveStep]) {
         if let step = steps["tools-list"] {
@@ -597,8 +583,6 @@ struct Phase7SelfTest {
                "\(agents.liveCommands.count) commands in the Activity tab; uname -a \(uname.map { "\($0.state)" } ?? "missing"): \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))")
     }
 
-    // MARK: - Finish
-
     private func finish(_ r: Recorder, key: SSHKeyRecord?) async -> Report {
         let ssh = model.ssh
         if let key {
@@ -627,8 +611,6 @@ struct Phase7SelfTest {
         r.step("shutdown", agentSocketGone && bridgeSocketGone && !model.monitoring.isRunning && model.agents.status == .stopped,
                "bridge stopped first, monitoring stopped, masters closed \(closed), agent socket removed \(agentSocketGone), bridge socket removed \(bridgeSocketGone)")
     }
-
-    // MARK: - Helpers
 
     /// The text between a get_logs reply's untrusted markers, without the final newline.
     private static func untrustedBody(_ text: String) -> String? {

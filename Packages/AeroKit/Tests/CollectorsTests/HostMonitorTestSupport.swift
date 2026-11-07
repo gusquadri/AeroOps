@@ -5,9 +5,6 @@ import Synchronization
 import Testing
 @testable import Collectors
 
-// Test doubles for HostMonitor and MonitorCoordinator. Names start with `Monitor` so they do
-// not collide with helpers of other collector tests in the same target.
-
 /// Errors from the helpers' real-time safety nets (a test fails instead of hanging).
 struct MonitorTestTimeout: Error, CustomStringConvertible {
     var description: String
@@ -32,8 +29,6 @@ enum MonitorTestHosts {
         RemoteHost(name: name, address: address, port: port, user: user, keyId: keyId)
     }
 }
-
-// MARK: - Clock
 
 /// A manual ``MonitorClock``: time moves only through ``advance(by:)`` and ``advance(to:)``.
 final class MonitorTestClock: MonitorClock {
@@ -112,8 +107,6 @@ final class MonitorTestClock: MonitorClock {
     }
 }
 
-// MARK: - Gate
-
 /// A latch a scripted response waits on, so a test controls when a poll ends.
 final class MonitorTestGate: Sendable {
     private struct State {
@@ -142,8 +135,6 @@ final class MonitorTestGate: Sendable {
         }
     }
 }
-
-// MARK: - Runner
 
 /// A scripted ``HostCommandRunning``: answers each host's calls from a queue and records them.
 final class MonitorTestRunner: HostCommandRunning {
@@ -276,8 +267,6 @@ final class MonitorTestRunner: HostCommandRunning {
         }
     }
 }
-
-// MARK: - Update recorder
 
 /// Collects a monitor's (or coordinator's) updates so tests can wait for specific ones.
 final class MonitorUpdateRecorder: Sendable {

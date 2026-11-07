@@ -1,5 +1,3 @@
-// tools/list from the static catalog; tools/call validated here, then forwarded to the app.
-
 import BridgeProtocol
 import Foundation
 import Logging
@@ -122,8 +120,6 @@ struct ToolForwarder: Sendable {
         CallTool.Result(content: [.text(text: message, annotations: nil, _meta: nil)], isError: true)
     }
 }
-
-// MARK: - Value ⇄ JSONValue
 
 extension JSONValue {
     /// The bridge form of an SDK value. The SDK turns strings that look like data URLs into

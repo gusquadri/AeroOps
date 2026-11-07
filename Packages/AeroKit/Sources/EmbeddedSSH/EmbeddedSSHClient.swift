@@ -48,8 +48,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
         }
     }
 
-    // MARK: - Run to completion
-
     /// Runs `command` and collects its output. Throws the ``SSHKit/SSHError`` that kept it from
     /// running; a command that ran returns its exit status, whatever it is.
     ///
@@ -96,8 +94,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
         }
         try Task.checkCancellation()
         if outcome.timedOut {
-            // An established connection that cannot even start a command is most likely dead
-            // (no RST yet); close it so the next command connects afresh.
             if !outcome.started { control.connection?.close() }
             return SSHResult(
                 exitCode: 255, stdout: stdout.data, stderr: stderr.data, stdoutTruncated: stdout.truncated,
@@ -110,8 +106,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
             stderrTruncated: stderr.truncated, duration: .now - started
         )
     }
-
-    // MARK: - Streaming
 
     /// Runs `command` and yields its stdout line by line (without line terminators), like
     /// ``SSHKit/SSHRunner/stream(_:on:stdin:timeout:maxBufferedLines:)``: the stream finishes on
@@ -180,8 +174,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
         return lines
     }
 
-    // MARK: - Sessions
-
     /// Starts the subsystem `name` (for example `sftp`) on `host` and returns its channel once the
     /// server started it: the in-process counterpart of ``SSHKit/SSHRunner/openSubsystem(_:on:)``.
     /// The session lasts until ``EmbeddedSSHChannel/close()``, EOF or its connection closes.
@@ -247,7 +239,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
             try await Task.sleep(for: timeout)
             guard state.abandonStart(SSHError.timeout) else { return }
             control.stop()
-            // As for a command that cannot start: the connection is most likely dead.
             control.connection?.close()
         }
         defer { timer.cancel() }
@@ -265,8 +256,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
         }
     }
 
-    // MARK: - Connections
-
     /// Closes `id`'s connections (after its settings changed, or it was deleted).
     public func disconnect(_ id: RemoteHost.ID) async {
         await pool.disconnect(id)
@@ -282,8 +271,6 @@ public final class EmbeddedSSHClient: RemoteCommandRunning {
     public func closeIdleConnections() async {
         await pool.closeIdle()
     }
-
-    // MARK: - Internals
 
     /// Gets `host` a connection and starts `command` on it, in the background: the caller only
     /// waits for `events`, so its timeout and cancellation work while a login is still running.

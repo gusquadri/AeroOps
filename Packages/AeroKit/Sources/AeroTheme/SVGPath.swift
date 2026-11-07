@@ -15,97 +15,145 @@ enum SVGPath {
 
     /// Parses `data` into a path in the SVG's user space (y grows downwards, as in SwiftUI).
     static func parse(_ data: String) throws -> CGPath {
-        var cursor = Cursor(bytes: Array(data.utf8))
+        var builder = Builder(cursor: Cursor(bytes: Array(data.utf8)))
+        while !builder.cursor.atEnd {
+            try builder.step()
+        }
+        return builder.path
+    }
+
+    private typealias Handler = @Sendable (inout Builder, Bool) throws -> Void
+
+    private static let handlers: [UInt8: Handler] = [
+        UInt8(ascii: "m"): { try $0.move($1) },
+        UInt8(ascii: "l"): { try $0.line($1) },
+        UInt8(ascii: "h"): { try $0.horizontal($1) },
+        UInt8(ascii: "v"): { try $0.vertical($1) },
+        UInt8(ascii: "c"): { try $0.cubic($1) },
+        UInt8(ascii: "s"): { try $0.smoothCubic($1) },
+        UInt8(ascii: "q"): { try $0.quad($1) },
+        UInt8(ascii: "t"): { try $0.smoothQuad($1) },
+        UInt8(ascii: "a"): { try $0.arc($1) },
+        UInt8(ascii: "z"): { $0.close($1) },
+    ]
+
+    private struct Builder {
+        var cursor: Cursor
         let path = CGMutablePath()
         var current = CGPoint.zero
         var subpathStart = CGPoint.zero
-        // The second control point of the last C/S (or the control point of the last Q/T), for
-        // the reflected first control point of S (T).
         var lastCubicControl: CGPoint?
         var lastQuadControl: CGPoint?
+        var cubicControl: CGPoint?
+        var quadControl: CGPoint?
         var command: UInt8?
         var needsMove = false
+        var base = CGPoint.zero
 
-        while !cursor.atEnd {
-            if let letter = cursor.commandLetter() {
-                command = letter
-            } else if command == nil || command == UInt8(ascii: "Z") || command == UInt8(ascii: "z") {
-                throw ParseError(offset: cursor.index)
-            }
-            guard let op = command else { break }
+        mutating func step() throws {
+            let op = try nextCommand()
             let relative = op >= UInt8(ascii: "a")
-            let base = relative ? current : .zero
-            func point() throws -> CGPoint {
-                let x = try cursor.number(), y = try cursor.number()
-                return CGPoint(x: base.x + x, y: base.y + y)
-            }
-            if needsMove, op != UInt8(ascii: "M"), op != UInt8(ascii: "m") {
+            base = relative ? current : .zero
+            if needsMove, op | 0x20 != UInt8(ascii: "m") {
                 path.move(to: current)
                 needsMove = false
             }
-            var cubicControl: CGPoint?
-            var quadControl: CGPoint?
-
-            switch op | 0x20 { // lower-cased
-            case UInt8(ascii: "m"):
-                let p = try point()
-                path.move(to: p)
-                current = p
-                subpathStart = p
-                needsMove = false
-                // Further coordinate pairs are implicit line-tos.
-                command = relative ? UInt8(ascii: "l") : UInt8(ascii: "L")
-            case UInt8(ascii: "l"):
-                current = try point()
-                path.addLine(to: current)
-            case UInt8(ascii: "h"):
-                let x = try cursor.number()
-                current = CGPoint(x: relative ? current.x + x : x, y: current.y)
-                path.addLine(to: current)
-            case UInt8(ascii: "v"):
-                let y = try cursor.number()
-                current = CGPoint(x: current.x, y: relative ? current.y + y : y)
-                path.addLine(to: current)
-            case UInt8(ascii: "c"):
-                let c1 = try point(), c2 = try point(), end = try point()
-                path.addCurve(to: end, control1: c1, control2: c2)
-                cubicControl = c2
-                current = end
-            case UInt8(ascii: "s"):
-                let c1 = lastCubicControl.map { reflect($0, about: current) } ?? current
-                let c2 = try point(), end = try point()
-                path.addCurve(to: end, control1: c1, control2: c2)
-                cubicControl = c2
-                current = end
-            case UInt8(ascii: "q"):
-                let c = try point(), end = try point()
-                path.addQuadCurve(to: end, control: c)
-                quadControl = c
-                current = end
-            case UInt8(ascii: "t"):
-                let c = lastQuadControl.map { reflect($0, about: current) } ?? current
-                let end = try point()
-                path.addQuadCurve(to: end, control: c)
-                quadControl = c
-                current = end
-            case UInt8(ascii: "a"):
-                let rx = try cursor.number(), ry = try cursor.number(), rotation = try cursor.number()
-                let largeArc = try cursor.flag(), sweep = try cursor.flag()
-                let end = try point()
-                addArc(to: path, from: current, to: end, radii: CGSize(width: rx, height: ry),
-                       rotationDegrees: rotation, largeArc: largeArc, sweep: sweep)
-                current = end
-            case UInt8(ascii: "z"):
-                path.closeSubpath()
-                current = subpathStart
-                needsMove = true
-            default:
-                throw ParseError(offset: cursor.index)
-            }
+            guard let handler = SVGPath.handlers[op | 0x20] else { throw ParseError(offset: cursor.index) }
+            cubicControl = nil
+            quadControl = nil
+            try handler(&self, relative)
             lastCubicControl = cubicControl
             lastQuadControl = quadControl
         }
-        return path
+
+        private mutating func nextCommand() throws -> UInt8 {
+            if let letter = cursor.commandLetter() {
+                command = letter
+                return letter
+            }
+            guard let op = command, op | 0x20 != UInt8(ascii: "z") else { throw ParseError(offset: cursor.index) }
+            return op
+        }
+
+        private mutating func point() throws -> CGPoint {
+            let x = try cursor.number(), y = try cursor.number()
+            return CGPoint(x: base.x + x, y: base.y + y)
+        }
+
+        mutating func move(_ relative: Bool) throws {
+            let p = try point()
+            path.move(to: p)
+            current = p
+            subpathStart = p
+            needsMove = false
+            command = relative ? UInt8(ascii: "l") : UInt8(ascii: "L")
+        }
+
+        mutating func line(_ relative: Bool) throws {
+            current = try point()
+            path.addLine(to: current)
+        }
+
+        mutating func horizontal(_ relative: Bool) throws {
+            let x = try cursor.number()
+            current = CGPoint(x: relative ? current.x + x : x, y: current.y)
+            path.addLine(to: current)
+        }
+
+        mutating func vertical(_ relative: Bool) throws {
+            let y = try cursor.number()
+            current = CGPoint(x: current.x, y: relative ? current.y + y : y)
+            path.addLine(to: current)
+        }
+
+        mutating func cubic(_ relative: Bool) throws {
+            let c1 = try point(), c2 = try point(), end = try point()
+            addCubic(to: end, c1, c2)
+        }
+
+        mutating func smoothCubic(_ relative: Bool) throws {
+            let c1 = lastCubicControl.map { SVGPath.reflect($0, about: current) } ?? current
+            let c2 = try point(), end = try point()
+            addCubic(to: end, c1, c2)
+        }
+
+        mutating func quad(_ relative: Bool) throws {
+            let c = try point(), end = try point()
+            addQuad(to: end, c)
+        }
+
+        mutating func smoothQuad(_ relative: Bool) throws {
+            let c = lastQuadControl.map { SVGPath.reflect($0, about: current) } ?? current
+            let end = try point()
+            addQuad(to: end, c)
+        }
+
+        mutating func arc(_ relative: Bool) throws {
+            let rx = try cursor.number(), ry = try cursor.number(), rotation = try cursor.number()
+            let largeArc = try cursor.flag(), sweep = try cursor.flag()
+            let end = try point()
+            SVGPath.addArc(to: path, from: current, to: end, radii: CGSize(width: rx, height: ry),
+                           rotationDegrees: rotation, largeArc: largeArc, sweep: sweep)
+            current = end
+        }
+
+        mutating func close(_ relative: Bool) {
+            path.closeSubpath()
+            current = subpathStart
+            needsMove = true
+        }
+
+        private mutating func addCubic(to end: CGPoint, _ c1: CGPoint, _ c2: CGPoint) {
+            path.addCurve(to: end, control1: c1, control2: c2)
+            cubicControl = c2
+            current = end
+        }
+
+        private mutating func addQuad(to end: CGPoint, _ control: CGPoint) {
+            path.addQuadCurve(to: end, control: control)
+            quadControl = control
+            current = end
+        }
     }
 
     private static func reflect(_ point: CGPoint, about center: CGPoint) -> CGPoint {
@@ -128,7 +176,6 @@ enum SVGPath {
         let dx = (start.x - end.x) / 2, dy = (start.y - end.y) / 2
         let x1 = cosPhi * dx + sinPhi * dy
         let y1 = -sinPhi * dx + cosPhi * dy
-        // Radii too small for the endpoints are scaled up just enough.
         let lambda = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry)
         if lambda > 1 {
             rx *= lambda.squareRoot()
@@ -152,7 +199,6 @@ enum SVGPath {
         var delta = angle(ux, uy, vx, vy)
         if !sweep, delta > 0 { delta -= 2 * .pi }
         if sweep, delta < 0 { delta += 2 * .pi }
-        // The unit circle, scaled to the radii, rotated and moved to the centre.
         let transform = CGAffineTransform(translationX: center.x, y: center.y)
             .rotated(by: phi)
             .scaledBy(x: rx, y: ry)
@@ -182,7 +228,6 @@ enum SVGPath {
             let byte = bytes[index]
             let isLetter = (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z"))
                 || (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z"))
-            // `e`/`E` only ever appear inside numbers, which `number()` consumes whole.
             guard isLetter else { return nil }
             index += 1
             return byte

@@ -130,8 +130,6 @@ final class SSHServices {
     /// Runs commands on hosts; refuses blocked hosts and password hosts the gate holds back.
     var runner: SSHRunner { SSHRunner(context: context, hostKeys: hostKeys, passwords: passwordGate) }
 
-    // MARK: - Lifecycle
-
     /// Writes the public key files, starts the agent (unless the system agent is chosen) and the
     /// askpass server, and writes `ssh_config`. Failures are reported in ``agentStatus``,
     /// ``askpassError``, ``keyStoreError`` and ``configError``; nothing here throws.
@@ -279,8 +277,6 @@ final class SSHServices {
         }
     }
 
-    // MARK: - Askpass
-
     /// `AeroOps.app/Contents/MacOS/aeroops-askpass`, if the bundle has it.
     nonisolated static var bundledAskpassHelper: URL? {
         guard let executable = Bundle.main.executableURL else { return nil }
@@ -339,7 +335,6 @@ final class SSHServices {
         case .answered:
             askpassRefusals[host] = nil
         case .refused(.untrustedPeer), .refused(.malformedRequest):
-            // Not from ssh that the app started; the host id is not to be trusted.
             break
         case .refused(let refusal):
             askpassRefusals[host] = refusal.description
@@ -358,8 +353,6 @@ final class SSHServices {
         ]
     }
 
-    // MARK: - ssh_config
-
     /// Rewrites `ssh_config` for the current hosts and agent choice.
     @discardableResult
     func writeConfig() -> SSHConfigRendering? {
@@ -373,8 +366,6 @@ final class SSHServices {
             return nil
         }
     }
-
-    // MARK: - Keys
 
     enum KeyActionError: LocalizedError {
         case storeUnavailable(String?)
@@ -483,8 +474,6 @@ final class SSHServices {
         }
     }
 
-    // MARK: - Passwords
-
     /// Whether `host` uses a password and one is saved.
     func hasPassword(for host: RemoteHost) -> Bool {
         host.auth == .password && passwords.hasPassword(for: host.id)
@@ -529,8 +518,6 @@ final class SSHServices {
         }
         return context
     }
-
-    // MARK: - Host keys
 
     /// The block for `host`, if its key changed.
     func hostKeyBlock(for host: RemoteHost) -> HostKeyBlock? {

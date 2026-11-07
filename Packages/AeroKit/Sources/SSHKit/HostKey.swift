@@ -55,13 +55,12 @@ public struct HostKey: Sendable, Hashable, Codable, CustomStringConvertible {
             return 521
         case "ssh-rsa":
             var reader = WireReader(blob)
-            _ = reader.string() // type
-            _ = reader.string() // e
-            return reader.string().map(Self.bitLength)
+            let fields = (type: reader.string(), exponent: reader.string(), modulus: reader.string())
+            return fields.modulus.map(Self.bitLength)
         case "ssh-dss":
             var reader = WireReader(blob)
-            _ = reader.string() // type
-            return reader.string().map(Self.bitLength) // p
+            let fields = (type: reader.string(), prime: reader.string())
+            return fields.prime.map(Self.bitLength)
         default:
             return nil
         }
@@ -76,8 +75,6 @@ public struct HostKey: Sendable, Hashable, Codable, CustomStringConvertible {
         let leading = bytes[index]
         return (bytes.endIndex - index - 1) * 8 + (8 - leading.leadingZeroBitCount)
     }
-
-    // MARK: Codable (as the two known_hosts fields)
 
     private enum CodingKeys: String, CodingKey { case type, key }
 

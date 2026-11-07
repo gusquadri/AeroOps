@@ -20,7 +20,6 @@ agent_pid=
 pub=
 cleanup() {
   [ -n "$agent_pid" ] && kill "$agent_pid" 2>/dev/null || true
-  # dev/add-key.sh authorizes the key on every dev server; remove-key.sh revokes it there.
   if [ -n "$pub" ]; then
     "$repo/dev/remove-key.sh" "$tmp/id_ed25519.pub" >/dev/null || true
   fi
@@ -36,7 +35,6 @@ agent_pid=$SSH_AGENT_PID
 SSH_AUTH_SOCK="$tmp/agent.sock" ssh-add -q "$tmp/id_ed25519"
 rm -f "$tmp/id_ed25519"
 
-# Port 1 on localhost is closed on a stock Mac: ssh fails with "Connection refused", exit 255.
 cat > "$tmp/ssh_config" <<EOF
 Host aero-selftest
   HostName localhost
@@ -58,6 +56,5 @@ EOF
 swift build --package-path "$pkg" --product TerminalKitSelfTest
 bin="$(swift build --package-path "$pkg" --show-bin-path)/TerminalKitSelfTest"
 
-# No inherited agent: only the launch spec's SSH_AUTH_SOCK can authenticate.
 env -u SSH_AUTH_SOCK "$bin" --ssh-config "$tmp/ssh_config" --host aero-selftest \
   --closed-host aero-closed --agent-sock "$tmp/agent.sock"

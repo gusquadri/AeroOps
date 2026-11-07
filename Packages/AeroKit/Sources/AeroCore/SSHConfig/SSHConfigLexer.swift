@@ -60,7 +60,6 @@ enum SSHConfigLexer {
         if index < scalars.count, scalars[index] == "\"" { throw .malformedKeyword }
         let keyword = string(scalars[keywordStart..<index]).lowercased()
 
-        // The separator: one "=", or whitespace optionally followed by one "=".
         if index < scalars.count, scalars[index] == "=" {
             index += 1
         } else {

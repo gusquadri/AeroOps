@@ -27,8 +27,6 @@ import TerminalKit
 @MainActor
 @Observable
 final class AppModel {
-    // MARK: Inventory
-
     /// The host inventory, synced with the user's other devices through iCloud Keychain.
     let hostStore: HostStore
 
@@ -37,8 +35,6 @@ final class AppModel {
 
     var hostSearch = ""
     var searchedHosts: [RemoteHost] { hosts.matching(search: hostSearch) }
-
-    // MARK: Navigation
 
     /// The main window's tab.
     var selectedTab: AppTab = .dashboard
@@ -66,8 +62,6 @@ final class AppModel {
     /// its flag in `UserDefaults.standard` (`AeroOpsApp.makeModel()`).
     var onboarding = OnboardingState()
 
-    // MARK: Services
-
     /// Keys, the in-app agent, `ssh_config` and host-key trust (Phase 2).
     let ssh: SSHServices
     /// Runs Settings › Hosts' Test connection: ``SSHConnectionTester`` unless injected.
@@ -86,8 +80,6 @@ final class AppModel {
             KeySummary(id: $0.id.uuidString, name: $0.name, detail: "\($0.algorithm.displayName) · \($0.fingerprint)")
         }
     }
-
-    // MARK: Per-host state
 
     /// Live state per host id. Contains exactly the ids in ``hosts``.
     private(set) var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
@@ -168,8 +160,6 @@ final class AppModel {
         host(id: id).flatMap(ssh.hostKeyBlock(for:))
     }
 
-    // MARK: - Queries
-
     /// The selected host, if it still exists.
     var selectedHost: RemoteHost? {
         selection.flatMap(hostStore.host(id:))
@@ -191,8 +181,6 @@ final class AppModel {
         hosts.reduce(into: [:]) { counts, host in counts[displayState(for: host.id).status, default: 0] += 1 }
     }
 
-    // MARK: - Inventory mutations
-
     /// Adds `host`, saves, and selects it.
     func addHost(_ host: RemoteHost) throws(HostStoreError) {
         try hostStore.add(host, toFolder: newHostFolderID)
@@ -210,7 +198,6 @@ final class AppModel {
     func deleteHost(id: RemoteHost.ID) throws(HostStoreError) {
         try hostStore.delete(id: id)
         hostsDidChange()
-        // Its saved password, if any, goes with it.
         try? ssh.deletePassword(for: id)
     }
 
@@ -234,8 +221,6 @@ final class AppModel {
         observer.hostsDidChange(hosts)
     }
 
-    // MARK: - Live state
-
     /// Records a new status (and optionally metrics) for a host: previews and demo launches.
     /// Live polls go through ``MonitorService`` (``HostDisplayState/apply(_:)``).
     /// Ignored for hosts no longer in the inventory, so a late poll result can't resurrect one.
@@ -246,8 +231,6 @@ final class AppModel {
         state.message = message
         state.lastUpdated = .now
     }
-
-    // MARK: - Editor sheet
 
     /// Opens the main window's host editor for a new host.
     func requestNewHost() {
@@ -276,8 +259,6 @@ final class AppModel {
         isImportingSSHConfig = false
         isImportingTermius = true
     }
-
-    // MARK: - Terminals
 
     /// Whether Open SSH is available for the host: it exists, renders into `ssh_config`, is not
     /// blocked by a changed host key, and has its key with the agent running (or the system
@@ -320,8 +301,6 @@ final class AppModel {
         }
         return nil
     }
-
-    // MARK: - Sync
 
     /// Keeps ``displayStates`` and ``selection`` in step with the inventory and notifies observers.
     func hostsDidChange() {

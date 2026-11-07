@@ -56,8 +56,6 @@ public final class MonitorCoordinator {
         }
     }
 
-    // MARK: - Hosts
-
     /// The hosts being monitored.
     public var monitoredHostIDs: Set<RemoteHost.ID> { Set(entries.keys) }
 
@@ -137,8 +135,6 @@ public final class MonitorCoordinator {
         stopping.removeAll()
         continuation.finish()
     }
-
-    // MARK: - Private
 
     private static func needsRestart(_ old: RemoteHost, _ new: RemoteHost) -> Bool {
         old.address != new.address || old.port != new.port || old.user != new.user || old.keyId != new.keyId

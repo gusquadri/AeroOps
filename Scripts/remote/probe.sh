@@ -3,16 +3,6 @@
 # Run as: ssh aero-<id> 'LC_ALL=C sh -s' < probe.sh
 # Prints one capability token per line, in this order, only when present:
 #   docker podman kubectl k3s docker-ok kube-ok
-# POSIX sh, BusyBox-compatible.
-#
-# Changes from the first version of this script:
-# 1. "export LC_ALL=C" at the top (same reason as metrics.sh).
-# 2. "exit 0" at the end. Without it the script's exit status was that of the
-#    last "&&" list, so every host without a working kubectl failed: 127 where
-#    kubectl is not installed (measured on the dev container), 1 where it
-#    exists but cannot reach a cluster. A caller that checks the exit status
-#    would treat a successful probe as a failure. Exit status is now 0
-#    whenever the probe ran.
 export LC_ALL=C
 command -v docker  >/dev/null && echo docker
 command -v podman  >/dev/null && echo podman

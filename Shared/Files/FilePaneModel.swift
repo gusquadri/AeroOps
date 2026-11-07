@@ -26,8 +26,6 @@ enum FileBrowserError: LocalizedError, Equatable {
     }
 }
 
-// MARK: - Backends
-
 /// Where a pane's files live: the Mac's own disk (`LocalFileBackend`) or a host over SFTP
 /// (``RemoteFileBackend``).
 @MainActor
@@ -104,7 +102,6 @@ final class RemoteFileBackend: FileTransferBackend {
         } else if text.hasPrefix("/") {
             target = SFTPPath(text)
         } else {
-            // Bytes, so a folder whose name is not UTF-8 keeps its exact name.
             let base: SFTPPath
             if let directory {
                 base = directory
@@ -128,7 +125,6 @@ final class RemoteFileBackend: FileTransferBackend {
 
     func rename(_ source: SFTPPath, to destination: SFTPPath) async throws {
         let client = try await session.client()
-        // posix-rename replaces silently; a Finder-style rename must not.
         if (try? await client.attributes(of: destination, followingSymlinks: false)) != nil {
             throw FileBrowserError.exists(destination.name)
         }
@@ -141,8 +137,6 @@ final class RemoteFileBackend: FileTransferBackend {
             try await client.removeRecursively(path)
         }
     }
-
-    // MARK: Transfers
 
     func download(_ sources: [SFTPPath], into directory: String, for transfer: FileTransfer, progress: TransferProgress) async throws {
         let client = try await session.client(.transfer)
@@ -162,8 +156,6 @@ final class RemoteFileBackend: FileTransferBackend {
         session.disconnect()
     }
 }
-
-// MARK: - Pane
 
 /// One folder view of a ``FileBackend``: the Mac Files tab's two panes, the iOS Files screen.
 /// Holds the folder, its listing, selection, sort order and back history. Listing errors stay
@@ -220,8 +212,6 @@ final class FilePaneModel<Backend: FileBackend> {
     func path(of item: FileItem) -> Backend.Path? {
         directory.map { backend.path($0, appending: item.rawName) }
     }
-
-    // MARK: Navigation
 
     /// Shows the home folder the first time.
     func start() {
@@ -316,8 +306,6 @@ final class FilePaneModel<Backend: FileBackend> {
             isLoading = false
         }
     }
-
-    // MARK: Actions
 
     func createFolder(named name: String) async {
         guard let directory else { return }

@@ -47,7 +47,6 @@ pid_t aero_pty_spawn(const char *path, char *const argv[], char *const envp[], c
         return -1;
     }
 
-    // macOS leaves IUTF8 off, which breaks erasing multi-byte characters in canonical mode.
     struct termios attributes;
     if (tcgetattr(slave, &attributes) == 0) {
         attributes.c_iflag |= IUTF8;
@@ -55,7 +54,6 @@ pid_t aero_pty_spawn(const char *path, char *const argv[], char *const envp[], c
     }
     aero_pty_set_size(slave, rows, columns, width_pixels, height_pixels);
 
-    // Everything the child needs is prepared here: after fork only async-signal-safe calls.
     int max_fd = getdtablesize();
     if (max_fd < 0 || max_fd > 65536) max_fd = 65536;
     sigset_t all_signals, no_signals, previous;
@@ -65,7 +63,6 @@ pid_t aero_pty_spawn(const char *path, char *const argv[], char *const envp[], c
     default_action.sa_handler = SIG_DFL;
     sigemptyset(&default_action.sa_mask);
 
-    // Blocked across fork so no parent handler runs in the child before the reset below.
     pthread_sigmask(SIG_SETMASK, &all_signals, &previous);
     pid_t pid = fork();
     if (pid == 0) {
@@ -83,7 +80,6 @@ pid_t aero_pty_spawn(const char *path, char *const argv[], char *const envp[], c
             close(fd);
         }
         if (cwd != NULL) {
-            // A missing directory is not fatal: the program starts where the app runs.
             (void)chdir(cwd);
         }
         execve(path, argv, envp);

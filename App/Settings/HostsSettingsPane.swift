@@ -20,7 +20,6 @@ struct HostsSettingsPane: View {
             editor
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        // The plain sky gradient: bubbles and ribbons would sit behind form text.
         .background { Aero.sky.gradient.ignoresSafeArea() }
         .hostDeletionConfirmation($deletionCandidate)
         .sshConfigImportSheet(isPresented: $isImporting) { ids in

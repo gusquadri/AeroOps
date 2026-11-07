@@ -105,8 +105,6 @@ final class TerminalService {
         self.ssh = ssh
         self.hostOrder = hostOrder
         self.hostLookup = hostLookup
-        // A key press in an ended tab ("Press any key to close the terminal") closes it like
-        // ⌘W, keeping the tab info and the selection in step.
         manager.closeRequestHandler = { [weak self] session in
             self?.requestClose(session.id)
         }
@@ -116,8 +114,6 @@ final class TerminalService {
         }
     }
 
-    // MARK: - Queries
-
     /// The open sessions in the sidebar's order: grouped by host in the host list's order, each
     /// host's in ``manager`` order. ⌃Tab, ⌘⌥1…9 and the selection after a close follow it.
     var sessions: [TerminalSession] {
@@ -125,7 +121,6 @@ final class TerminalService {
         for (index, id) in hostOrder().enumerated() where rank[id] == nil {
             rank[id] = index
         }
-        // Tabs of a host no longer listed go last.
         func hostRank(_ session: TerminalSession) -> Int {
             tabs[session.id].flatMap { rank[$0.hostID] } ?? .max
         }
@@ -196,8 +191,6 @@ final class TerminalService {
             }
         }
     }
-
-    // MARK: - Opening
 
     /// Opens a tab to `host` running `kind`, after the first-contact check. The tab appears and is
     /// selected once the host key is known; until the user trusts a new host, ``trustRequest``
@@ -308,15 +301,12 @@ final class TerminalService {
     }
 
     private func nextOrdinal(for baseTitle: String) -> Int {
-        // Only tabs whose session is still open (libghostty can close one on its own).
         let open = manager.sessions.compactMap { tabs[$0.id] }
         let used = Set(open.filter { $0.baseTitle == baseTitle }.map(\.ordinal))
         var ordinal = 1
         while used.contains(ordinal) { ordinal += 1 }
         return ordinal
     }
-
-    // MARK: - Launch spec (pure, checked by the Phase 4 self-test)
 
     static func baseTitle(hostName: String, kind: Kind) -> String {
         switch kind {
@@ -364,8 +354,6 @@ final class TerminalService {
             title: title
         )
     }
-
-    // MARK: - Terminfo
 
     /// The outcome of ``installTerminfo(_:)``.
     struct TerminfoInstallResult: Identifiable {
@@ -444,8 +432,6 @@ final class TerminalService {
             terminfoInstallResult = TerminfoInstallResult(hostName: host.name, failure: failure)
         }
     }
-
-    // MARK: - Tabs
 
     /// Closes the tab, asking first (``closeConfirmation``) while its program runs, unless
     /// `force`.
@@ -545,8 +531,6 @@ final class TerminalService {
               siblings.indices.contains(index + offset) else { return nil }
         return siblings[index + offset].id
     }
-
-    // MARK: - Display
 
     /// What the tab's status orb and exit banner say.
     struct Status: Equatable {

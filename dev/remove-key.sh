@@ -18,8 +18,6 @@ short=$(printf '%s' "$key" | cut -c1-40)
 
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 
-# Reads the key from stdin and removes it from the files given as arguments.
-# shellcheck disable=SC2016  # expanded by the remote shell
 revoke='
   read -r k
   for f in "$@"; do

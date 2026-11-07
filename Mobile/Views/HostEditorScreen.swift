@@ -138,8 +138,6 @@ struct HostEditorScreen: View {
         .onAppear(perform: load)
     }
 
-    // MARK: - Fields
-
     /// A field with its validation message underneath.
     private func field(
         _ field: HostDraft.Field,
@@ -192,8 +190,6 @@ struct HostEditorScreen: View {
             .font(Aero.font(.footnote))
             .foregroundStyle(Aero.text.secondary)
     }
-
-    // MARK: - Actions
 
     private func load() {
         guard !isLoaded else { return }

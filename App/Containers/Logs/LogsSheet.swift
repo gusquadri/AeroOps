@@ -43,14 +43,11 @@ struct LogsSheet: View {
         .onDisappear { viewer.stop() }
         .task(id: viewer.searchText) {
             let query = viewer.searchText
-            // Debounce typing; highlighting 10k lines on every keystroke would stutter.
             if !query.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
             guard !Task.isCancelled else { return }
             viewer.search(query)
         }
     }
-
-    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -91,8 +88,6 @@ struct LogsSheet: View {
         case .idle: EmptyView()
         }
     }
-
-    // MARK: - Controls
 
     private var controls: some View {
         HStack(spacing: 14) {
@@ -205,8 +200,6 @@ struct LogsSheet: View {
         .aeroGlass(in: RoundedRectangle(cornerRadius: Aero.radius.inner, style: .continuous), shadow: nil)
     }
 
-    // MARK: - Footer
-
     private var footer: some View {
         HStack(spacing: 12) {
             Text("\(viewer.lineCount.formatted()) lines")
@@ -221,8 +214,6 @@ struct LogsSheet: View {
         .foregroundStyle(Aero.text.secondary)
     }
 }
-
-// MARK: - Inspect
 
 /// `docker inspect` for one container: a summary and the full JSON with a Copy button.
 struct InspectSheet: View {

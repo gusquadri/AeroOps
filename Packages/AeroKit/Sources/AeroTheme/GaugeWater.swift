@@ -20,8 +20,6 @@ struct GaugeWater: Equatable {
     let strong: Bool
 }
 
-// MARK: - Palette
-
 /// The water's colours, by day and by night. The water lies over the tube's own colours, so it
 /// is drawn in light and dark: a lighter band over the wave, a bright crest line with a dark
 /// edge, and bubbles with bright rims and dark edges, which read on leaf, aqua, sun and coral.
@@ -33,8 +31,6 @@ enum WaterPalette {
     /// The dark edge inside the crest and around the bubbles.
     static let shade = Color(day: Color(hex: 0x0A4A7A, opacity: 0.35), night: Color(hex: 0x03041C, opacity: 0.5))
 }
-
-// MARK: - Geometry (unit-tested)
 
 /// The tube of a gauge `diameter` points across with a ring `lineWidth` points wide, in points.
 struct TubeGeometry: Equatable, Sendable {
@@ -54,8 +50,6 @@ struct TubeGeometry: Equatable, Sendable {
     static let wavePeriod: TimeInterval = 18
     static let bubblePeriods: [TimeInterval] = [11, 16]
 }
-
-// MARK: - Bubbles (unit-tested)
 
 /// One bubble in a stream.
 struct TubeBubble: Equatable, Sendable {
@@ -81,7 +75,6 @@ enum BubbleSchedule {
         let slot = 2 * Double.pi / Double(count)
         return (0..<count).map { index in
             let size = width * CGFloat(random.unit(in: sizes[stream]))
-            // Inside the tube, clear of its walls.
             let room = max(0, (width - size) / 2 - width * 0.12)
             return TubeBubble(
                 angle: CGFloat(slot * (Double(index) + random.unit(in: 0.15...0.85))),
@@ -111,8 +104,6 @@ struct SplitMix64: RandomNumberGenerator {
         range.lowerBound + Double(next() >> 11) / Double(1 << 53) * (range.upperBound - range.lowerBound)
     }
 }
-
-// MARK: - Art
 
 /// The cached images of the water for one look: the wave ring and the two bubble streams, each
 /// a full ring the size of the gauge. Every gauge with the same look, size and scale shares
@@ -262,8 +253,6 @@ final class WaterArt {
     }
 }
 
-// MARK: - Views
-
 /// The water for a gauge's tube: live, or still with Reduce Motion and in render tests. Its
 /// frame is the gauge's ring, `diameter` points across.
 struct GaugeWaterView: View {
@@ -388,7 +377,6 @@ final class WaterView: WaterHostView {
     /// The arc's glide to a new value: the ring's spring.
     static let glide: TimeInterval = 0.6
 
-    // Set and cleared on the main actor; deinit is the last reference, so nothing races.
     nonisolated(unsafe) private var observers: [any NSObjectProtocol] = []
 
     override init(frame: CGRect) {

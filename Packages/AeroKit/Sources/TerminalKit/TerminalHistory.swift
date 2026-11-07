@@ -127,18 +127,15 @@ struct TerminalHistory: Sendable {
                 continue
             }
             guard switched else {
-                // Not kept in `alternate` meanwhile, so the log's storage is not copied.
                 alternate = nil
                 stay.log.append(piece, graphicsBytes: pieceGraphics)
                 alternate = stay
                 continue
             }
-            // The program left the alternate screen, with this piece's last sequence.
             alternate = nil
             if let standIn = tail.alternateScreenStandIn(since: stay.entry) {
                 main.append(standIn, graphicsBytes: 0)
             } else {
-                // RIS: it wipes the main screen as well.
                 main.append(Data([0x1B, UInt8(ascii: "c")]), graphicsBytes: 0)
             }
         }
@@ -234,7 +231,6 @@ struct TerminalOutputLog: Sendable {
         }
         byteCount += data.count
         graphicsAppended += graphicsBytes
-        // Trim in steps of a chunk, not on every append.
         if budgetedByteCount(dropping: 0, droppedGraphics: droppedGraphics(dropped)) > limit + Self.chunkSize {
             trim()
         }
@@ -307,7 +303,6 @@ struct TerminalOutputLog: Sendable {
                 body.append(kept)
                 return
             }
-            // The cut may have split an escape sequence or a UTF-8 character: skip its rest.
             var start = kept.startIndex
             while start < kept.endIndex, !tracker.isAtBoundary(next: kept[start]) {
                 tracker.consume(kept[start])

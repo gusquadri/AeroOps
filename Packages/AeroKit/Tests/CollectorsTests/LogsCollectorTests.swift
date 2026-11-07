@@ -152,7 +152,6 @@ struct LogsWatchdogTests {
         run.process.waitUntilExit()
         #expect(String(decoding: output, as: UTF8.self) == "one\ntwo\n")
         #expect(run.process.terminationStatus == 3)
-        // The heartbeat's sleep must not hold stdout open after the command exits.
         #expect(ContinuousClock.now - started < .seconds(2))
     }
 
@@ -186,7 +185,6 @@ struct LogsWatchdogTests {
     }
 
     private static func launch(shell: String, command: String) throws -> (process: Process, stdout: Pipe, stderr: Pipe) {
-        // `command` here is a compound list, so wrap it in a subshell to keep the script valid.
         let script = LogFollowStream.watchdogScript("(\(command))", heartbeatSeconds: 1)
         let process = Process()
         let stdout = Pipe()

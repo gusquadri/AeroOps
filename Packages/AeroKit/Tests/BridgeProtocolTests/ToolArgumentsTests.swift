@@ -91,7 +91,6 @@ struct ToolArgumentsTests {
         #expect(message("get_host_metrics", ["host": "web", "verbose": true]) ==
             "Unknown argument \"verbose\" for get_host_metrics. Allowed: host.")
         #expect(message("list_hosts", ["a": 1, "b": 2]) == "Unknown arguments \"a\", \"b\" for list_hosts. Allowed: tag.")
-        // null counts as absent.
         #expect(message("list_containers", ["host": "web", "all": nil]) == nil)
         #expect(message("list_containers", ["host": "web", "all": "yes"]) == "Argument 'all' must be true or false (got \"yes\").")
         #expect(message("nope", [:]) == "Unknown tool 'nope'.")

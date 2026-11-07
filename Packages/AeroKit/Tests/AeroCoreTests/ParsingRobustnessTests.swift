@@ -21,7 +21,6 @@ struct TimestampTests {
         #expect(Timestamps.parseRFC3339("2000-02-29T00:00:00Z") == Date(timeIntervalSince1970: 951_782_400))
         #expect(Timestamps.parseRFC3339("1969-12-31T23:59:59Z") == Date(timeIntervalSince1970: -1))
         #expect(Timestamps.parseRFC3339("0001-01-01T00:00:00Z") == Date(timeIntervalSince1970: -62_135_596_800))
-        // A leap second is read as :59.
         #expect(Timestamps.parseRFC3339("2016-12-31T23:59:60Z") == Date(timeIntervalSince1970: 1_483_228_799))
     }
 
@@ -39,7 +38,7 @@ struct TimestampTests {
 
     @Test("Docker CreatedAt")
     func dockerCreatedAt() {
-        let expected = Date(timeIntervalSince1970: day + 24_930)   // 06:55:30Z
+        let expected = Date(timeIntervalSince1970: day + 24_930)
         #expect(Timestamps.parseDockerCreatedAt("2026-10-11 03:55:30 -0300 -03") == expected)
         #expect(Timestamps.parseDockerCreatedAt("2026-10-11 03:55:30 -0300 BRT") == expected)
         #expect(Timestamps.parseDockerCreatedAt("2026-10-11 06:55:30 +0000 UTC") == expected)

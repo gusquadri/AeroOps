@@ -12,10 +12,8 @@ struct GaugeWaterTests {
         let geometry = TubeGeometry(diameter: diameter, lineWidth: lineWidth)
         #expect(geometry.radius == diameter / 2 - lineWidth / 2)
         #expect(geometry.waves >= 3)
-        // About one crest per 2.4 tube widths of centre line.
         let spacing = 2 * .pi * geometry.radius / CGFloat(geometry.waves) / lineWidth
         #expect(geometry.waves == 3 || (1.8...3.2).contains(spacing))
-        // The wave rolls inside the tube.
         let half = lineWidth / 2
         #expect(geometry.waveRadius + geometry.amplitude < geometry.radius + half)
         #expect(geometry.waveRadius - geometry.amplitude > geometry.radius - half)
@@ -34,10 +32,8 @@ struct GaugeWaterTests {
         for bubble in a {
             #expect((0..<(2 * .pi)).contains(bubble.angle))
             #expect(sizes.contains(Double(bubble.size / width)))
-            // Clear of the tube's walls.
             #expect(abs(bubble.offset) + bubble.size / 2 <= width / 2 - width * 0.12 + 0.0001)
         }
-        // One per slot, in order round the ring, never touching (including across the start).
         #expect(a.map(\.angle) == a.map(\.angle).sorted())
         let angles = a.map(\.angle) + [a[0].angle + 2 * .pi]
         for (index, gap) in zip(angles, angles.dropFirst()).map({ $1 - $0 }).enumerated() {
@@ -82,7 +78,6 @@ struct GaugeWaterTests {
             }
             #expect(inked > 100)
         }
-        // Near the outer wall the wave's lighter water runs right round.
         let pixels = try #require(Pixels(art.wave))
         for step in 0..<36 {
             let theta = CGFloat(step) * .pi / 18
@@ -100,13 +95,11 @@ struct GaugeWaterTests {
         #expect(view.tube.lineWidth == 9)
         #expect(view.tube.lineCap == .round)
         #expect(view.tube.fillColor == nil)
-        // The arc starts and ends at the top of the tube's centre line.
         let end = try #require(view.tube.path?.currentPoint)
         #expect(abs(end.x - 32) < 0.001 && abs(end.y - (64 - 4.5)) < 0.001)
         #expect(view.waveLayer.contents != nil)
         #expect(view.streamLayers.count == TubeGeometry.bubblePeriods.count)
         #expect(view.streamLayers.allSatisfy { $0.contents != nil && $0.position == CGPoint(x: 32, y: 32) })
-        // No window: nothing moves.
         #expect(!view.isMoving)
         #expect(view.waveLayer.animationKeys() == nil)
 
@@ -117,7 +110,6 @@ struct GaugeWaterTests {
         for (ring, period) in zip(rings, periods) {
             let flow = try #require(ring.animation(forKey: "flow") as? CABasicAnimation)
             #expect(flow.keyPath == "transform.rotation.z")
-            // Clockwise, toward the tip of the arc.
             #expect((flow.toValue as? CGFloat) == -2 * .pi)
             #expect(flow.duration == period)
             #expect(flow.repeatCount == .infinity)
@@ -128,11 +120,9 @@ struct GaugeWaterTests {
         view.setMoving(false)
         #expect(rings.allSatisfy { $0.animationKeys() == nil })
 
-        // A new value moves the arc's tip; off screen there is no glide.
         view.show(GaugeWater(fraction: 0.9, strong: false), lineWidth: 9, variant: .night, animated: true)
         #expect(view.tube.strokeEnd == 0.9)
         #expect(view.tube.animation(forKey: "glide") == nil)
-        // A new look swaps the art.
         let art = view.art
         view.show(GaugeWater(fraction: 0.9, strong: true), lineWidth: 9, variant: .night, animated: false)
         #expect(view.art !== art)
@@ -156,8 +146,6 @@ struct GaugeWaterTests {
         let image = try #require(renderer.cgImage)
         #expect(image.width == 128)
         let pixels = try #require(Pixels(image))
-        // Half full: the right half of the tube, from the top clockwise. Near the outer wall
-        // the wave's lighter water always shows.
         #expect(pixels[126, 64][3] > 20, "the tube at 3 o'clock")
         #expect(pixels[1, 64][3] == 0, "the tube at 9 o'clock, past the tip")
         #expect(pixels[64, 64][3] == 0, "the bubble")

@@ -33,7 +33,6 @@ public struct AeroHeaderWash: View {
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: Aero.radius.card, topTrailingRadius: Aero.radius.card, style: .continuous
         )
-        // Increase Contrast keeps the colour cue but calmer, under the stronger rim.
         let peak = accessibility.increaseContrast ? Self.peak * 0.6 : Self.peak
         shape
             .fill(LinearGradient(
@@ -48,8 +47,6 @@ public struct AeroHeaderWash: View {
             .accessibilityHidden(true)
     }
 }
-
-// MARK: - Previews
 
 #Preview("AeroHeaderWash: every tone") {
     HStack(spacing: 16) {

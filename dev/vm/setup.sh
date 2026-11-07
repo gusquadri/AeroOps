@@ -30,9 +30,6 @@ if [ "$fresh" = 1 ] && exists; then
 fi
 
 if ! exists; then
-  # --isolated: no Mac file sharing, so nothing that SSHes in as dev (the app,
-  # or an AI agent via run_command) can read the Mac's home directory.
-  # Memory/CPU are caps inside OrbStack's shared VM, not reservations.
   echo "==> creating $VM (Ubuntu 24.04)"
   orb create --isolated --memory 2G --cpus 2 --disk 20G ubuntu:noble "$VM"
 fi
@@ -45,7 +42,6 @@ vm mkdir -p /opt/aeroops/k8s
 vm sh -c 'cat > /opt/aeroops/provision.sh'   < "$here/provision.sh"
 vm sh -c 'cat > /opt/aeroops/ansi-logger.sh' < "$here/ansi-logger.sh"
 vm sh -c 'cat > /opt/aeroops/k8s/demo.yaml'  < "$here/k8s/demo.yaml"
-# Concatenate dev/keys/*.pub (may be none) into one file inside the VM.
 for f in "$devdir"/keys/*.pub; do
   [ -f "$f" ] && cat "$f"
 done | vm sh -c 'cat > /opt/aeroops/authorized_keys'

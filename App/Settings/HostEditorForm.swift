@@ -158,7 +158,6 @@ struct HostEditorForm: View {
         }
         .onChange(of: connectionKey) { resetTest() }
         .onChange(of: draft) { _, draft in onDraftChange?(draft) }
-        // Trusting the new key lifts the block: the old "key changed" result no longer applies.
         .onChange(of: keyBlock == nil) { _, unblocked in
             if unblocked { resetTest() }
         }
@@ -184,8 +183,6 @@ struct HostEditorForm: View {
             )
         }
     }
-
-    // MARK: - Rows
 
     /// A field with its validation message (or help text) underneath.
     private func field<Control: View>(
@@ -333,8 +330,6 @@ struct HostEditorForm: View {
         }
         .padding(16)
     }
-
-    // MARK: - Actions
 
     /// Saves a typed password to the Keychain first, so the host never exists without the
     /// password it was saved with; a new host's password is removed again if `onSave` fails.

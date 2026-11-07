@@ -75,7 +75,6 @@ extension TerminalAlert {
                 pendingSpace = !scalars.isEmpty
                 continue
             }
-            // Bidi embeddings, overrides and isolates can make a text read as another.
             if (0x202A...0x202E).contains(scalar.value) || (0x2066...0x2069).contains(scalar.value) {
                 continue
             }

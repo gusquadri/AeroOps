@@ -137,13 +137,10 @@ final class MobileModel {
         )
     }
 
-    // MARK: - Lifecycle
-
     /// Loads keys and host-key blocks, then starts monitoring. Idempotent.
     func start() async {
         guard !isStarted else { return }
         isStarted = true
-        // Downloads left from the last run.
         MobileFileBrowser<RemoteFileBackend>.removeAllDownloads()
         await reloadKeys()
         await refreshHostKeys()
@@ -182,8 +179,6 @@ final class MobileModel {
         }
     }
 
-    // MARK: - Monitoring
-
     /// The live state of host `id`, created on first use.
     func displayState(for id: RemoteHost.ID) -> HostDisplayState {
         if let state = displayStates[id] { return state }
@@ -210,7 +205,6 @@ final class MobileModel {
         let blockChanged = Self.isChanged(update.hostKeyIssue) != Self.isChanged(state.hostKeyIssue)
         state.apply(update)
         if blockChanged {
-            // The store blocked the host (or lifted the block); mirror it for the card and banner.
             Task { await refreshHostKeyBlocks() }
         }
     }
@@ -218,8 +212,6 @@ final class MobileModel {
     private static func isChanged(_ issue: HostKeyIssue?) -> Bool {
         if case .changed = issue { true } else { false }
     }
-
-    // MARK: - Hosts
 
     func host(id: RemoteHost.ID) -> RemoteHost? {
         hostStore.host(id: id)
@@ -295,7 +287,6 @@ final class MobileModel {
 
     private func hostsDidChange() {
         refreshPasswordHosts()
-        // The coordinator skips hosts with monitoring off.
         coordinator?.setHosts(hosts)
         containerService.hostsDidChange(hosts)
         for host in hosts {
@@ -317,8 +308,6 @@ final class MobileModel {
             }
         }
     }
-
-    // MARK: - Terminals and files
 
     /// Whether a terminal or the file browser can try host `host`: its key has not changed and
     /// the keys could be opened.
@@ -411,8 +400,6 @@ final class MobileModel {
         return (client, host)
     }
 
-    // MARK: - Host keys
-
     /// Whether `host` has a pinned key, so a session can connect without the trust sheet.
     func isHostKeyPinned(_ host: RemoteHost) async -> Bool {
         (try? await hostKeys.pinnedKeys(for: host).isEmpty) == false
@@ -471,8 +458,6 @@ final class MobileModel {
         await refreshHostKeyBlocks()
         refresh(host.id)
     }
-
-    // MARK: - Keys
 
     /// Re-reads the keys from the Keychain, including ones synced from the user's other devices.
     func reloadKeys() async {
@@ -574,7 +559,6 @@ extension MobileModel {
             passwordKeychain: InMemoryKeychain(), hostKeyKeychain: InMemoryKeychain()
         )
         for host in hosts { try? model.hostStore.add(host) }
-        // Hosts with monitoring off get no update.
         for update in SampleData.liveUpdates(for: model.hosts) {
             model.displayState(for: update.hostID).apply(update)
         }

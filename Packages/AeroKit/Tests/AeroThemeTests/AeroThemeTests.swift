@@ -12,7 +12,6 @@ struct AeroThemeTests {
         #expect(Aero.shadow.card.y == 6)
         #expect(Aero.shadow.card.blur == 18)
         let day = EnvironmentValues.aero(.day)
-        // Within rounding: the tokens are NSColors, so they pass through AppKit's colour space.
         func same(_ token: Color, _ expected: Color) -> Bool {
             let (a, b) = (token.resolve(in: day), expected.resolve(in: day))
             return [a.red - b.red, a.green - b.green, a.blue - b.blue, a.opacity - b.opacity]
@@ -47,7 +46,6 @@ struct AeroThemeTests {
         }
         #expect(Aero.text.onAccent.resolve(in: day) == Aero.text.onAccent.resolve(in: night))
         #expect(Aero.text.onBright.resolve(in: day) == Aero.text.onBright.resolve(in: night))
-        // Night text is light on a dark sky.
         #expect(RGB(Aero.text.primary, .night).luminance > RGB(Aero.sky.top, .night).luminance)
         #expect(RGB(Aero.sky.top, .night).luminance < 0.02)
     }
@@ -211,7 +209,6 @@ struct AeroThemeTests {
 
     @Test("sky surface keeps the image's size, rows, colours and opacity")
     func skySurface() throws {
-        // Red over blue: the top half of the image is red.
         let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let drawing = try #require(CGContext(
             data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
@@ -228,7 +225,6 @@ struct AeroThemeTests {
         #expect(surface.attachment(forKey: kIOSurfaceColorSpace as String) != nil)
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
-        // BGRA in memory.
         func pixel(row: Int) -> [UInt8] {
             let start = surface.baseAddress.advanced(by: row * surface.bytesPerRow).assumingMemoryBound(to: UInt8.self)
             return Array(UnsafeBufferPointer(start: start, count: 4))

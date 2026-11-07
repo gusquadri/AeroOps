@@ -69,8 +69,6 @@ public enum MetricsParser {
         parseDF(lines: text.split(whereSeparator: \.isNewline))
     }
 
-    // MARK: - Sections
-
     /// Splits the output into named sections. Lines before the first marker are ignored (login
     /// banners), a repeated section is ignored (first wins), and parsing stops at `@@end`.
     static func splitSections(_ output: String) -> (sections: [String: [Substring]], complete: Bool) {
@@ -120,8 +118,6 @@ public enum MetricsParser {
         else { return nil }
         return value
     }
-
-    // MARK: - df
 
     static func parseDF(lines: [Substring]) -> [DiskUsage] {
         var blockSize: Int64 = 1024
@@ -285,7 +281,6 @@ public struct CPUTimes: Codable, Sendable, Hashable {
             guard !overflow else { return nil }
             total = sum
         }
-        // Cannot overflow: both are already part of `total`.
         let idle = values[3] + (values.count > 4 ? values[4] : 0)
         self.init(total: total, idle: idle)
     }

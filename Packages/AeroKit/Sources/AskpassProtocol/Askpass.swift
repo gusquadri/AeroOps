@@ -136,7 +136,6 @@ public enum AskpassWire {
     public static func line(_ value: some Encodable) -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        // Encoding these plain structs cannot fail.
         return (try! encoder.encode(value)) + Data("\n".utf8)
     }
 

@@ -87,8 +87,6 @@ final class SelfTest {
             defer: false
         )
         window.title = "TerminalKit self-test"
-        // Fixed geometry: by default NSHostingView sizes the window to its content, and an
-        // empty grid would shrink the window to nothing before the first tab opens.
         let host = NSHostingView(rootView: GridView(manager: manager, state: grid))
         host.sizingOptions = []
         window.contentView = host
@@ -137,7 +135,6 @@ final class SelfTest {
 
     /// Types `command; echo <marker>` and returns the screen lines once the marker printed.
     func run(_ session: TerminalSession, _ command: String, marker: String) async -> [String]? {
-        // `''` splits the marker in the echoed command line, so only the output matches.
         let split = marker.prefix(2) + "''" + marker.dropFirst(2)
         session.type("\(command); echo \(split)\n")
         var result: [String]?
@@ -191,14 +188,12 @@ final class SelfTest {
         let baseline = memory()
         print("MEM baseline:", format(baseline))
 
-        // Invalid spec fails fast and never starts anything.
         let invalid = manager.open(TerminalLaunchSpec(executable: "ssh", title: "bad"))
         if case .failed = invalid.state { check(true, "relative executable -> failed state") } else {
             check(false, "relative executable -> failed state (got \(invalid.state))")
         }
         manager.close(invalid.id)
 
-        // 1 tab, then 5.
         let first = manager.open(options.spec(host: options.host, title: "tab 1"))
         let firstPrompt = await wait { hasPrompt(first) }
         check(firstPrompt, "tab 1 reaches the remote prompt")
@@ -236,7 +231,6 @@ final class SelfTest {
             check(!lines(session).contains { $0.contains("Last login") }, "tab \(index + 1) shows no 'Last login'")
         }
 
-        // stty size + OK in each, compared with the surface's grid.
         var before: [(rows: Int, columns: Int)] = []
         for (index, session) in sessions.enumerated() {
             let marker = "OK_\(index + 1)"
@@ -250,10 +244,6 @@ final class SelfTest {
             before.append(size ?? (0, 0))
         }
 
-        // SSH_AUTH_SOCK reached ssh: the harness runs without one and the private key exists
-        // only in the temp agent, so the logins above prove it. Environment additions and the
-        // working directory, plus a short-lived local program's exit code, checked locally
-        // (macOS `ps -E` no longer shows other processes' environments).
         let local = manager.open(TerminalLaunchSpec(
             executable: "/bin/sh",
             arguments: ["-c", #"printf 'ENV=%s PWD=%s\n' "$AEROOPS_SELFTEST" "$(pwd)"; exit 3"#],
@@ -264,8 +254,6 @@ final class SelfTest {
         check(await wait { local.state.isFinished }, "local program finishes")
         check(local.state == .exited(code: 3), "local 'exit 3' -> exited(code: 3) (\(local.state))")
         check(lines(local).contains("ENV=env-ok PWD=/usr"), "environment and working directory reach the program")
-        // libghostty prints "Press any key to close the terminal" on every exit: the ended tab
-        // stays until then, and the key press reaches the manager's close handler.
         try? await Task.sleep(for: .milliseconds(500))
         check(manager.session(id: local.id) != nil, "an ended tab stays open until asked")
         var closeRequests: [TerminalSession.ID] = []
@@ -279,7 +267,6 @@ final class SelfTest {
         manager.closeRequestHandler = nil
         manager.close(local.id)
 
-        // Resize: shrink the window, sizes must follow.
         window.setContentSize(NSSize(width: 1000, height: 640))
         try? await Task.sleep(for: .seconds(1))
         for (index, session) in sessions.enumerated() {
@@ -294,31 +281,25 @@ final class SelfTest {
             }
         }
 
-        // Full-screen programs: vi in tab 1, top in tab 2.
         sessions[0].type("vi /tmp/aeroops-selftest-\(getpid()).txt\n")
         check(await wait { lines(sessions[0]).filter { $0 == "~" }.count >= 3 }, "vi draws its screen")
         sessions[0].pressEscape()
-        // A lone ESC followed at once by more keys reads as an escape sequence to vi.
         try? await Task.sleep(for: .milliseconds(300))
         sessions[0].type(":q!\n")
         let viDone = await run(sessions[0], "true", marker: "VI_DONE") != nil
         check(viDone, "vi quits back to the shell")
         if !viDone { dump(sessions[0], "tab 1 (vi)") }
 
-        // procps top on the Alpine container.
         sessions[1].type("top\n")
         let topDrawn = await wait { lines(sessions[1]).contains { $0.hasPrefix("top - ") || $0.hasPrefix("Tasks:") } }
         check(topDrawn, "top draws its screen")
         if !topDrawn { dump(sessions[1], "tab 2 (top)") }
         sessions[1].type("q")
-        // top restores the tty with TCSAFLUSH, discarding input typed before it is gone.
         try? await Task.sleep(for: .milliseconds(500))
         let topDone = await run(sessions[1], "true", marker: "TOP_DONE") != nil
         check(topDone, "top quits back to the shell")
         if !topDone { dump(sessions[1], "tab 2 (after top)") }
 
-        // Surface LRU: a hidden tab beyond the limit loses its surface, its program keeps
-        // running, and showing it again rebuilds the screen from the recorded output.
         let lru = sessions[1]
         let lruRoot = lru.processRootPID
         lru.type("sleep 2; echo LRU''_LATE\n")
@@ -335,7 +316,6 @@ final class SelfTest {
         check(await run(lru, "true", marker: "LRU_INPUT") != nil, "a rebuilt surface takes input")
         if !lines(lru).contains("LRU_INPUT") { dump(lru, "tab 2 (rebuilt)") }
 
-        // A full-screen program comes back on its alternate screen.
         lru.type("vi /tmp/aeroops-selftest-lru-\(getpid()).txt\n")
         check(await wait { lines(lru).filter { $0 == "~" }.count >= 3 }, "vi draws its screen before the suspend")
         grid.hidden.insert(lru.id)
@@ -348,9 +328,6 @@ final class SelfTest {
         check(await run(lru, "true", marker: "LRU_VI_DONE") != nil, "vi quits back to the shell after the rebuild")
         if !lines(lru).contains("LRU_VI_DONE") { dump(lru, "tab 2 (vi rebuilt)") }
 
-        // What a full-screen program draws does not push the shell's output out of the
-        // recorded output: 6 MB on
-        // the alternate screen, more than the main screen's limit.
         check(await run(lru, "true", marker: "ALT_BEFORE") != nil, "the shell prints before the flood")
         let flood = #"printf '\033[?1049h'; yes 0123456789abcdefghijklmnopqrstuvwxyz | head -c 6000000; printf '\033[?1049l'"#
         check(await run(lru, flood, marker: "ALT_FLOOD_DONE") != nil, "6 MB on the alternate screen")
@@ -362,7 +339,6 @@ final class SelfTest {
         check(!lines(lru).contains { $0.hasPrefix("0123456789abcdefghijklmnopqrstuvwxyz") }, "the flood stays off the main screen")
         if !lines(lru).contains("ALT_BEFORE") { dump(lru, "tab 2 (after the flood)") }
 
-        // Memory pressure suspends every tab off screen, even under the limit.
         manager.liveSurfaceLimit = manager.sessions.count + 1
         grid.hidden.insert(lru.id)
         try? await Task.sleep(for: .seconds(1))
@@ -375,11 +351,9 @@ final class SelfTest {
         check(await run(lru, "true", marker: "PRESSURE_INPUT") != nil, "it takes input")
         manager.liveSurfaceLimit = 3
 
-        // Title from OSC 2.
         sessions[3].type(#"printf '\033]2;AERO''_TITLE\007'"# + "\n")
         check(await wait(5) { sessions[3].title == "AERO_TITLE" }, "OSC 2 updates the title (\(sessions[3].title))")
 
-        // Font size: increase, then reset.
         let initialFont = sessions[2].fontSize
         sessions[2].increaseFontSize()
         sessions[2].increaseFontSize()
@@ -388,11 +362,9 @@ final class SelfTest {
         sessions[2].resetFontSize()
         check(await wait(5) { sessions[2].fontSize == initialFont }, "font size resets (\(sessions[2].fontSize))")
 
-        // Real exit code from the remote shell.
         sessions[4].type("exit 7\n")
         check(await wait { sessions[4].state == .exited(code: 7) }, "remote 'exit 7' -> exited(code: 7) (\(sessions[4].state))")
 
-        // Closing one tab ends its tree.
         let closedRoot = sessions[0].processRootPID
         let beforeClose = leftovers().count
         manager.close(sessions[0].id)
@@ -401,7 +373,6 @@ final class SelfTest {
         check(rootGone, "close() ends the tab's process (pid \(closedRoot.map(String.init) ?? "?"))")
         check(sessions[0].state == .exited(code: nil), "closed tab state exited(code: nil) (\(sessions[0].state))")
 
-        // Connection failure: closed port.
         let failing = manager.open(options.spec(host: options.closedHost, title: "closed port"))
         check(await wait { failing.state.isFinished }, "closed port session finishes")
         check(failing.state == .exited(code: 255), "closed port -> exited(code: 255) (\(failing.state))")
@@ -409,7 +380,6 @@ final class SelfTest {
         check(failText.contains("Connection refused") || failText.contains("connect to host"), "ssh error stays on screen")
         check(!failText.contains("Last login"), "no 'Last login' on the failed tab")
 
-        // A closed session (and its surface, controller and delegate bridge) is freed.
         weak var probe: TerminalSession?
         do {
             let session = manager.open(options.spec(host: options.host, title: "probe"))
@@ -419,7 +389,6 @@ final class SelfTest {
         }
         check(await wait(5) { probe == nil }, "a closed session is deallocated")
 
-        // Close everything (the quit path) and look for leaks.
         let running = leftovers()
         print("PROCS before closeAll: \(running.count)")
         running.forEach { print("  ", $0.prefix(140)) }
@@ -456,7 +425,6 @@ Task { @MainActor in
     let status = await selfTest.run()
     exit(status)
 }
-// Watchdog: never hang a CI shell.
 Task { @MainActor in
     try? await Task.sleep(for: .seconds(240))
     print("RESULT FAIL (timeout)")

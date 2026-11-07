@@ -129,7 +129,6 @@ enum SampleHostKeys {
             blob.append(Data(bytes: &length, count: 4))
             blob.append(field)
         }
-        // The blob is built above with a valid type prefix, so parsing cannot fail.
         return try! HostKey(type: type, base64: blob.base64EncodedString())
     }
 }

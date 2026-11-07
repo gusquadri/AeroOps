@@ -57,7 +57,6 @@ public struct StatusOrb: View {
     public var body: some View {
         let strong = accessibility.increaseContrast
         ZStack {
-            // Body: light pools at the bottom, the edge darkens.
             Circle().fill(RadialGradient(
                 stops: [
                     .init(color: tone.color.mix(with: .white, by: 0.45), location: 0),
@@ -67,7 +66,6 @@ public struct StatusOrb: View {
                 center: UnitPoint(x: 0.5, y: 0.92),
                 startRadius: 0, endRadius: size * 0.95
             ))
-            // Specular cap.
             Ellipse()
                 .fill(LinearGradient(
                     colors: [.white.opacity(0.95), .white.opacity(0.1)],
@@ -86,8 +84,6 @@ public struct StatusOrb: View {
         .accessibilityLabel(tone.rawValue.capitalized)
     }
 }
-
-// MARK: - Previews
 
 #Preview("StatusOrb: every tone and size") {
     VStack(spacing: 18) {

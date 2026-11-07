@@ -123,7 +123,6 @@ struct ModelTests {
         snapshot.swapUsedBytes = 0
         #expect(snapshot.swapUsedFraction == nil)
 
-        // Snapshots encoded before the swap fields existed still decode.
         let json = #"{"cpuPercent":5,"memUsedBytes":1,"memTotalBytes":2,"disks":[],"uptimeSeconds":1,"load1":0,"load5":0,"load15":0,"hostname":"h","kernel":"Linux","sampledAt":0}"#
         let old = try JSONDecoder().decode(MetricsSnapshot.self, from: Data(json.utf8))
         #expect(old.swapTotalBytes == nil)
@@ -161,7 +160,6 @@ struct ModelTests {
         #expect(paths.sshConfig.path == "/Users/test/.aeroops/ssh_config")
         #expect(paths.knownHosts.path == "/Users/test/.aeroops/synced_known_hosts")
         #expect(paths.publicKeysDirectory.path == "/Users/test/.aeroops/pub")
-        // Socket paths must stay well under the 104-byte sun_path limit for typical home dirs.
         #expect(paths.bridgeSocket.path.utf8.count < 104)
     }
 }

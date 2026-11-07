@@ -3,8 +3,6 @@ import AeroTheme
 import SSHKit
 import SwiftUI
 
-// MARK: - Key list
-
 /// Host keys as rows: type and size, then the SHA256 fingerprint in monospace (selectable, so
 /// it can be compared with `ssh-keygen -lf` output on the server).
 struct HostKeyList: View {
@@ -48,8 +46,6 @@ extension HostKeyBlock {
         "Host key changed. AeroOps will not connect until you review it.\nTrusted:\n\(HostKey.summary(pinned))\nPresented now:\n\(HostKey.summary(offered))"
     }
 }
-
-// MARK: - First contact
 
 /// First contact with a host: the keys it presented, for the user to trust (written to
 /// AeroOps' `known_hosts`) or cancel. Nothing was logged in to yet.
@@ -137,8 +133,6 @@ struct HostKeyTrustSheet: View {
         }
     }
 }
-
-// MARK: - Changed key
 
 /// The red "host key changed" banner, with the old and new fingerprints and Trust New Key.
 /// Shown in the host editor and host detail; dashboard cards show a short notice with Review…
@@ -250,8 +244,6 @@ struct HostKeyChangedBanner: View {
         }
     }
 }
-
-// MARK: - Previews
 
 private enum HostKeyPreviewData {
     static let host = SampleData.hosts[1]

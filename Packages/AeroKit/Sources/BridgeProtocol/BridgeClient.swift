@@ -132,13 +132,11 @@ public actor BridgeClient {
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BridgeReply, any Error>) in
-                // Runs synchronously on this actor, so no reply can arrive before `pending` is set.
                 guard !Task.isCancelled else {
                     continuation.resume(throwing: CancellationError())
                     return
                 }
                 guard self.connection === connection else {
-                    // It closed while this call waited for the connection.
                     continuation.resume(throwing: connection.endError)
                     return
                 }
@@ -146,8 +144,6 @@ public actor BridgeClient {
                 do {
                     try connection.send(line)
                 } catch {
-                    // The app closed its end. The reader still has to report why (a refusal may
-                    // be waiting in the buffer); its `closed` event fails this call.
                     connection.close()
                 }
             }
@@ -160,8 +156,6 @@ public actor BridgeClient {
     public func close() {
         connection?.close()
     }
-
-    // MARK: Connecting
 
     private func connected() async throws -> BridgeSocketConnection {
         if let connection { return connection }
@@ -221,8 +215,6 @@ public actor BridgeClient {
         }
         return connection
     }
-
-    // MARK: Replies
 
     private func receive(_ event: BridgeSocketConnection.Event, on source: BridgeSocketConnection) {
         switch event {

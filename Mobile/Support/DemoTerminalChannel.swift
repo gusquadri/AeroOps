@@ -48,7 +48,6 @@ final class DemoTerminalChannel: TerminalChannel {
                 state.withLock { $0.line.append(Character(UnicodeScalar(byte))) }
                 emit(String(UnicodeScalar(byte)))
             default:
-                // Escape sequences (arrows and the like) do nothing here.
                 break
             }
         }

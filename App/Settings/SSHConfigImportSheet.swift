@@ -67,8 +67,6 @@ struct SSHConfigImportSheet: View {
         .task { await importer.load(existingHosts: model.hosts) }
     }
 
-    // MARK: - Header and footer
-
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Import from SSH Config")
@@ -110,8 +108,6 @@ struct SSHConfigImportSheet: View {
         case let count: "Add \(count) Hosts"
         }
     }
-
-    // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
@@ -216,8 +212,6 @@ struct SSHConfigImportSheet: View {
         let lines = count == 1 ? "1 line was" : "\(count) lines were"
         return "\(lines) skipped in \(importer.fileCount == 1 ? "the config" : "\(importer.fileCount) config files")"
     }
-
-    // MARK: - Actions
 
     private func add() {
         let added = importer.importSelected(into: model)

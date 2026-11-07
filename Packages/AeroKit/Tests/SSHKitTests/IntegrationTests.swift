@@ -23,7 +23,6 @@ struct IntegrationTests {
         let repo = try Fixtures.repoRoot()
         let marker = "aero-it-" + UUID().uuidString.prefix(8).lowercased()
 
-        // Throwaway key, authorized on the container.
         let keyFile = scratch.file("id")
         let keygen = try await runTool("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", marker, "-f", keyFile.filePath])
         try #require(keygen.status == 0, "\(keygen.stderr)")
@@ -69,11 +68,9 @@ struct IntegrationTests {
     }
 
     private func checkFirstContact(_ dev: RemoteHost, store: HostKeyStore, runner: SSHRunner) async throws -> Bool {
-        // Before trust: ssh refuses the unknown key.
         let untrusted = try await runner.run("true", on: dev)
         #expect(untrusted.transportError == .hostKeyUnknown, "\(untrusted.stderrString)")
 
-        // TOFU via ssh-keyscan; the fingerprint must match the server's own key file.
         guard case .unknown(let offered) = try await store.verify(dev) else {
             Issue.record("expected an unknown host key")
             return false
@@ -90,7 +87,6 @@ struct IntegrationTests {
     }
 
     private func checkMultiplexing(_ dev: RemoteHost, runner: SSHRunner, control: ControlMaster) async throws -> Bool {
-        // First command opens the master; the second multiplexes over it.
         let first = try await runner.run("uname -a", on: dev)
         #expect(first.succeeded, "\(first.stderrString)")
         #expect(first.stdoutString.hasPrefix("Linux "))
@@ -107,7 +103,6 @@ struct IntegrationTests {
     }
 
     private func checkCommands(_ dev: RemoteHost, runner: SSHRunner) async throws {
-        // stdin, remote exit status, output caps.
         let echoed = try await runner.run("cat", on: dev, stdin: Data("hello from stdin\n".utf8))
         #expect(echoed.stdoutString == "hello from stdin\n")
         let failed = try await runner.run("echo nope >&2; exit 3", on: dev)
@@ -116,13 +111,11 @@ struct IntegrationTests {
         let capped = try await runner.run("head -c 100000 /dev/zero", on: dev, outputLimit: 4096)
         #expect(capped.stdout.count == 4096 && capped.stdoutTruncated)
 
-        // Timeout kills ssh; the remote side goes away with the channel.
         let slow = try await runner.run("sleep 20", on: dev, timeout: .milliseconds(500))
         #expect(slow.timedOut && slow.transportError == .timeout)
     }
 
     private func checkStreaming(_ dev: RemoteHost, runner: SSHRunner, marker: String) async throws {
-        // Streaming: consume three lines, drop the stream, local and remote processes end.
         let tick = "tick-\(marker)"
         do {
             let stream = try await runner.stream(
@@ -149,7 +142,6 @@ struct IntegrationTests {
     }
 
     private func checkTransportFailures(refused: RemoteHost, unresolvable: RemoteHost, store: HostKeyStore, runner: SSHRunner) async throws {
-        // Real transport failures, classified from real stderr.
         let refusedResult = try await runner.run("true", on: refused)
         #expect(refusedResult.transportError == .connectionRefused, "\(refusedResult.stderrString)")
         let dns = try await runner.run("true", on: unresolvable)
@@ -159,14 +151,12 @@ struct IntegrationTests {
     }
 
     private func checkClosingMasters(_ dev: RemoteHost, runner: SSHRunner, control: ControlMaster, context: SSHContext) async throws {
-        // -O exit closes the master.
         let exited = try await control.exit(dev)
         #expect(exited)
         #expect(await eventually { (try? await control.check(dev)) == .notRunning })
         let exitedAgain = try await control.exit(dev)
         #expect(!exitedAgain)
 
-        // closeAll on quit: reopen a master, close everything, nothing left in cm/.
         let reopened = try await runner.run("true", on: dev)
         #expect(reopened.succeeded, "\(reopened.stderrString)")
         let closed = await control.closeAll()
@@ -193,7 +183,6 @@ struct IntegrationTests {
         let real = try #require(offered.first { $0.type == "ssh-ed25519" })
         #expect(await store.isBlocked(dev))
 
-        // A fresh store learns about the change from ssh itself.
         let freshStore = HostKeyStore(context: context, keychain: pins)
         let runner = SSHRunner(context: context, hostKeys: freshStore)
         let result = try await runner.run("true", on: dev)
@@ -202,7 +191,6 @@ struct IntegrationTests {
         #expect(await freshStore.isBlocked(dev))
         await #expect(throws: SSHError.hostKeyChanged) { try await runner.run("true", on: dev) }
 
-        // The user accepts the new key: replaced pin, unblocked, connects.
         await #expect(throws: HostKeyError.self) { try await freshStore.trust(real, for: dev) }
         try await freshStore.trust(real, for: dev, replacingPinned: true)
         let accepted = try await runner.run("echo ok", on: dev)

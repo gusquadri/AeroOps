@@ -12,13 +12,11 @@ public struct EmbeddedTerminalView: View {
     }
 
     public var body: some View {
-        // Reading `connection` redraws this view when a connect makes a new surface.
         let connection = session.connection
         if let state = session.surfaceState() {
             TerminalSurfaceView(context: state)
                 .id(connection)
         } else {
-            // Until the first connect: still a view, so the screen's modifiers apply.
             Color.clear
         }
     }

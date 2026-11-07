@@ -70,10 +70,13 @@ public struct ControlMaster: Sendable {
             "exit", arguments: ["-F", "/dev/null", "-o", "ControlPath=\(path)"], alias: "aero-shutdown"
         ) else { return false }
         if result.exitCode == 0 { return true }
-        if result.stderrString.contains("Connection refused") {
-            unlink(socket.filePath) // stale: the master is gone but left its socket behind
-        }
+        let masterIsGone = result.stderrString.contains("Connection refused")
+        if masterIsGone { removeStaleSocket(socket) }
         return false
+    }
+
+    private func removeStaleSocket(_ socket: URL) {
+        unlink(socket.filePath)
     }
 
     private func control(_ operation: String, arguments: [String], alias: String) async throws -> SSHResult {

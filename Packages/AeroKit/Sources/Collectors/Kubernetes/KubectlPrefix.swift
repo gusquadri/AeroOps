@@ -62,8 +62,6 @@ public enum KubectlPrefix {
         (try? normalized(prefix)) != nil
     }
 
-    // MARK: - Private
-
     private static func isSeparator(_ byte: UInt8) -> Bool {
         byte == UInt8(ascii: " ") || byte == UInt8(ascii: "\t")
     }

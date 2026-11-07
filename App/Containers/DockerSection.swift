@@ -101,7 +101,6 @@ private struct DockerTable: View {
         let rows = containers.filteredContainers
         let layout = ContainerColumn.layout(width: width)
         AeroCard(padding: 0) {
-            // The table is created once its width is known, so it starts out filled.
             if width > 0 {
                 table(rows, layout: layout)
             } else {

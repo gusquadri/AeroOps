@@ -99,8 +99,6 @@ enum LogFollowStream {
                 continuation.finish(throwing: error)
             }
         }
-        // Consumer cancelled or dropped the stream: cancelling the pump cancels its iteration of
-        // `inner`, whose termination handler kills the local ssh process.
         continuation.onTermination = { _ in pump.cancel() }
         return outer
     }
