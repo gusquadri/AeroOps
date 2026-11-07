@@ -44,8 +44,11 @@ struct DashboardContent: View {
         content
             .background { SkyBackground() }
             .tabSearchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name or address")
-            .navigationTitle(isShowingSamples ? "Sample Servers" : "Servers")
+            .navigationTitle(title)
             .toolbar {
+                if !model.hosts.isEmpty {
+                    ToolbarItem(placement: .largeTitle) { titleRow }
+                }
                 if showsAppItems {
                     AppToolbarItems(exitSamples: isShowingSamples ? showSampleServers : nil)
                     ToolbarItem(placement: .primaryAction) {
@@ -92,7 +95,6 @@ struct DashboardContent: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     problems
-                    HostStatusSummary(counts: model.statusCounts())
                     hostsSection
                 }
                 .padding(16)
@@ -131,6 +133,26 @@ struct DashboardContent: View {
             onSelect: { onOpen(.host($0)) },
             onNewFolder: { folderRequest = .new(moving: $0) }
         )
+    }
+
+    private var title: String {
+        isShowingSamples ? "Sample Servers" : "Servers"
+    }
+
+    /// The title, then the host count and a chip per status, scrolling sideways when they don't fit.
+    private var titleRow: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(Aero.font(.largeTitle, weight: .bold))
+                .foregroundStyle(Aero.text.primary)
+                .lineLimit(1)
+                .fixedSize()
+            ScrollView(.horizontal) {
+                HostStatusSummary(counts: model.statusCounts())
+            }
+            .scrollIndicators(.hidden)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var isShowingSamples: Bool {
