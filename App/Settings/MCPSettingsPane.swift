@@ -10,7 +10,7 @@ struct MCPSettingsPane: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 header
                 BridgeStatusSection()
                 ConnectAgentSection()
@@ -245,7 +245,7 @@ private struct HostAccessSection: View {
 
     var body: some View {
         GlassSection("Access per host", systemImage: "server.rack") {
-            VStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 if model.hosts.isEmpty {
                     Text("No hosts yet.")
                         .font(Aero.font(.callout))
