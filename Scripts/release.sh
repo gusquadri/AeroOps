@@ -223,6 +223,7 @@ run_logged "$run_dir/archive.log" xcodebuild \
     -project AeroOps.xcodeproj -scheme AeroOps -configuration Release \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$derived_data" -archivePath "$archive" \
+    -onlyUsePackageVersionsFromResolvedFile \
     archive \
     CODE_SIGN_STYLE=Manual \
     "CODE_SIGN_IDENTITY=$identity" \

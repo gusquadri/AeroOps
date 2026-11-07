@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Install lizard and gitleaks
+        shell: bash
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          pipx install lizard==1.24.3
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSLo "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Find the base commit
+        id: base
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != 0000000000000000000000000000000000000000 ]] \
+              && git cat-file -e "$BASE_SHA^{commit}" 2> /dev/null; then
+            echo "sha=$(git merge-base "$BASE_SHA" HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scan new commits for secrets
+        shell: bash
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BASE" ]]; then
+            gitleaks git --no-banner --redact --log-opts="$BASE..HEAD" .
+          else
+            gitleaks git --no-banner --redact .
+          fi
+
+      - name: Complexity and comments in changed lines
+        if: steps.base.outputs.sha != ''
+        shell: bash
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git reset --soft "$BASE"
+          mapfile -t files < <(git diff --name-only --diff-filter=d HEAD)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No changed files."
+            exit 0
+          fi
+          status=0
+          python3 Scripts/complexity.py --added "${files[@]}" || status=1
+          python3 Scripts/no_comments.py --added "${files[@]}" || status=1
+          exit "$status"
+
+  test:
+    name: AeroKit tests
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Test AeroKit
+        run: swift test --package-path Packages/AeroKit
+
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: xcode-27
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            scheme: AeroOps
+            destination: generic/platform=macOS
+          - name: iOS
+            scheme: AeroOpsMobile
+            destination: generic/platform=iOS Simulator
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install XcodeGen
+        shell: bash
+        env:
+          XCODEGEN_VERSION: 2.45.3
+          XCODEGEN_SHA256: 0c90f4d28ca57335f9fa78cf5bf6dabfe20a232036dabe36de2eef79cb7c0878
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        env:
+          SCHEME: ${{ matrix.scheme }}
+          DESTINATION: ${{ matrix.destination }}
+        run: |
+          set -euo pipefail
+          xcodegen generate --quiet
+          xcodebuild -scheme "$SCHEME" -destination "$DESTINATION" \
+            -derivedDataPath build/DerivedData -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO -quiet build
