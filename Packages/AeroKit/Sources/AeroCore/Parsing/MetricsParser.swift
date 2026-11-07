@@ -2,8 +2,8 @@ import Foundation
 
 /// Parses the output of `Scripts/remote/metrics.sh`.
 ///
-/// One run prints `@@stat`, `@@cpus`, `@@mem`, `@@uptime`, `@@load`, `@@df`, `@@host`, `@@os`
-/// and `@@end` sections. Keep the returned ``MetricsSample`` and pass it as `previous` on the next poll: CPU %
+/// One run prints `@@stat` (Linux) or `@@cpubusy` (macOS), `@@cpus`, `@@mem`, `@@uptime`, `@@load`,
+/// `@@df`, `@@host`, `@@os` and `@@end` sections. Keep the returned ``MetricsSample`` and pass it as `previous` on the next poll: CPU %
 /// is the busy share of the CPU time that passed between two samples.
 ///
 /// ```swift
@@ -18,7 +18,7 @@ public enum MetricsParser {
     ///
     /// - Output without an `@@end` line is ``MetricsParseResult/truncated`` (the connection dropped
     ///   or the script was cut off), whatever else it contains.
-    /// - Output without a usable `cpu` line in `@@stat` (no `/proc/stat`) is
+    /// - Output with neither a usable `cpu` line in `@@stat` nor a `@@cpubusy` percent is
     ///   ``MetricsParseResult/unsupportedOS(_:)``.
     /// - Empty or junk sections are "unavailable": `nil` in the sample, `0` (or empty) in the
     ///   snapshot, whose non-optional fields predate this parser. A 0 `memTotalBytes` makes
@@ -27,13 +27,14 @@ public enum MetricsParser {
         let (sections, complete) = splitSections(output)
         guard complete else { return .truncated }
         let sample = sample(from: sections)
-        guard sample.cpuTimes != nil else { return .unsupportedOS(sample) }
+        guard sample.cpuTimes != nil || sample.cpuBusyPercent != nil else { return .unsupportedOS(sample) }
         return .success(snapshot(from: sample, previous: previous, sampledAt: sampledAt), sample: sample)
     }
 
-    /// Builds the snapshot for `sample`; CPU % is `nil` without a usable `previous` sample.
+    /// Builds the snapshot for `sample`. CPU % is the sample's own ``MetricsSample/cpuBusyPercent``
+    /// when it has one, else `nil` without a usable `previous` sample.
     public static func snapshot(from sample: MetricsSample, previous: MetricsSample?, sampledAt: Date) -> MetricsSnapshot {
-        var cpuPercent: Double?
+        var cpuPercent = sample.cpuBusyPercent
         if let current = sample.cpuTimes, let earlier = previous?.cpuTimes {
             cpuPercent = CPUTimes.busyPercent(from: earlier, to: current)
         }
@@ -100,6 +101,7 @@ public enum MetricsParser {
         let host = sections["host"] ?? []
         return MetricsSample(
             cpuTimes: (sections["stat"] ?? []).lazy.compactMap { CPUTimes(statLine: $0) }.first,
+            cpuBusyPercent: sections["cpubusy"]?.first.flatMap { firstNumber(in: $0) }.map { min($0, 100) },
             cpuCount: sections["cpus"]?.first.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }.flatMap { $0 > 0 ? $0 : nil },
             memory: MemoryInfo(meminfoLines: sections["mem"] ?? []),
             uptimeSeconds: sections["uptime"]?.first.flatMap { firstNumber(in: $0) },
@@ -183,7 +185,7 @@ public enum MetricsParser {
 public enum MetricsParseResult: Sendable, Hashable {
     /// A Linux poll. Keep `sample` for the next poll's CPU delta.
     case success(MetricsSnapshot, sample: MetricsSample)
-    /// The script ran to `@@end` but there was no `/proc/stat` (macOS, BSD, ...): the card says
+    /// The script ran to `@@end` without CPU figures (the BSDs, ...): the card says
     /// "unsupported OS". The sample still carries `kernel`, `hostname`, `os` and `disks` when present.
     case unsupportedOS(MetricsSample)
     /// No `@@end`: the output was cut off. Count it as a failed poll.
@@ -206,8 +208,10 @@ public enum MetricsParseResult: Sendable, Hashable {
 /// Everything one run of `metrics.sh` reported, before CPU % is computed. Unavailable metrics
 /// (empty or unparsable sections) are `nil`, never 0.
 public struct MetricsSample: Codable, Sendable, Hashable {
-    /// Aggregate CPU counters from `@@stat`; `nil` means no `/proc/stat` (unsupported OS).
+    /// Aggregate CPU counters from `@@stat`; `nil` on macOS and unsupported systems.
     public var cpuTimes: CPUTimes?
+    /// Busy CPU % over the script's own measuring window, 0...100 (`@@cpubusy`, macOS).
+    public var cpuBusyPercent: Double?
     /// Logical CPUs (`@@cpus`).
     public var cpuCount: Int?
     /// Memory from `@@mem`.
@@ -228,6 +232,7 @@ public struct MetricsSample: Codable, Sendable, Hashable {
     /// Creates a sample.
     public init(
         cpuTimes: CPUTimes? = nil,
+        cpuBusyPercent: Double? = nil,
         cpuCount: Int? = nil,
         memory: MemoryInfo? = nil,
         uptimeSeconds: Double? = nil,
@@ -238,6 +243,7 @@ public struct MetricsSample: Codable, Sendable, Hashable {
         os: OSRelease? = nil
     ) {
         self.cpuTimes = cpuTimes
+        self.cpuBusyPercent = cpuBusyPercent
         self.cpuCount = cpuCount
         self.memory = memory
         self.uptimeSeconds = uptimeSeconds

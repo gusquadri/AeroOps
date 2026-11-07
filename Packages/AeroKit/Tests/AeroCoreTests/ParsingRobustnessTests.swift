@@ -104,7 +104,7 @@ struct ParsingRobustnessTests {
     private static let fixtureNames = [
         "metrics/ubuntu-vm-1.txt", "metrics/ubuntu-vm-2.txt", "metrics/debian-1.txt", "metrics/debian-2.txt",
         "metrics/devcontainer-1.txt", "metrics/devcontainer-2.txt", "metrics/alpine-busybox-1.txt",
-        "metrics/alpine-busybox-2.txt", "metrics/nonlinux-darwin.txt", "metrics/nonlinux-darwin.stderr.txt",
+        "metrics/alpine-busybox-2.txt", "metrics/nonlinux-darwin.txt", "metrics/nonlinux-darwin.stderr.txt", "metrics/macos-1.txt",
         "metrics/synthetic-oldkernel-no-memavailable.txt",
         "probe/vm-dev.txt", "probe/vm-nodocker.txt", "probe/vm-root.txt", "probe/devcontainer.txt",
         "probe/alpine-busybox.txt",

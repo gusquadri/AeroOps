@@ -1,0 +1,25 @@
+@@cpubusy
+16
+@@cpus
+10
+@@mem
+MemTotal: 16777216 kB
+MemAvailable: 2873712 kB
+SwapTotal: 8388608 kB
+SwapFree: 1027389 kB
+@@uptime
+367248
+@@load
+2.76 5.32 4.76
+@@df
+Filesystem                                                                                         1024-blocks      Used  Available Capacity  Mounted on
+/dev/disk3s1s1 239362496 203219444 36143052 85% /
+/dev/disk7s1 976629760 140124936 836504824 15% /Volumes/ADATA
+@@host
+Darwin 27.2.0 arm64
+mac-fixture.local
+@@os
+ID=macos
+NAME="macOS"
+VERSION_ID=27.2
+@@end

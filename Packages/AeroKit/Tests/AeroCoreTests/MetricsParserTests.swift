@@ -138,7 +138,7 @@ struct MetricsParserTests {
         #expect(snapshot.hostname == "oldkernel-fixture")
     }
 
-    @Test("darwin: empty /proc sections mean unsupported OS; host and df still parse")
+    @Test("darwin, script without the macOS branch: unsupported OS; host and df still parse")
     func darwinUnsupported() throws {
         let result = try parse("nonlinux-darwin")
         guard case .unsupportedOS(let sample) = result else {
@@ -172,6 +172,39 @@ struct MetricsParserTests {
         #expect(sample.disks.last == DiskUsage(mount: "/Users/dev/OrbStack", device: "OrbStack:/OrbStack",
                                                usedBytes: 22_392_100 * kib, totalBytes: 51_904_512 * kib,
                                                availableBytes: 29_512_412 * kib))
+    }
+
+    @Test("macOS: @@cpubusy is the CPU % of the first sample; memory, swap, uptime, load, df and os parse")
+    func macOS() throws {
+        let (snapshot, sample) = try success("macos-1")
+        #expect(sample.cpuTimes == nil)
+        #expect(sample.cpuBusyPercent == 16)
+        #expect(snapshot.cpuPercent == 16)
+        #expect(snapshot.cpuCount == 10)
+        #expect(snapshot.memTotalBytes == 16_777_216 * kib)
+        #expect(snapshot.memUsedBytes == (16_777_216 - 2_873_712) * kib)
+        #expect(snapshot.swapTotalBytes == 8_388_608 * kib)
+        #expect(snapshot.swapUsedBytes == (8_388_608 - 1_027_389) * kib)
+        #expect(snapshot.uptimeSeconds == 367_248)
+        #expect(snapshot.load1 == 2.76)
+        #expect(snapshot.load15 == 4.76)
+        #expect(snapshot.kernel == "Darwin 27.2.0 arm64")
+        #expect(snapshot.hostname == "mac-fixture.local")
+        #expect(snapshot.os == OSRelease(id: "macos", name: "macOS", versionID: "27.2"))
+        #expect(snapshot.os?.displayName == "macOS 27.2")
+        #expect(snapshot.disks.map(\.mount) == ["/", "/Volumes/ADATA"])
+        #expect(snapshot.cardDisk() == DiskUsage(mount: "/", device: "/dev/disk3s1s1", usedBytes: 203_219_444 * kib,
+                                                 totalBytes: 239_362_496 * kib, availableBytes: 36_143_052 * kib))
+    }
+
+    @Test("macOS: a later sample keeps its own @@cpubusy instead of a /proc/stat delta")
+    func macOSSecondSample() throws {
+        let (_, first) = try success("macos-1")
+        let text = try Fixtures.string("metrics/macos-1.txt").replacingOccurrences(of: "@@cpubusy\n16\n", with: "@@cpubusy\n42\n")
+        let snapshot = try #require(MetricsParser.parse(text, previous: first).snapshot)
+        #expect(snapshot.cpuPercent == 42)
+        #expect(MetricsParser.parse("@@cpubusy\n250\n@@end\n").snapshot?.cpuPercent == 100)
+        #expect(MetricsParser.parse("@@cpubusy\n-3\n@@end\n") == .unsupportedOS(MetricsSample()))
     }
 
     @Test("darwin stderr fixture is only 'No such file' noise")
