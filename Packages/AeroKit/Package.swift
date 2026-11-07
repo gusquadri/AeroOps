@@ -21,12 +21,13 @@ let package = Package(
         // Shared by the app (through SSHKit and KeyAgent) and the `aeroops-askpass` helper.
         .library(name: "AskpassProtocol", targets: ["AskpassProtocol"]),
         .library(name: "AeroTheme", targets: ["AeroTheme"]),
+        .library(name: "TermiusImport", targets: ["TermiusImport"]),
     ],
     dependencies: [
         // libghostty wrapper, pinned exactly. Linked by TerminalStyle, TerminalKit and
         // EmbeddedTerminal; the apps get it transitively through the TerminalKit product (Mac) and
         // the EmbeddedTerminal product (iOS).
-        .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "2.2.2026101003"),
+        .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "2.2.2026103001"),
         // SSH in Swift for iOS, which has no /usr/bin/ssh. Pinned exactly. Only EmbeddedSSH links it.
         .package(url: "https://github.com/gusquadri/swift-nio-ssh", revision: "7a9d8c39777f99927c3c2591b0246c1e06ec3dfe"),
         // swift-nio-ssh's own dependency; declared for the NIOCore/NIOPosix products.
@@ -121,9 +122,11 @@ let package = Package(
         // Usage: the header comment of Tests/BridgeHarness/main.swift.
         .executableTarget(
             name: "BridgeHarness",
-            dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore"],
+            dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit"],
             path: "Tests/BridgeHarness"
         ),
+
+        .target(name: "TermiusImport", dependencies: ["AeroCore"]),
 
         // Frutiger Aero design tokens and glossy components. Must NOT depend on AeroCore.
         // Logos/: the system logo SVGs for StatusBubble (Simple Icons, CC0).
@@ -154,5 +157,6 @@ let package = Package(
         .testTarget(name: "BridgeProtocolTests", dependencies: ["BridgeProtocol", "AeroCore"]),
         .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge", "BridgeProtocol", "AeroCore", "SSHKit", "AeroTestSupport"]),
         .testTarget(name: "AeroThemeTests", dependencies: ["AeroTheme"]),
+        .testTarget(name: "TermiusImportTests", dependencies: ["TermiusImport", "AeroCore", "KeyAgent"]),
     ]
 )

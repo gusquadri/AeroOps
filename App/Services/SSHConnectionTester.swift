@@ -84,7 +84,6 @@ extension SSHServices {
             }
         }
 
-        // Host key: refuse blocked hosts; first contact goes through the trust sheet.
         if let block = await hostKeys.block(for: host) {
             await refreshHostKeyBlocks()
             return result(.hostKeyChanged(block), Self.changedMessage(host))
@@ -116,7 +115,6 @@ extension SSHServices {
             return result(.failure, error.localizedDescription)
         }
 
-        // One ssh run against a probe config holding only this host, sharing off.
         let probe: URL
         do {
             probe = try writeProbeConfig(for: host, context: context)
@@ -136,7 +134,6 @@ extension SSHServices {
             probeContext.askpassToken = token
         }
         defer { if let token { passwords.endTemporary(token) } }
-        // Only a test of the saved password says anything about what background ssh may try.
         let testsSavedPassword = host.auth == .password && token == nil
 
         let outcome: SSHResult
@@ -153,8 +150,6 @@ extension SSHServices {
 
         if let transportError = outcome.transportError {
             if transportError == .hostKeyChanged {
-                // ssh saw a different key than the pinned one and the runner blocked the host.
-                // One scan to show what the server presents now.
                 _ = try? await hostKeys.verify(host)
                 await refreshHostKeyBlocks()
                 if let block = await hostKeys.block(for: host) {
@@ -170,7 +165,6 @@ extension SSHServices {
             return result(.failure, message, hint: hint, keyToAuthorize: transportError == .authFailed ? key?.id : nil)
         }
         if testsSavedPassword {
-            // ssh logged in with the saved password: background ssh may use it again.
             await passwordGate.reset(host.id)
             await passwordGate.accept(host.id)
             passwordsDidChange?(host.id)

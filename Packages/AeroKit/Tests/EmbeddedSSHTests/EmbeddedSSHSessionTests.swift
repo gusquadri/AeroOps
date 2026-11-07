@@ -91,7 +91,6 @@ struct EmbeddedSSHSessionTests {
         await #expect(throws: SSHError.self) {
             try await client.openTerminal(on: host, term: "xterm", size: PseudoTerminalSize(columns: 80, rows: 24), command: "")
         }
-        // A command still runs after all that.
         #expect(try await client.run("true", on: host).stdoutString == "ran true\r\n")
         await fixture.tearDown()
     }
@@ -139,7 +138,6 @@ struct EmbeddedSSHSessionTests {
         let fixture = try await Fixture()
         let (client, host) = (fixture.client, fixture.host)
         let channel = try await client.openSubsystem("echo", on: host)
-        // Commands share the connection with a session.
         #expect(try await client.run("true", on: host).exitCode == 0)
         await client.disconnect(host.id)
         #expect(await collect(channel) == "")
@@ -198,11 +196,9 @@ struct EmbeddedSSHSessionTests {
     func sftpErrors() async throws {
         let fixture = try await Fixture()
         let (client, host) = (fixture.client, fixture.host)
-        // The server has no sftp subsystem without a root.
         await #expect(throws: SFTPError.disconnected(.other("The server has no “sftp” subsystem."))) {
             try await SFTPClient.connect(using: client, to: host)
         }
-        // On a new connection, an unknown host key and then a changed one, which blocks the host.
         await client.disconnect(host.id)
         try await fixture.env.hostKeys.forget(host)
         await #expect(throws: SFTPError.disconnected(.hostKeyUnknown)) {

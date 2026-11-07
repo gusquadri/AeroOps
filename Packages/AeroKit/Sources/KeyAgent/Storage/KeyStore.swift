@@ -39,7 +39,6 @@ public struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
 
     /// The public key, e.g. for display.
     public var publicKey: SSHPublicKey {
-        // The blob was validated when the record was created or loaded.
         (try? SSHPublicKey(blob: publicKeyBlob)) ?? SSHPublicKey(unchecked: publicKeyBlob, keyType: algorithm.keyType)
     }
 
@@ -131,8 +130,6 @@ public actor KeyStore {
         }
     }
 
-    // MARK: Reading
-
     /// All keys, oldest first.
     public var keys: [SSHKeyRecord] { records }
 
@@ -149,8 +146,6 @@ public actor KeyStore {
     public nonisolated func publicKeyFileURL(for id: UUID) -> URL {
         publicKeysDirectory.appending(path: "\(id.uuidString).pub")
     }
-
-    // MARK: Creating
 
     /// Generates a key. Ed25519 keys are stored in the Keychain and sync when `syncs` is set; Secure
     /// Enclave keys never leave the enclave, and only their wrapped handle is stored, on this device.
@@ -182,8 +177,9 @@ public actor KeyStore {
             publicKeyBlob: signingKey.publicKeyBlob, secret: secret, signingKey: signingKey)
     }
 
-    /// Imports an unencrypted OpenSSH private key (`-----BEGIN OPENSSH PRIVATE KEY-----`):
-    /// Ed25519, ECDSA P-256 or RSA (≥ 1024 bits). `name` defaults to the key's comment.
+    /// Imports an unencrypted private key: OpenSSH (`-----BEGIN OPENSSH PRIVATE KEY-----`),
+    /// PEM (PKCS#1, SEC1, PKCS#8) or PuTTY `.ppk`; Ed25519, ECDSA P-256 or RSA (≥ 1024 bits).
+    /// `name` defaults to the key's comment.
     ///
     /// The private key moves into the Keychain; this does not touch the original file.
     @discardableResult
@@ -192,7 +188,7 @@ public actor KeyStore {
     ) throws -> SSHKeyRecord {
         let parsed: OpenSSHPrivateKey
         do {
-            parsed = try OpenSSHPrivateKey.parse(text)
+            parsed = try OpenSSHPrivateKey.parseAnyFormat(text)
         } catch {
             throw KeyStoreError.importFailed(error)
         }
@@ -201,6 +197,17 @@ public actor KeyStore {
         return try add(
             algorithm: parsed.algorithm, name: chosenName, comment: parsed.comment, policy: policy, syncs: syncs, origin: .imported,
             publicKeyBlob: parsed.publicKeyBlob, secret: parsed.secret, signingKey: parsed.signingKey)
+    }
+
+    /// Why ``importOpenSSHPrivateKey(_:name:policy:syncs:)`` would refuse `text`, or `nil` if it
+    /// would accept it. Parses and self-tests the key without storing anything.
+    public static func importIssue(_ text: String) -> KeyImportError? {
+        do {
+            _ = try OpenSSHPrivateKey.parseAnyFormat(text)
+            return nil
+        } catch {
+            return error
+        }
     }
 
     private func add(
@@ -240,8 +247,6 @@ public actor KeyStore {
         }
         records.append(record)
     }
-
-    // MARK: Changing
 
     public func rename(id: UUID, to name: String) throws {
         try update(id) { $0.name = name }
@@ -319,8 +324,6 @@ public actor KeyStore {
         return true
     }
 
-    // MARK: Agent
-
     /// The keys the agent offers, in order.
     func identities() -> [SSHKeyRecord] { records }
 
@@ -350,8 +353,6 @@ public actor KeyStore {
         guard key.publicKeyBlob.elementsEqual(record.publicKeyBlob) else { throw KeyStoreError.secretMismatch(record.id) }
         return key
     }
-
-    // MARK: Embedded SSH client
 
     /// A stored key's private part for AeroKit's in-process SSH client (EmbeddedSSH, used on iOS
     /// where there is no `/usr/bin/ssh`). `package`, so it never reaches the app: the key only
@@ -384,8 +385,6 @@ public actor KeyStore {
         default: throw ClientKeyError.unsupportedAlgorithm(record.algorithm)
         }
     }
-
-    // MARK: Files
 
     private func record(_ id: UUID) throws -> SSHKeyRecord {
         guard let record = key(id: id) else { throw KeyStoreError.keyNotFound(id) }

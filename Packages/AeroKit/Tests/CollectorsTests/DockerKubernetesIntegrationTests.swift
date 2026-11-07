@@ -55,8 +55,6 @@ struct DockerKubernetesIntegrationTests {
         await cleanUp(context: context, publicKey: publicKey)
     }
 
-    // MARK: - Scenario
-
     private func scenario(context: SSHContext, keyFile: URL) async throws {
         let dev = RemoteHost(name: "vm-dev", address: Self.address, user: "dev", kubectlPrefix: "sudo -n k3s kubectl")
         let devPlain = RemoteHost(name: "vm-dev-plain", address: Self.address, user: "dev", dockerSudo: true)
@@ -69,7 +67,6 @@ struct DockerKubernetesIntegrationTests {
         let rendering = try writer.write(hosts)
         try #require(rendering.rejected.isEmpty)
 
-        // Pin the VM's real host key, read through OrbStack rather than over the network.
         let hostKeyLine = try await VMIntegration.local(
             "/bin/sh", ["-c", "orb -m aeroops-vm -u root cat /etc/ssh/ssh_host_ed25519_key.pub"]
         )
@@ -80,7 +77,6 @@ struct DockerKubernetesIntegrationTests {
         for host in hosts { try await store.trust(hostKey, for: host) }
         let runner = SSHRunner(context: context, hostKeys: store)
 
-        // One login first; stop here on an auth failure rather than hammering sshd.
         let hello = try await runner.run("echo ok", on: dev)
         try #require(hello.succeeded, "first login failed: \(hello.stderrString)")
 
@@ -125,7 +121,6 @@ struct DockerKubernetesIntegrationTests {
         print("Collectors integration: docker ps + stats in \(listDuration): "
               + rows.map { "\($0.name) cpu=\($0.cpuPercent.map { String($0) } ?? "-")" }.joined(separator: ", "))
 
-        // Permission paths.
         let denied = await #expect(throws: DockerError.self) { try await collector.containers(on: nodocker) }
         if case .permissionDenied = denied {} else { Issue.record("nodocker: expected permissionDenied, got \(String(describing: denied))") }
         #expect(denied?.hint?.contains("docker group") == true)
@@ -133,7 +128,6 @@ struct DockerKubernetesIntegrationTests {
         #expect(Set(viaSudo.map(\.name)).isSuperset(of: ["demo-web", "demo-logger", "demo-exited"]))
         await #expect(throws: DockerError.sudoRefused) { try await collector.containers(on: devPlain) }
 
-        // Logs: ANSI stripped; stderr merged (demo-exited printed one of its 3 lines on stderr).
         let logger = try await collector.logs(of: "demo-logger", on: dev, tail: 20)
         let loggerLines = logger.text.split(separator: "\n")
         #expect(!loggerLines.isEmpty && loggerLines.count <= 20)
@@ -149,7 +143,6 @@ struct DockerKubernetesIntegrationTests {
         }
         await #expect(throws: DockerError.self) { try await collector.logs(of: "no-such-container", on: dev) }
 
-        // Inspect.
         let inspection = try await collector.inspect("demo-web", on: dev)
         #expect(inspection.summary.name == "demo-web")
         #expect(inspection.summary.healthCheck == .healthy)
@@ -158,7 +151,6 @@ struct DockerKubernetesIntegrationTests {
     private func dockerFollow(runner: SSHRunner, dev: RemoteHost) async throws {
         let collector = DockerCollector(runner: runner)
 
-        // Busy container: read a few lines, cancel, the remote `docker logs -f` goes away.
         let received = try await VMIntegration.followThenCancel(count: 40, within: .seconds(15)) {
             try await collector.followLogs(of: "demo-logger", on: dev, tail: 37)
         }
@@ -168,9 +160,6 @@ struct DockerKubernetesIntegrationTests {
         let busyGone = await VMIntegration.remoteGone(runner: runner, host: dev, pattern: "[d]ocker logs -f --tail 37 ")
         #expect(busyGone, "docker logs -f for demo-logger still running")
 
-        // Quiet container (nginx logs a health check every 10 s): cancel right after a line, so
-        // only the watchdog's heartbeat, not the next log write, can stop the remote process in
-        // time. (Under the ControlMaster, sshd closes the command's stdout but not its stderr.)
         let healthLine = try await VMIntegration.followThenCancel(count: 1, within: .seconds(15)) {
             try await collector.followLogs(of: "demo-web", on: dev, tail: 0)
         }
@@ -213,8 +202,6 @@ struct DockerKubernetesIntegrationTests {
             LogRequest(hostId: dev.id, kind: .pod, name: crasher.name, namespace: "demo", previous: true), on: dev
         ).text
         if previous.hasPrefix("unable to retrieve container logs") {
-            // The pod is between restarts (status Error): kubelet already removed the container
-            // before the last one, and the last run's logs are the current ones.
             print("Collectors integration: crasher between restarts; reading its current logs")
             previous = try await logs.fetch(
                 LogRequest(hostId: dev.id, kind: .pod, name: crasher.name, namespace: "demo"), on: dev
@@ -231,7 +218,6 @@ struct DockerKubernetesIntegrationTests {
     }
 
     private func kubernetesErrors(_ collector: KubernetesCollector, devPlain: RemoteHost, nodocker: RemoteHost) async {
-        // Error paths with hints.
         let unreadable = await #expect(throws: KubectlError.self) { try await collector.pods(on: devPlain) }
         if case .kubeconfigUnreadable = unreadable {} else {
             Issue.record("plain kubectl: expected kubeconfigUnreadable, got \(String(describing: unreadable))")
@@ -251,8 +237,6 @@ struct DockerKubernetesIntegrationTests {
         )
         #expect(gone, "sudo -n k3s kubectl logs -f still running after cancel")
     }
-
-    // MARK: - Cleanup
 
     private func cleanUp(context: SSHContext, publicKey: String) async {
         await ControlMaster(context: context).closeAll()

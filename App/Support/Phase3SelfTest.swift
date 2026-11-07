@@ -46,8 +46,6 @@ struct Phase3SelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -173,8 +171,6 @@ struct Phase3SelfTest {
         }
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         let report = await run()
         if let url = Phase2SelfTest.outputURL {
@@ -189,7 +185,6 @@ struct Phase3SelfTest {
         if report.ok {
             NSApp.terminate(nil)
         } else {
-            // Services are already shut down; skip the quit path so the exit status reports failure.
             exit(1)
         }
     }
@@ -208,12 +203,10 @@ struct Phase3SelfTest {
         }
         r.step("services", true, "agent running, monitoring started")
 
-        // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
         guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 3 self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
 
-        // 2. Authorize it on every dev server.
         if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
             await checkHosts(key, launchedAt: launchedAt, r)
         }
@@ -221,8 +214,6 @@ struct Phase3SelfTest {
     }
 
     private func checkHosts(_ key: SSHKeyRecord, launchedAt: Date?, _ r: Recorder) async {
-        // 3. Hosts. The closed port gets a made-up pinned key: otherwise its monitor would hold it
-        //    for first contact (ssh-keyscan fails) and never try to connect.
         let keyID = key.id.uuidString
         let hosts: [(RemoteHost, Bool)] = [
             (RemoteHost(name: "Dev container", address: "localhost", port: 2222, user: "dev", keyId: keyID), true),
@@ -238,7 +229,6 @@ struct Phase3SelfTest {
             return
         }
 
-        // 4. Activity: the main window in front and the app active means 5 s polls.
         await bringMainWindowForward(r)
 
         let tracker = makeTracker(hosts)
@@ -251,7 +241,6 @@ struct Phase3SelfTest {
     }
 
     private func makeTracker(_ hosts: [(RemoteHost, Bool)]) -> Tracker {
-        // 5. Watch the dashboard's batches; trust first-contact keys as the sheet's Trust would.
         let tracker = Tracker()
         for (host, expectsNumbers) in hosts {
             tracker.entries[host.id] = Tracker.Entry(host: host, expectsNumbers: expectsNumbers)
@@ -292,7 +281,6 @@ struct Phase3SelfTest {
     }
 
     private func checkPolling(_ hosts: [(RemoteHost, Bool)], closed: RemoteHost, tracker: Tracker, launchedAt: Date?, _ r: Recorder) async {
-        // 6. Wait for numbers, CPU and offline (or an auth failure, which ends the run at once).
         let real = hosts.filter(\.1).map(\.0)
         await waitUntil(seconds: Self.waitLimit) {
             tracker.authFailure != nil
@@ -312,10 +300,8 @@ struct Phase3SelfTest {
 
         await checkRefresh(online, tracker: tracker, r)
 
-        // 8. Sleep pauses polling; wake polls at once.
         await checkSleepAndWake(r, tracker: tracker, online: online)
 
-        // 9. Changed host key: held without contacting the host, banner shown; re-trust resumes it.
         if let host = online.first, let offered = tracker.entries[host.id]?.offered, !offered.isEmpty {
             await checkChangedKey(r, host: host, realKeys: offered, tracker: tracker)
         } else {
@@ -337,8 +323,6 @@ struct Phase3SelfTest {
         r.step("refresh all", refreshed, "new samples from \(online.count) hosts in \(r.report.refreshAllSeconds ?? 0) s")
     }
 
-    // MARK: - Checks
-
     private func bringMainWindowForward(_ r: Recorder) async {
         NSApp.activate()
         let windows = NSApp.windows.filter(MonitorService.isMainWindow)
@@ -349,8 +333,6 @@ struct Phase3SelfTest {
         r.report.mainWindowVisible = MonitorService.mainWindowIsVisible()
         r.report.activityByWindowRule = "\(model.monitoring.activity)"
         if model.monitoring.activity != .visible {
-            // Launched from a shell, macOS may keep another app active. The schedule under test
-            // is the visible one, so force it and say so in the report.
             model.monitoring.activityOverride = .visible
             r.report.activityOverride = true
         }
@@ -406,9 +388,9 @@ struct Phase3SelfTest {
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.post(name: NSWorkspace.willSleepNotification, object: NSWorkspace.shared)
         let paused = await waitUntil(seconds: 2) { model.monitoring.activity == .paused }
-        try? await Task.sleep(for: .seconds(1.5))  // let a poll already in flight land
+        try? await Task.sleep(for: .seconds(1.5))
         let before = online.map { tracker.samples($0.id) }
-        try? await Task.sleep(for: .seconds(7))  // longer than the 5 s visible interval
+        try? await Task.sleep(for: .seconds(7))
         let during = zip(online, before).reduce(0) { $0 + tracker.samples($1.0.id) - $1.1 }
         r.report.pausedPollsDuringSleep = during
         r.step("sleep pauses", paused && during == 0, "activity \(model.monitoring.activity), new samples while asleep \(during)")
@@ -427,8 +409,6 @@ struct Phase3SelfTest {
 
     private func checkChangedKey(_ r: Recorder, host: RemoteHost, realKeys: [HostKey], tracker: Tracker) async {
         let ssh = model.ssh
-        // A real mismatch can't be provoked while the ControlMaster is open (ssh only checks the
-        // key on a new connection), so block the host the way SSHRunner does when ssh reports one.
         await ssh.hostKeys.block(host, offered: [SampleHostKeys.ed25519(seed: 32)])
         let start = Date.now
         model.refresh(host.id)
@@ -461,8 +441,6 @@ struct Phase3SelfTest {
         )
     }
 
-    // MARK: - Finish
-
     private func finish(_ r: Recorder, key: SSHKeyRecord?) async -> Report {
         let ssh = model.ssh
         let paths = ssh.paths
@@ -484,8 +462,6 @@ struct Phase3SelfTest {
         r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
         return r.report
     }
-
-    // MARK: - Helpers
 
     private func result(for host: RemoteHost, tracker: Tracker, launchedAt: Date?) -> HostResult {
         let entry = tracker.entries[host.id]

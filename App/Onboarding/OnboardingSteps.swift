@@ -5,13 +5,6 @@ import KeyAgent
 import SSHKit
 import SwiftUI
 
-// The five steps of ``OnboardingView``. Each reuses what Settings shows for the same job:
-// ``KeyGenerationFields``, ``KeyFileImport`` and ``SystemAgentToggle`` from Settings › Keys,
-// ``HostEditorForm`` (with Test Connection and host-key trust) and the ~/.ssh/config import
-// sheet from Settings › Hosts, and ``ConnectAgentSection`` from Settings › MCP.
-
-// MARK: - Welcome
-
 struct OnboardingWelcomeStep: View {
     var body: some View {
         ScrollView {
@@ -56,8 +49,6 @@ struct OnboardingWelcomeStep: View {
     }
 }
 
-// MARK: - Key
-
 /// Generate a Secure Enclave or Ed25519 key, or import a key file, then copy its public line.
 /// With "Use system ssh-agent instead" on, the step can be passed without a key.
 struct OnboardingKeyStep: View {
@@ -80,8 +71,6 @@ struct OnboardingKeyStep: View {
     }
 
     private static let agentCaption = "If your keys already live in 1Password, Secretive or another ssh-agent, ssh uses the agent in $SSH_AUTH_SOCK and AeroOps needs no key of its own. You can change this in Settings › Keys."
-
-    // MARK: Create or import
 
     private var keyForm: some View {
         Form {
@@ -118,8 +107,6 @@ struct OnboardingKeyStep: View {
         .scrollContentBackground(.hidden)
         .font(Aero.font(.body))
     }
-
-    // MARK: Key ready
 
     private func keySummary(_ key: SSHKeyRecord) -> some View {
         let isSecureEnclave = key.algorithm == .secureEnclaveP256
@@ -182,8 +169,6 @@ struct OnboardingKeyStep: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
-    // MARK: Actions
-
     private func generate() {
         let draft = flow.keyDraft
         guard draft.canGenerate else { return }
@@ -219,8 +204,6 @@ struct OnboardingKeyStep: View {
         }
     }
 }
-
-// MARK: - Server
 
 /// The host editor for a first server, or "Import from ~/.ssh/config"; then a summary of the
 /// servers added. Hosts added either way complete the step.
@@ -259,7 +242,6 @@ struct OnboardingServerStep: View {
         .sheet(item: $editing) { request in
             HostEditorSheet(request: request)
         }
-        // Over the onboarding sheet, not the main window's: hosts it adds show up in the list.
         .sshConfigImportSheet(isPresented: $isImporting) { ids in
             if let first = ids.first { flow.addedHostID = first }
         }
@@ -341,8 +323,6 @@ struct OnboardingServerStep: View {
     }
 }
 
-// MARK: - AI agents
-
 /// The MCP config snippets (copied, never written to an agent's files) and the access tiers.
 struct OnboardingAgentsStep: View {
     var body: some View {
@@ -385,8 +365,6 @@ struct MCPTierGuide: View {
         }
     }
 }
-
-// MARK: - Done
 
 struct OnboardingDoneStep: View {
     @Environment(AppModel.self) private var model

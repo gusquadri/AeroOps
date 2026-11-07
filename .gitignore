@@ -6,8 +6,7 @@ build/
 *.xcuserstate
 xcuserdata/
 .DS_Store
-.claude/worktrees/
 Vendor/ghostty-build/
-.claude/scheduled_tasks.lock
 __pycache__/
 output/
+.claude/

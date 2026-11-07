@@ -67,8 +67,6 @@ struct Phase2SelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -101,8 +99,6 @@ struct Phase2SelfTest {
         }
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         let report = await run()
         if let url = Self.outputURL {
@@ -113,7 +109,6 @@ struct Phase2SelfTest {
             }
         }
         print("[selftest] \(report.ok ? "OK" : "FAILED")")
-        // Quit through the normal path (AppDelegate), as a menu Quit would.
         NSApp.terminate(nil)
     }
 
@@ -132,7 +127,6 @@ struct Phase2SelfTest {
 
     private func checkAgentRunning(_ r: Recorder) -> Bool {
         let ssh = model.ssh
-        // 1. Services: agent socket up, ssh_config written.
         let socketExists = FileManager.default.fileExists(atPath: r.report.agentSocket)
         if case .running = ssh.agentStatus, socketExists, r.report.agentSocketBytes < 104 {
             r.step("agent running", true, "\(r.report.agentSocket) (\(r.report.agentSocketBytes) bytes)")
@@ -144,7 +138,6 @@ struct Phase2SelfTest {
 
     private func generateKey(_ r: Recorder) async -> SSHKeyRecord? {
         let ssh = model.ssh
-        // 2. Generate an Ed25519 key in the Keychain; the .pub is written, the secret is not.
         let key: SSHKeyRecord
         do {
             key = try await ssh.generateKey(.ed25519, name: "AeroOps self-test", policy: .always, syncs: false)
@@ -179,7 +172,6 @@ struct Phase2SelfTest {
     }
 
     private func addHost(_ key: SSHKeyRecord, _ r: Recorder) -> RemoteHost? {
-        // 4. Add the host through the model; the inventory observer rewrites ssh_config.
         let host = RemoteHost(name: "Self-test dev", address: "localhost", port: 2222, user: "dev", keyId: key.id.uuidString)
         do {
             try model.addHost(host)
@@ -196,7 +188,6 @@ struct Phase2SelfTest {
     }
 
     private func firstContact(_ host: RemoteHost, _ r: Recorder) async -> [HostKey]? {
-        // 5. First contact: Test connection scans the host key and asks for trust.
         let first = await model.connectionTester.testConnection(to: host)
         guard case .hostKeyUnknown(let offered) = first.outcome, !offered.isEmpty else {
             r.step("first contact", false, "expected an unknown host key, got \(first.outcome): \(first.message)")
@@ -209,7 +200,6 @@ struct Phase2SelfTest {
 
     private func trust(_ offered: [HostKey], for host: RemoteHost, _ r: Recorder) async -> Bool {
         let ssh = model.ssh
-        // 6. Trust (the user's click in the sheet; automatic only in this self-test).
         do {
             try await ssh.trust(offered, for: host, replacingPinned: false)
             let pinned = (try? await ssh.hostKeys.pinnedKeys(for: host)) ?? []
@@ -222,7 +212,6 @@ struct Phase2SelfTest {
     }
 
     private func testConnection(_ host: RemoteHost, _ r: Recorder) async -> Bool {
-        // 7. Test connection through /usr/bin/ssh and the in-app agent.
         let second = await model.connectionTester.testConnection(to: host)
         r.report.connectionMessage = second.message
         r.report.connectionMilliseconds = Int(second.elapsed.components.seconds * 1000 + second.elapsed.components.attoseconds / 1_000_000_000_000_000)
@@ -231,7 +220,6 @@ struct Phase2SelfTest {
     }
 
     private func checkControlMaster(_ host: RemoteHost, _ r: Recorder) async {
-        // 8. A regular run opens a ControlMaster; a second run reuses it.
         do {
             let (ok, detail) = try await runOverMaster(host)
             r.step("control master", ok, detail)
@@ -252,7 +240,6 @@ struct Phase2SelfTest {
 
     private func checkAgentEvents(_ key: SSHKeyRecord, _ r: Recorder) async {
         let ssh = model.ssh
-        // 9. Agent events: the trusted /usr/bin/ssh connected and the key signed.
         try? await Task.sleep(for: .milliseconds(300))
         r.report.agentEvents = ssh.agentEvents.map(Self.describe)
         let trustedPeer = ssh.agentEvents.contains { if case .connected(let peer) = $0.kind { peer.isTrustedAppSSH } else { false } }
@@ -263,8 +250,6 @@ struct Phase2SelfTest {
     /// A host whose pinned key no longer matches is blocked, and blocked hosts are never contacted.
     private func checkChangedKey(_ r: Recorder, host: RemoteHost, realKeys: [HostKey]) async {
         let ssh = model.ssh
-        // Test connection never reuses the open master (its probe config turns sharing off),
-        // so ssh really checks the server's key against the fake pin.
         do {
             try await ssh.trust([SampleHostKeys.ed25519(seed: 7)], for: host, replacingPinned: true)
         } catch {
@@ -296,20 +281,16 @@ struct Phase2SelfTest {
         let ssh = model.ssh
         let paths = ssh.paths
 
-        // No private key on disk: no PEM/OpenSSH private key files, and the raw secret bytes
-        // (compared in memory only) appear in no file under the root or ~/.aeroops.
         if let key {
             r.report.privateKeyMaterialFound = Self.checkNoKeyMaterial(key, step: r.step)
         }
 
-        // Shutdown: masters closed, agent stopped, socket removed.
         let closed = await model.shutdownServices()
         r.report.controlMastersClosed = closed
         let socketGone = !FileManager.default.fileExists(atPath: paths.agentSocket.path(percentEncoded: false))
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: paths.controlMasterDirectory.path(percentEncoded: false))) ?? []
         r.step("shutdown", socketGone && leftovers.isEmpty, "masters closed \(closed), agent socket removed \(socketGone), cm/ entries \(leftovers.count)")
 
-        // Cleanup: authorized_keys line, Keychain item and root.
         if let key {
             await Self.revokeKey(key, ssh: ssh, step: r.step)
             await Self.deleteKey(key, ssh: ssh, step: r.step)
@@ -320,8 +301,6 @@ struct Phase2SelfTest {
         r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
         return r.report
     }
-
-    // MARK: - Helpers
 
     typealias RecordStep = (String, Bool, String) -> Void
 
@@ -428,8 +407,6 @@ struct Phase2SelfTest {
             process.standardOutput = pipe
             process.standardError = pipe
             process.terminationHandler = { process in
-                // Blocks until every writer closes the pipe; a grandchild that outlives the
-                // script keeps it open, which the timeout below covers.
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 finish(process.terminationStatus, String(decoding: data, as: UTF8.self))
             }

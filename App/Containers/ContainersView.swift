@@ -53,21 +53,14 @@ struct HostContainersView: View {
             content
         }
         .padding(16)
-        // Zero minimums decouple the split view's column minimum from this content. Without them,
-        // wrapped text and toolbars feed a content-dependent minimum size back into
-        // NSSplitView, which can loop until AppKit throws "more Update Constraints in Window
-        // passes than there are views in the window". (A constant minimum while the inspector
-        // is open throws too, which is why a narrow window hides the sidebar instead.)
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .clipped()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
             let appeared = width == 0
             width = newWidth
             if appeared, containers.inspectorPresented {
-                // Back on the tab with the inspector still open.
                 hideSidebar(ifNarrowerThan: Self.widthBesideInspector)
             } else if hidSidebar, !containers.inspectorPresented {
-                // The inspector has closed and handed its width back.
                 showSidebarAgain()
             }
         }
@@ -75,7 +68,6 @@ struct HostContainersView: View {
             if presented { hideSidebar(ifNarrowerThan: Self.inspectorWidth + Self.widthBesideInspector) }
         }
         .onChange(of: sidebarVisibility.wrappedValue) { _, visibility in
-            // Shown by hand: it stays.
             if visibility != .detailOnly { hidSidebar = false }
         }
         .onDisappear(perform: showSidebarAgain)
@@ -159,8 +151,6 @@ struct HostContainersView: View {
     }
 }
 
-// MARK: - Header
-
 /// Host name, what the probe found, last update, the section switcher and Refresh.
 private struct ContainersHeader: View {
     @Environment(AppModel.self) private var model
@@ -178,7 +168,6 @@ private struct ContainersHeader: View {
                 hostMenu
                 HStack(spacing: 6) {
                     ForEach(capabilityTags, id: \.text) { tag in
-                        // The tags keep their text; the updated label gives way first.
                         AeroTag(tag.text, systemImage: tag.symbol, tint: tag.tint)
                             .fixedSize()
                     }
@@ -328,7 +317,6 @@ private enum StatusBubbleImage {
     static func image(tone: OrbTone, logo: SystemLogo?) -> NSImage {
         let key = Key(tone: tone, logo: logo)
         if let image = cache[key] { return image }
-        // A point of room for the bubble's shadow.
         let side = size + 2
         let renderer = ImageRenderer(content: StatusBubble(tone: tone, logo: logo, size: size).padding(1))
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
@@ -337,8 +325,6 @@ private enum StatusBubbleImage {
         return image
     }
 }
-
-// MARK: - Hints
 
 /// A collector, ssh or input problem with its hint and a way to fix it.
 struct WorkloadIssueCard: View {
@@ -355,9 +341,6 @@ struct WorkloadIssueCard: View {
                 StatusOrb(tone: issue.kind == .transient ? .warning : .error, size: compact ? 12 : 16)
                     .padding(.top, compact ? 3 : 4)
                 VStack(alignment: .leading, spacing: 6) {
-                    // No vertical fixedSize here (or in any text outside a scroll view): it makes
-                    // the minimum height of the whole detail column the height of this text
-                    // wrapped at zero width, which the split view cannot satisfy and loops on.
                     Text(issue.title)
                         .font(Aero.font(compact ? .callout : .headline, weight: .semibold))
                         .foregroundStyle(Aero.text.primary)
@@ -461,8 +444,6 @@ private struct NothingFoundCard: View {
     }
 }
 
-// MARK: - Shared bits
-
 /// A search field for the section toolbars.
 struct WorkloadSearchField: View {
     let prompt: String
@@ -530,7 +511,6 @@ struct WindowVisibilityReader: NSViewRepresentable {
 
     final class VisibilityView: NSView {
         var onChange: ((Bool) -> Void)?
-        // Set and cleared on the main actor; deinit is the last reference, so nothing races.
         nonisolated(unsafe) private var observer: (any NSObjectProtocol)?
 
         override func viewDidMoveToWindow() {

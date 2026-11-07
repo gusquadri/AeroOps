@@ -27,15 +27,14 @@ import TerminalKit
 @MainActor
 @Observable
 final class AppModel {
-    // MARK: Inventory
-
     /// The host inventory, synced with the user's other devices through iCloud Keychain.
     let hostStore: HostStore
 
     /// All hosts, in inventory order.
     var hosts: [RemoteHost] { hostStore.hosts }
 
-    // MARK: Navigation
+    var hostSearch = ""
+    var searchedHosts: [RemoteHost] { hosts.matching(search: hostSearch) }
 
     /// The main window's tab.
     var selectedTab: AppTab = .dashboard
@@ -45,14 +44,23 @@ final class AppModel {
     var settingsPane: SettingsPane = .hosts
     /// The main window's host editor sheet; `nil` when closed.
     var editorRequest: HostEditorRequest?
+    /// The folder the Dashboard shows; `nil` for the top level.
+    var openFolderID: HostFolder.ID?
+    /// The main window's folder name sheet; `nil` when closed.
+    var folderRequest: FolderNameRequest?
+    /// The folder the main window asks about deleting; `nil` when not asking.
+    var folderDeletion: HostFolder?
+    /// Why the last folder or order change could not be saved.
+    var layoutError: HostStoreError?
     /// Whether the main window shows the "Import from ~/.ssh/config" sheet. Set it with
     /// ``requestSSHConfigImport()``.
     var isImportingSSHConfig = false
+    /// Whether the main window shows the "Import from Termius" sheet. Set it with
+    /// ``requestTermiusImport()``.
+    var isImportingTermius = false
     /// The first-run onboarding sheet. In memory unless replaced: the real app's model stores
     /// its flag in `UserDefaults.standard` (`AeroOpsApp.makeModel()`).
     var onboarding = OnboardingState()
-
-    // MARK: Services
 
     /// Keys, the in-app agent, `ssh_config` and host-key trust (Phase 2).
     let ssh: SSHServices
@@ -72,8 +80,6 @@ final class AppModel {
             KeySummary(id: $0.id.uuidString, name: $0.name, detail: "\($0.algorithm.displayName) · \($0.fingerprint)")
         }
     }
-
-    // MARK: Per-host state
 
     /// Live state per host id. Contains exactly the ids in ``hosts``.
     private(set) var displayStates: [RemoteHost.ID: HostDisplayState] = [:]
@@ -154,8 +160,6 @@ final class AppModel {
         host(id: id).flatMap(ssh.hostKeyBlock(for:))
     }
 
-    // MARK: - Queries
-
     /// The selected host, if it still exists.
     var selectedHost: RemoteHost? {
         selection.flatMap(hostStore.host(id:))
@@ -177,11 +181,9 @@ final class AppModel {
         hosts.reduce(into: [:]) { counts, host in counts[displayState(for: host.id).status, default: 0] += 1 }
     }
 
-    // MARK: - Inventory mutations
-
     /// Adds `host`, saves, and selects it.
     func addHost(_ host: RemoteHost) throws(HostStoreError) {
-        try hostStore.add(host)
+        try hostStore.add(host, toFolder: newHostFolderID)
         hostsDidChange()
         selection = host.id
     }
@@ -196,7 +198,6 @@ final class AppModel {
     func deleteHost(id: RemoteHost.ID) throws(HostStoreError) {
         try hostStore.delete(id: id)
         hostsDidChange()
-        // Its saved password, if any, goes with it.
         try? ssh.deletePassword(for: id)
     }
 
@@ -220,8 +221,6 @@ final class AppModel {
         observer.hostsDidChange(hosts)
     }
 
-    // MARK: - Live state
-
     /// Records a new status (and optionally metrics) for a host: previews and demo launches.
     /// Live polls go through ``MonitorService`` (``HostDisplayState/apply(_:)``).
     /// Ignored for hosts no longer in the inventory, so a late poll result can't resurrect one.
@@ -232,8 +231,6 @@ final class AppModel {
         state.message = message
         state.lastUpdated = .now
     }
-
-    // MARK: - Editor sheet
 
     /// Opens the main window's host editor for a new host.
     func requestNewHost() {
@@ -254,7 +251,14 @@ final class AppModel {
         isImportingSSHConfig = true
     }
 
-    // MARK: - Terminals
+    /// Opens the main window's "Import from Termius" sheet (``TermiusImportSheet``), which
+    /// reads the hosts, keys and passwords saved in the Termius app and adds the picked hosts.
+    /// The first imported host is selected when it closes.
+    func requestTermiusImport() {
+        editorRequest = nil
+        isImportingSSHConfig = false
+        isImportingTermius = true
+    }
 
     /// Whether Open SSH is available for the host: it exists, renders into `ssh_config`, is not
     /// blocked by a changed host key, and has its key with the agent running (or the system
@@ -298,19 +302,12 @@ final class AppModel {
         return nil
     }
 
-    // MARK: - Sync
-
     /// Keeps ``displayStates`` and ``selection`` in step with the inventory and notifies observers.
-    private func hostsDidChange() {
+    func hostsDidChange() {
+        closeMissingFolder()
         let current = hosts
         let ids = Set(current.map(\.id))
-        if Set(displayStates.keys) != ids {
-            var next = displayStates.filter { ids.contains($0.key) }
-            for id in ids where next[id] == nil {
-                next[id] = HostDisplayState(hostID: id)
-            }
-            displayStates = next
-        }
+        syncDisplayStates(with: ids)
         if let selection, !ids.contains(selection) {
             self.selection = nil
         }
@@ -320,5 +317,14 @@ final class AppModel {
         for observer in inventoryObservers {
             observer.hostsDidChange(current)
         }
+    }
+
+    private func syncDisplayStates(with ids: Set<RemoteHost.ID>) {
+        guard Set(displayStates.keys) != ids else { return }
+        var next = displayStates.filter { ids.contains($0.key) }
+        for id in ids where next[id] == nil {
+            next[id] = HostDisplayState(hostID: id)
+        }
+        displayStates = next
     }
 }

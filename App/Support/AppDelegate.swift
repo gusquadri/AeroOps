@@ -30,7 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// shutdown work therefore runs detached, and the reply is posted as a run-loop block, which
     /// the nested loop does service.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // A second Quit while shutting down: the first one's reply still ends the app.
         guard !isTerminating else { return .terminateCancel }
         guard let work = Self.shutdownHandler?() else { return .terminateNow }
         isTerminating = true

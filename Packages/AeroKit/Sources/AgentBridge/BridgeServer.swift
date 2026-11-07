@@ -135,13 +135,11 @@ final class BridgeServerCore: Sendable {
         events.yield(BridgeServerEvent(connectionID: connectionID, kind: kind))
     }
 
-    // MARK: Start and stop
-
     func start() throws(BridgeServerError) {
         guard !isRunning else { return }
         let directory = (socketPath as NSString).deletingLastPathComponent
-        let tempPath = (directory as NSString).appendingPathComponent(".bridge-\(String(UInt32.random(in: 0...UInt32.max), radix: 16)).tmp")
-        for path in [socketPath, tempPath] where path.utf8.count > BridgeSocketPath.maxPathBytes {
+        let stagingPath = (directory as NSString).appendingPathComponent(".bridge-\(String(UInt32.random(in: 0...UInt32.max), radix: 16)).tmp")
+        for path in [socketPath, stagingPath] where path.utf8.count > BridgeSocketPath.maxPathBytes {
             throw .socketPathTooLong(path)
         }
         try Self.preparePrivateDirectory(directory)
@@ -153,19 +151,15 @@ final class BridgeServerCore: Sendable {
         defer {
             if !keepFD {
                 close(fd)
-                unlink(tempPath)
+                unlink(stagingPath)
             }
         }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        // Bind to a temporary name, restrict it, then rename into place: the socket is never
-        // reachable with looser permissions, and no process-wide umask change is needed.
-        guard Self.withAddress(tempPath, { bind(fd, $0, $1) }) == 0 else { throw .system(operation: "bind", errno: errno) }
-        guard chmod(tempPath, 0o600) == 0 else { throw .system(operation: "chmod", errno: errno) }
-        // A full accept queue refuses connections like a dead socket does (ECONNREFUSED), which
-        // a client would report as "not running", so leave plenty of room.
+        guard Self.withAddress(stagingPath, { bind(fd, $0, $1) }) == 0 else { throw .system(operation: "bind", errno: errno) }
+        guard chmod(stagingPath, 0o600) == 0 else { throw .system(operation: "chmod", errno: errno) }
         guard listen(fd, SOMAXCONN) == 0 else { throw .system(operation: "listen", errno: errno) }
         guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw .system(operation: "fcntl", errno: errno) }
-        guard rename(tempPath, socketPath) == 0 else { throw .system(operation: "rename", errno: errno) }
+        guard rename(stagingPath, socketPath) == 0 else { throw .system(operation: "rename", errno: errno) }
         var info = stat()
         guard lstat(socketPath, &info) == 0 else { throw .system(operation: "stat", errno: errno) }
         keepFD = true
@@ -188,7 +182,6 @@ final class BridgeServerCore: Sendable {
                 state.acceptSource = nil
                 state.socketNode = nil
             }
-            // Wake every connection thread; each cleans up its own connection.
             for connection in state.connections.values { connection.shutdown() }
             return (state.acceptSource, state.socketNode, state.listenFD >= 0)
         }
@@ -200,10 +193,7 @@ final class BridgeServerCore: Sendable {
         }
     }
 
-    // MARK: Socket file helpers
-
     private static func preparePrivateDirectory(_ path: String) throws(BridgeServerError) {
-        // Only the last component is created (the parent is the home directory, or a test root).
         if mkdir(path, 0o700) != 0, errno != EEXIST { throw .system(operation: "mkdir \(path)", errno: errno) }
         var info = stat()
         guard lstat(path, &info) == 0 else { throw .system(operation: "stat \(path)", errno: errno) }
@@ -236,8 +226,6 @@ final class BridgeServerCore: Sendable {
         }
     }
 
-    // MARK: Connections
-
     /// Readies an accepted socket for its connection thread. `false`: the peer is already gone
     /// and the socket must be closed unanswered.
     ///
@@ -251,7 +239,6 @@ final class BridgeServerCore: Sendable {
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         var on: Int32 = 1
         guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 else { return false }
-        // Accepted sockets inherit O_NONBLOCK on macOS; connection threads want blocking I/O.
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
         var writeTimeout = timeval(tv_sec: writeTimeoutSeconds, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &writeTimeout, socklen_t(MemoryLayout<timeval>.size))
@@ -261,33 +248,37 @@ final class BridgeServerCore: Sendable {
     private func acceptPending(_ listenFD: Int32) {
         while true {
             let fd = accept(listenFD, nil, nil)
-            if fd < 0 {
-                if errno == EINTR { continue }
-                return // EAGAIN: drained; other errors: try again on the next event.
-            }
-            guard Self.prepareAccepted(fd) else {
-                close(fd)
-                continue
-            }
+            if fd < 0, errno == EINTR { continue }
+            if fd < 0 { return }
+            admit(fd)
+        }
+    }
 
-            let connection: BridgeConnection? = state.withLock { state in
-                guard state.listenFD >= 0, state.connections.count < maxConnections else { return nil }
-                let id = state.nextConnectionID
-                state.nextConnectionID += 1
-                let connection = BridgeConnection(id: id, fd: fd)
-                state.connections[id] = connection
-                return connection
-            }
-            guard let connection else {
-                Self.writeAll(fd, (try? BridgeWire.line(.reply(.failure(
-                    id: BridgeReply.connectionErrorID, .busy, "AeroOps has too many agent connections open.")))) ?? Data())
-                close(fd)
-                emit(0, .rejected(reason: "too many connections"))
-                continue
-            }
-            let thread = Thread { [self] in serve(connection) }
-            thread.name = "AeroOps bridge connection \(connection.id)"
-            thread.start()
+    private func admit(_ fd: Int32) {
+        guard Self.prepareAccepted(fd) else {
+            close(fd)
+            return
+        }
+        guard let connection = register(fd) else {
+            Self.writeAll(fd, (try? BridgeWire.line(.reply(.failure(
+                id: BridgeReply.connectionErrorID, .busy, "AeroOps has too many agent connections open.")))) ?? Data())
+            close(fd)
+            emit(0, .rejected(reason: "too many connections"))
+            return
+        }
+        let thread = Thread { [self] in serve(connection) }
+        thread.name = "AeroOps bridge connection \(connection.id)"
+        thread.start()
+    }
+
+    private func register(_ fd: Int32) -> BridgeConnection? {
+        state.withLock { state in
+            guard state.listenFD >= 0, state.connections.count < maxConnections else { return nil }
+            let id = state.nextConnectionID
+            state.nextConnectionID += 1
+            let connection = BridgeConnection(id: id, fd: fd)
+            state.connections[id] = connection
+            return connection
         }
     }
 
@@ -418,7 +409,6 @@ final class BridgeConnection: Sendable {
             let token = state.nextToken
             state.nextToken += 1
             let requestID = request.id
-            // The task cannot finish before it is registered: finishing takes this lock.
             let task = Task { [self] in
                 let reply = await handler.handle(request, from: peer) { [weak self] message in
                     self?.progress(requestID, token: token, message)

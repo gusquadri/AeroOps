@@ -86,25 +86,21 @@ public struct TerminalAppearance: Sendable, Hashable {
         cursor: TerminalRGB(hex: 0x7FDBFF),
         selectionForeground: TerminalRGB(hex: 0xFFFFFF),
         selectionBackground: TerminalRGB(hex: 0x1F6E9C),
-        palette: [
-            TerminalRGB(hex: 0x082B42), // black
-            TerminalRGB(hex: 0xF2605A), // red: coral
-            TerminalRGB(hex: 0x6CCB4F), // green: leaf
-            TerminalRGB(hex: 0xFFC83D), // yellow: sun
-            TerminalRGB(hex: 0x1BA6E8), // blue: aqua
-            TerminalRGB(hex: 0xC48BE8), // magenta
-            TerminalRGB(hex: 0x5BC8F5), // cyan: sky
-            TerminalRGB(hex: 0xD6E6F0), // white
-            TerminalRGB(hex: 0x5E7F94), // bright black
-            TerminalRGB(hex: 0xFF8C86), // bright red
-            TerminalRGB(hex: 0x97E07C), // bright green
-            TerminalRGB(hex: 0xFFDC7A), // bright yellow
-            TerminalRGB(hex: 0x62C3F5), // bright blue
-            TerminalRGB(hex: 0xDDB1F5), // bright magenta
-            TerminalRGB(hex: 0xA6E6FB), // bright cyan
-            TerminalRGB(hex: 0xFFFFFF), // bright white
-        ]
+        palette: ansiColors(
+            black: 0x082B42, red: 0xF2605A, green: 0x6CCB4F, yellow: 0xFFC83D,
+            blue: 0x1BA6E8, magenta: 0xC48BE8, cyan: 0x5BC8F5, white: 0xD6E6F0
+        ) + ansiColors(
+            black: 0x5E7F94, red: 0xFF8C86, green: 0x97E07C, yellow: 0xFFDC7A,
+            blue: 0x62C3F5, magenta: 0xDDB1F5, cyan: 0xA6E6FB, white: 0xFFFFFF
+        )
     )
+
+    private static func ansiColors(
+        black: UInt32, red: UInt32, green: UInt32, yellow: UInt32,
+        blue: UInt32, magenta: UInt32, cyan: UInt32, white: UInt32
+    ) -> [TerminalRGB] {
+        [black, red, green, yellow, blue, magenta, cyan, white].map { TerminalRGB(hex: $0) }
+    }
 
     /// Config lines for the colours (`key = value`), in libghostty config syntax.
     package var colorSettings: [(key: String, value: String)] {

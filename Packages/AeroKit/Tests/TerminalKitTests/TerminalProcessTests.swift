@@ -120,7 +120,6 @@ struct TerminalProcessTests {
         _ = await events.first { if case .exited = $0 { true } else { nil } }
         let output = String(decoding: process.replayData(), as: UTF8.self)
         #expect(output.contains("ab"))
-        // The answer to the blocked command may come back as the terminal's echo, never the command.
         #expect(!output.contains("\u{1B}_G"))
         #expect(!output.contains("L2V0Yy9wYXNzd2Q"))
     }

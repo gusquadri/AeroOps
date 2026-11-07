@@ -44,7 +44,6 @@ private struct FilesBrowser: View {
             }
         }
         .padding(16)
-        // Zero minimums, as in the Containers tab: content-dependent minimums loop NSSplitView.
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .clipped()
         .sheet(item: $files.trustRequest) { request in
@@ -67,8 +66,6 @@ private struct FilesBrowser: View {
             Text("\(Self.list(conflict.names)) already \(conflict.names.count == 1 ? "exists" : "exist") in \(conflict.destination). Replace overwrites files with the same name and copies into existing folders; Skip leaves them as they are.")
         }
     }
-
-    // MARK: Remote side
 
     @ViewBuilder private var remoteSide: some View {
         if let host {
@@ -128,8 +125,6 @@ private struct FilesBrowser: View {
         }
     }
 
-    // MARK: Local side
-
     private var localConfiguration: FilePaneConfiguration<String> {
         let target = uploadTarget
         return FilePaneConfiguration(
@@ -162,8 +157,6 @@ private struct FilesBrowser: View {
         return (host, directory)
     }
 
-    // MARK: Conflicts
-
     private var conflictTitle: String {
         guard let names = files.conflict?.names else { return "" }
         return names.count == 1 ? "Replace “\(names[0])”?" : "Replace \(names.count) items?"
@@ -179,8 +172,6 @@ private struct FilesBrowser: View {
         }
     }
 }
-
-// MARK: - Pane
 
 /// A connection state in a pane header.
 struct PaneStatus {
@@ -295,8 +286,6 @@ struct FilePaneView<Backend: FileBackend>: View {
         }
     }
 
-    // MARK: Navigation bar
-
     private var navigationBar: some View {
         HStack(spacing: 8) {
             RowActionButton(title: "Back", systemImage: "chevron.backward", disabled: !pane.canGoBack) { pane.goBack() }
@@ -316,13 +305,10 @@ struct FilePaneView<Backend: FileBackend>: View {
         }
     }
 
-    // MARK: Table
-
     private var tableCard: some View {
         let rows = pane.visibleItems
         let layout = FileColumn.layout(width: tableWidth)
         return AeroCard(padding: 0) {
-            // Created once its width is known, so it starts out filled (WorkloadTableLayout).
             if tableWidth > 0 {
                 table(rows, layout: layout)
             } else {
@@ -456,8 +442,6 @@ struct FilePaneView<Backend: FileBackend>: View {
         return deleting.count == 1 ? "Delete “\(deleting[0].name)”?" : "Delete \(deleting.count) items?"
     }
 
-    // MARK: Actions
-
     private func open(_ item: FileItem) {
         Task {
             guard !(await pane.open(item)), let openFile = configuration.openFile, let path = pane.path(of: item) else { return }
@@ -504,8 +488,6 @@ struct FilePaneView<Backend: FileBackend>: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    // MARK: Drag and drop
-
     /// A dragged row carries the whole selection when it is part of it.
     private func payload(for item: FileItem) -> FileDragPayload {
         let items = pane.selection.contains(item.id) ? pane.selectedItems : [item]
@@ -516,7 +498,6 @@ struct FilePaneView<Backend: FileBackend>: View {
     private func drop(_ payloads: [FileDragPayload], into item: FileItem?) -> Bool {
         guard let first = payloads.first, var folder = pane.directory else { return false }
         if let item, item.isFolder, let path = pane.path(of: item) { folder = path }
-        // A multi-row drag may deliver one payload per selected row, each carrying the selection.
         var seen = Set<Data>()
         var merged = first
         merged.paths = payloads
@@ -621,8 +602,6 @@ private struct PathField: View {
     }
 }
 
-// MARK: - Problems
-
 /// A listing or connection problem, with the Containers tab's hints for ssh errors.
 struct FileIssue {
     var title: String
@@ -681,7 +660,6 @@ struct FileIssueCard: View {
                 StatusOrb(tone: .warning, size: 12)
                     .padding(.top, 3)
                 VStack(alignment: .leading, spacing: 4) {
-                    // No vertical fixedSize (see WorkloadIssueCard): it loops the split view.
                     Text(issue.title)
                         .font(Aero.font(.callout, weight: .semibold))
                         .foregroundStyle(Aero.text.primary)
@@ -711,8 +689,6 @@ struct FileIssueCard: View {
         }
     }
 }
-
-// MARK: - Transfers
 
 /// The transfer queue under the panes, newest first.
 private struct TransferList: View {
@@ -751,7 +727,6 @@ private struct TransferList: View {
                         }
                     }
                 }
-                // A height from the row count, not the content: the split view loops on the latter.
                 .frame(height: Self.rowHeight * CGFloat(min(files.transfers.count, Self.visibleRows)))
             }
         }

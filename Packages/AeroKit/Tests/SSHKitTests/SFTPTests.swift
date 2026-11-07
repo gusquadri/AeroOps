@@ -91,7 +91,7 @@ struct SFTPWireTests {
 
         var handle = SFTPWire.Writer(.handle)
         handle.u32(1)
-        handle.u32(100) // string length with no bytes behind it
+        handle.u32(100)
         #expect(throws: SFTPError.self) { try SFTPWire.parse(handle.body) }
 
         #expect(throws: SFTPError.self) { try SFTPWire.parse(Data([99, 0, 0, 0, 1])) }
@@ -107,7 +107,7 @@ struct SFTPWireTests {
         #expect(SFTPPath("/srv").appending(component: "a b") == SFTPPath("/srv/a b"))
         #expect(SFTPPath.root.appending(component: "etc") == SFTPPath("/etc"))
 
-        let latin1 = Data([0x63, 0x61, 0x66, 0xE9]) // "café" in Latin-1, not valid UTF-8
+        let latin1 = Data([0x63, 0x61, 0x66, 0xE9])
         let path = SFTPPath("/data").appending(component: latin1)
         #expect(path.lastComponent == latin1)
         #expect(path.bytes == Data("/data/".utf8) + latin1)
@@ -151,7 +151,6 @@ struct InteractiveChildTests {
             finished.yield(outcome)
             finished.finish()
         }
-        // Several MiB at once fills the pipe, so the writer has to wait for `cat`.
         var expected = Data("head:".utf8)
         for index in 0..<40 {
             let piece = Data(repeating: UInt8(index), count: 100_000 + index)
@@ -256,7 +255,6 @@ struct SFTPClientTests {
 
         try await sftp.rename(home.appending(component: "hello.txt"), to: home.appending(component: "dir/moved.txt"))
         #expect(FileManager.default.fileExists(atPath: remote + "/dir/moved.txt"))
-        // posix-rename replaces an existing file.
         try Data("other".utf8).write(to: URL(filePath: remote + "/other.txt"))
         try await sftp.rename(home.appending(component: "other.txt"), to: home.appending(component: "dir/moved.txt"))
         #expect(scratch.read("remote/dir/moved.txt") == "other")
@@ -311,7 +309,6 @@ struct SFTPClientTests {
         #expect(uploaded.withLock { $0 } == Int64(upload.count))
         #expect(try LocalFileInfo(path: remote + "/up.bin", followingSymlinks: false).mode == 0o640)
 
-        // Replacing a longer file truncates it.
         try Data("short".utf8).write(to: URL(filePath: local + "/up.bin"))
         try await sftp.upload(local + "/up.bin", to: home.appending(component: "up.bin"))
         #expect(scratch.read("remote/up.bin") == "short")
@@ -368,7 +365,6 @@ struct SFTPClientTests {
         #expect(scratch.read("local/tree/link-to-file") == "one")
         #expect(events.withLock { $0.filter { if case .file = $0 { true } else { false } }.count } == 4)
 
-        // And back up under another name.
         try fm.moveItem(atPath: local + "/tree", toPath: local + "/copy")
         let upPlan = try await sftp.planUpload([local + "/copy"], into: home)
         #expect(upPlan.files.count == 4)
@@ -376,7 +372,6 @@ struct SFTPClientTests {
         #expect(scratch.read("remote/copy/a/b/deep.txt") == "deep")
         #expect(try fm.contentsOfDirectory(atPath: remote + "/copy").sorted() == ["a", "link-to-file", "one.txt"])
 
-        // Uploading again merges into the existing folders.
         #expect(try await sftp.upload(upPlan).isEmpty)
     }
 
@@ -389,7 +384,6 @@ struct SFTPClientTests {
         try Data("a".utf8).write(to: URL(filePath: remote + "/src/a.txt"))
         try Data("b".utf8).write(to: URL(filePath: remote + "/src/sub/b.txt"))
         let plan = try await sftp.planDownload([home.appending(component: "src")], into: local)
-        // A file where the folder should go.
         try FileManager.default.createDirectory(atPath: local + "/src", withIntermediateDirectories: true)
         try Data().write(to: URL(filePath: local + "/src/sub"))
         let failures = try await sftp.download(plan)

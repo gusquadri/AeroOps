@@ -29,8 +29,6 @@ protocol SSHSigningKey: Sendable {
     func signature(for data: [UInt8], flags: UInt32) throws -> [UInt8]
 }
 
-// MARK: Ed25519
-
 struct Ed25519SigningKey: SSHSigningKey {
     let privateKey: Curve25519.Signing.PrivateKey
 
@@ -38,7 +36,6 @@ struct Ed25519SigningKey: SSHSigningKey {
     var publicKeyBlob: [UInt8] { PublicKeyBlob.ed25519(privateKey.publicKey.rawRepresentation) }
 
     func signature(for data: [UInt8], flags: UInt32) throws -> [UInt8] {
-        // 64 bytes R || S. CryptoKit's signatures are randomized but valid: verify, never compare bytes.
         let signature = try privateKey.signature(for: Data(data))
         var w = SSHWriter()
         w.string("ssh-ed25519")
@@ -46,8 +43,6 @@ struct Ed25519SigningKey: SSHSigningKey {
         return w.bytes
     }
 }
-
-// MARK: ECDSA P-256
 
 /// `string "ecdsa-sha2-nistp256" || string(mpint r || mpint s)` from CryptoKit's raw `r || s`.
 func ecdsaP256SignatureBlob(raw: Data) -> [UInt8] {
@@ -69,7 +64,6 @@ struct P256SigningKey: SSHSigningKey {
     var publicKeyBlob: [UInt8] { PublicKeyBlob.ecdsaP256(x963: privateKey.publicKey.x963Representation) }
 
     func signature(for data: [UInt8], flags: UInt32) throws -> [UInt8] {
-        // signature(for:) hashes with SHA-256 itself; never pass a digest here.
         ecdsaP256SignatureBlob(raw: try privateKey.signature(for: Data(data)).rawRepresentation)
     }
 }
@@ -85,8 +79,6 @@ struct SecureEnclaveP256SigningKey: SSHSigningKey {
         ecdsaP256SignatureBlob(raw: try privateKey.signature(for: Data(data)).rawRepresentation)
     }
 }
-
-// MARK: RSA
 
 /// An RSA key via Security.framework. `SecKey` is immutable and thread-safe but not annotated `Sendable`.
 final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
@@ -105,7 +97,6 @@ final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
         guard let der = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
             throw SigningError.crypto("RSA public key export failed: \(Self.describe(error))")
         }
-        // PKCS#1 RSAPublicKey ::= SEQUENCE { modulus INTEGER, publicExponent INTEGER }
         var outer = DERReader(Array(der))
         var sequence = try outer.sequence("RSAPublicKey")
         let n = try sequence.unsignedInteger("modulus")
@@ -135,7 +126,6 @@ final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
             throw SigningError.sha1Refused(flags: flags)
         }
         var error: Unmanaged<CFError>?
-        // The "Message" algorithms hash the data themselves.
         guard let signature = SecKeyCreateSignature(privateKey, algorithm, Data(data) as CFData, &error) as Data? else {
             throw SigningError.crypto("RSA signing failed: \(Self.describe(error))")
         }
@@ -149,8 +139,6 @@ final class RSASigningKey: SSHSigningKey, @unchecked Sendable {
         error.map { String(describing: $0.takeRetainedValue()) } ?? "unknown error"
     }
 }
-
-// MARK: Rebuilding keys from stored secrets
 
 enum SigningKeyFactory {
     /// Rebuilds a signing key from the bytes kept in the ``KeychainStore``:

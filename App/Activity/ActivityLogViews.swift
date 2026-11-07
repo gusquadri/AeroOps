@@ -3,8 +3,6 @@ import AeroTheme
 import AgentBridge
 import SwiftUI
 
-// MARK: - Commands
-
 /// Running `run_command` calls (with Cancel) and the last few finished ones, with their output.
 struct CommandsSection: View {
     @Environment(AppModel.self) private var model

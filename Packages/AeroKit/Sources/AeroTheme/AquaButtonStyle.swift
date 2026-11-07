@@ -50,8 +50,6 @@ extension ButtonStyle where Self == AquaButtonStyle {
     public static var aquaSecondary: AquaButtonStyle { AquaButtonStyle(.secondary) }
 }
 
-// MARK: - Palette
-
 /// Colours of one filled button variant. Internal; the contrast tests read them. The primary gel
 /// is aqua by day and violet by night, matching the night sky; the
 /// destructive gel is the same coral on either sky.
@@ -107,8 +105,6 @@ enum AquaGlassFill {
     static let label = Aero.aquaDeep
 }
 
-// MARK: - Body
-
 private struct AquaButtonBody: View {
     let configuration: ButtonStyleConfiguration
     let prominence: AquaButtonStyle.Prominence
@@ -129,7 +125,6 @@ private struct AquaButtonBody: View {
             .font(metrics.font)
             .lineLimit(1)
             .foregroundStyle(prominence == .primary ? Aero.text.onAccent : AquaGlassFill.label)
-            // Primary: a soft dark edge under the white label lifts it off the gloss.
             .shadow(
                 color: prominence == .primary ? Aero.ink.opacity(0.5) : .clear,
                 radius: 0.5, x: 0, y: 0.5
@@ -257,7 +252,6 @@ private struct GelSurface: View {
     var body: some View {
         ZStack {
             Capsule().fill(fill.gradient)
-            // Caustic: light pooling at the bottom centre.
             if caustic {
                 Capsule().fill(EllipticalGradient(
                     colors: [fill.glow.opacity(0.8), fill.glow.opacity(0)],
@@ -278,7 +272,6 @@ private struct GelRim: View {
     var body: some View {
         ZStack {
             Capsule().strokeBorder(fill.rim.opacity(strong ? 1 : 0.75), lineWidth: strong ? 1.5 : 1)
-            // Inner light edge, brightest at the top.
             Capsule()
                 .inset(by: 1)
                 .strokeBorder(
@@ -315,8 +308,6 @@ struct GlossHighlight: View {
         .allowsHitTesting(false)
     }
 }
-
-// MARK: - Previews
 
 #Preview("AquaButton: primary, secondary, destructive, disabled") {
     VStack(spacing: 16) {

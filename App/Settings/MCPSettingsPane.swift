@@ -34,8 +34,6 @@ struct MCPSettingsPane: View {
     }
 }
 
-// MARK: - Bridge
-
 private struct BridgeStatusSection: View {
     @Environment(AppModel.self) private var model
 
@@ -99,8 +97,6 @@ struct LabeledPath: View {
         }
     }
 }
-
-// MARK: - Connect an agent
 
 /// Config snippets for MCP clients, using the path of the aeroops-mcp in this app bundle. Also
 /// onboarding's "AI agents" step.
@@ -243,8 +239,6 @@ enum MCPClientConfig {
         return String(decoding: data, as: UTF8.self)
     }
 }
-
-// MARK: - Host access
 
 private struct HostAccessSection: View {
     @Environment(AppModel.self) private var model

@@ -19,16 +19,11 @@ P="$root/Scripts/remote/probe.sh"
 cd "$here" || exit 1
 mkdir -p metrics probe docker kubectl
 
-# shellcheck disable=SC2086  # $SSH is a command line
 dev()      { $SSH "dev@$VMHOST" "$@"; }
-# shellcheck disable=SC2086
 nodocker() { $SSH "nodocker@$VMHOST" "$@"; }
-# shellcheck disable=SC2086
 devc()     { $SSH -p 2222 dev@localhost "$@"; }
-# shellcheck disable=SC2086
 alp()      { $SSH -p 2223 dev@localhost "$@"; }
 K='sudo -n k3s kubectl'
-# Run "$@" capturing stdout+stderr into $1 and appending the exit status.
 witherr()  { out=$1; shift; "$@" > "$out" 2>&1; echo "[exit status $?]" >> "$out"; }
 sections=$*
 want()     { [ -z "$sections" ] && return 0; case " $sections " in *" $1 "*) return 0 ;; esac; return 1; }
@@ -46,17 +41,13 @@ docker run -d --name aeroops-fx-debian --hostname debian-fixture debian:stable-s
 docker exec -i aeroops-fx-debian env LC_ALL=C sh -s < "$M" > metrics/debian-1.txt; sleep 2
 docker exec -i aeroops-fx-debian env LC_ALL=C sh -s < "$M" > metrics/debian-2.txt
 docker rm -f aeroops-fx-debian >/dev/null
-# Old kernel (< 3.14, no MemAvailable): hand-made from ubuntu-vm-1.
 sed -e '/^MemAvailable:/d' \
     -e 's/^Linux [^ ]* aarch64$/Linux 3.10.0-1160.el7.x86_64 x86_64/' \
     -e 's/^aeroops-vm$/oldkernel-fixture/' \
     metrics/ubuntu-vm-1.txt > metrics/synthetic-oldkernel-no-memavailable.txt
-# Non-Linux: the real script on this Mac, sanitized (host name, home, volumes).
 if [ "$(uname -s)" = Darwin ]; then
   LC_ALL=C sh -s < "$M" > metrics/nonlinux-darwin.txt 2> metrics/nonlinux-darwin.stderr.txt
   h=$(hostname)
-  # Mount points under /Volumes/ (the last column) become /Volumes/External<n>;
-  # the column alignment before them is kept.
   sed -e "s#$h#mac-fixture.local#g" -e "s#$HOME#/Users/dev#g" metrics/nonlinux-darwin.txt |
     awk 'match($0, /[ \t]\/Volumes\/[^\/]*$/) { n++; $0 = substr($0, 1, RSTART) "/Volumes/External" n }
          { print }' > metrics/nonlinux-darwin.tmp &&

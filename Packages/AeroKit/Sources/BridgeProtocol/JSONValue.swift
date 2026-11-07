@@ -14,8 +14,6 @@ public enum JSONValue: Sendable, Hashable {
     case object([String: JSONValue])
 }
 
-// MARK: - Accessors
-
 extension JSONValue {
     /// The string, if this is a string.
     public var stringValue: String? {
@@ -84,8 +82,6 @@ extension JSONValue {
     }
 }
 
-// MARK: - Codable
-
 extension JSONValue: Codable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -137,8 +133,6 @@ extension JSONValue {
         return String(decoding: data, as: UTF8.self)
     }
 }
-
-// MARK: - Literals
 
 extension JSONValue: ExpressibleByNilLiteral, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral,
     ExpressibleByFloatLiteral, ExpressibleByStringLiteral, ExpressibleByArrayLiteral,

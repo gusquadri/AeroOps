@@ -5,8 +5,6 @@ import Foundation
 import Synchronization
 @testable import AgentBridge
 
-// MARK: - Files
-
 /// A short directory under `/tmp` (socket paths must fit in 104 bytes), removed by `remove()`.
 struct TempDirectory {
     let url: URL
@@ -33,8 +31,6 @@ struct TestFailure: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-// MARK: - Waiting
-
 /// Polls `condition` until it holds or `timeout` passes.
 @discardableResult
 func eventually(timeout: Duration = .seconds(5), _ condition: @Sendable () async -> Bool) async -> Bool {
@@ -45,8 +41,6 @@ func eventually(timeout: Duration = .seconds(5), _ condition: @Sendable () async
     }
     return await condition()
 }
-
-// MARK: - Clock
 
 /// A clock that only moves when told to.
 final class FakeClock: BridgeClock {
@@ -107,8 +101,6 @@ final class FakeClock: BridgeClock {
     }
 }
 
-// MARK: - Hosts and handler
-
 enum TestHosts {
     static let staging = RemoteHost(id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!, name: "staging",
                                     address: "10.0.0.5", user: "deploy", tags: ["web"], mcpTier: .readExec)
@@ -168,8 +160,6 @@ final class FakeToolHandler: BridgeToolHandler {
     }
 }
 
-// MARK: - Command runner
-
 /// A ``RemoteCommandRunner`` that never touches ssh.
 final class FakeRunner: RemoteCommandRunner {
     struct Call: Sendable {
@@ -218,8 +208,6 @@ final class FakeRunner: RemoteCommandRunner {
     }
 }
 
-// MARK: - Peers
-
 /// Accepts every peer without looking at it. Tests only.
 struct AcceptAllPeers: BridgePeerValidator {
     func validate(socket fd: Int32) -> PeerValidation {
@@ -232,8 +220,6 @@ struct RejectAllPeers: BridgePeerValidator {
 }
 
 let testPeer = BridgePeer(pid: 1, uid: getuid(), executablePath: "/test/aeroops-mcp", trust: .custom)
-
-// MARK: - Socket client
 
 /// A raw bridge client: writes lines, collects every message the app sends.
 ///
@@ -329,8 +315,6 @@ final class BridgeTestClient: Sendable {
         }
     }
 }
-
-// MARK: - Scripted request handler
 
 /// A ``BridgeRequestHandler`` driven by the tool name:
 /// - `echo`: replies with `arguments.text` at once.

@@ -60,9 +60,6 @@ public struct GlossyGauge: View {
                     .padding(.horizontal, lineWidth + 4)
             }
             .frame(width: diameter, height: diameter)
-            // The groove and the tube sit in a background: drawn first, as before, but outside
-            // the layout, so the animating tube does not re-measure the stacks and grid around
-            // the gauge on every frame.
             .background {
                 ZStack {
                     GaugeGroove(lineWidth: lineWidth, strong: strong)
@@ -73,17 +70,12 @@ public struct GlossyGauge: View {
                     }
                 }
             }
-            // Keyed on the shown percentage: a sub-percent move (under 2 pt of ring) lands in
-            // one frame instead of running the 0.6 s spring at the display rate.
             .animation(accessibility.animation(Self.animation), value: Self.percent(value))
             Text(label)
                 .font(Aero.font(.caption, weight: .semibold))
                 .foregroundStyle(strong ? Aero.text.primary : Aero.text.secondary)
                 .lineLimit(1)
         }
-        // SwiftUI pushes a new position down to every shape inside a view. As a group, a gauge
-        // that moves (its card resizing while the sidebar slides) takes one new position
-        // instead of one for each of its dozens of shapes.
         .geometryGroup()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
@@ -97,8 +89,6 @@ public struct GlossyGauge: View {
     /// it costs a fraction of SwiftUI's own spring, which was a tenth of each animation frame
     /// with twenty hosts on the Dashboard.
     nonisolated static let animation = Animation(SettlingSpring(duration: 0.6, remaining: 0.001))
-
-    // MARK: Logic (unit-tested)
 
     /// The dash shown when there is no value.
     nonisolated static let placeholder = "—"
@@ -149,8 +139,6 @@ public struct GlossyGauge: View {
     }
 }
 
-// MARK: - Animation
-
 /// A critically damped spring (`Spring(duration:bounce: 0)`, the curve of
 /// `.smooth(duration:)`) that ends once less than `remaining` of the change is left.
 ///
@@ -180,8 +168,6 @@ struct SettlingSpring: CustomAnimation {
     }
 }
 
-// MARK: - Parts
-
 /// The recessed track: darker at the top, lit at the bottom, so it reads as a groove.
 private struct GaugeGroove: View {
     let lineWidth: CGFloat
@@ -198,7 +184,6 @@ private struct GaugeGroove: View {
                 ),
                 lineWidth: lineWidth
             )
-            // Outer and inner lips of the groove.
             Circle().strokeBorder(Aero.ink.opacity(strong ? 0.4 : 0.12), lineWidth: 0.75)
             Circle()
                 .inset(by: lineWidth)
@@ -223,13 +208,10 @@ private struct GaugeTube: View {
     let strong: Bool
 
     var body: some View {
-        // The gradient spans only the arc, so a short arc still shows both colours.
         let gradient = AngularGradient(
             colors: colors, center: .center,
             startAngle: .degrees(0), endAngle: .degrees(360 * max(fraction, 0.02))
         )
-        // The water sits between the tube's colour and its glass, and is not rotated: it draws
-        // its own arc from the top.
         ZStack {
             Circle()
                 .inset(by: lineWidth / 2)
@@ -252,7 +234,6 @@ private struct GaugeTubeGlass: View {
 
     var body: some View {
         ZStack {
-            // Highlight along the outer half of the tube.
             Circle()
                 .inset(by: lineWidth * 0.3)
                 .trim(from: 0, to: fraction)
@@ -261,7 +242,6 @@ private struct GaugeTubeGlass: View {
                     style: StrokeStyle(lineWidth: lineWidth * 0.22, lineCap: .round)
                 )
                 .blur(radius: 0.4)
-            // Shade along the inner edge gives the tube its roundness.
             Circle()
                 .inset(by: lineWidth * 0.86)
                 .trim(from: 0, to: fraction)
@@ -307,7 +287,6 @@ struct GaugeBubble: View {
                     colors: [Aero.base.opacity(0.95), Aero.base.opacity(GaugeBubble.edgeOpacity)],
                     center: UnitPoint(x: 0.5, y: 0.7), startRadius: 0, endRadius: d * 0.6
                 ))
-                // Top gloss.
                 Ellipse()
                     .fill(LinearGradient(
                         colors: [Aero.sheen.opacity(0.95), Aero.sheen.opacity(0)],
@@ -329,8 +308,6 @@ struct GaugeBubble: View {
         .allowsHitTesting(false)
     }
 }
-
-// MARK: - Previews
 
 #Preview("GlossyGauge: nil, low, mid, warning, critical") {
     HStack(spacing: 20) {

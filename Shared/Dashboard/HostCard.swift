@@ -78,7 +78,6 @@ struct HostCard: View, Equatable {
         }
         .overlay {
             if isSelected {
-                // A soft aqua halo around a crisp aqua rim.
                 shape.stroke(Aero.aqua.opacity(0.3), lineWidth: 7)
                     .allowsHitTesting(false)
                 shape.strokeBorder(Aero.aqua, lineWidth: 2)
@@ -100,16 +99,12 @@ struct HostCard: View, Equatable {
             HStack(spacing: 12) {
                 StatusBubble(tone: orbTone, logo: state.systemLogo, size: 44)
                     .help(statusHelp)
-                    // The card's accessibility value says the status and the system.
                     .accessibilityHidden(true)
-                // Narrower cards get small buttons, then drop uptime (the inspector shows it), so
-                // the name keeps room down to the grid's 300 pt minimum.
                 HorizontalFit(Self.titleLayouts) { layout in
                     titleRow(layout)
                 }
             }
             ZStack(alignment: .leading) {
-                // As tall as a small button, so cards showing Review… are no taller.
                 Button("Review…") {}
                     .buttonStyle(.aquaSecondary)
                     .controlSize(.small)
@@ -119,11 +114,9 @@ struct HostCard: View, Equatable {
                     if host.tags.isEmpty {
                         Spacer(minLength: 8)
                     } else {
-                        // Fewer tags (and "+N") where the accessory needs the room.
                         HorizontalFit([4, 3, 2, 1]) { limit in
                             TagRow(tags: host.tags, limit: limit)
                         }
-                        // At least 16 pt before the accessory.
                         .padding(.trailing, 8)
                     }
                     accessory

@@ -93,7 +93,6 @@ struct AgentProtocolTests {
         let f = try await Fixture()
         defer { f.dir.remove() }
         var state = f.state()
-        // Empty, truncated, and an unknown key.
         let empty = await f.handler.handle([], state: &state)
         #expect(empty.reply == [AgentMessage.failure])
         let truncated = await f.handler.handle([AgentMessage.signRequest, 0, 0, 0, 50, 1], state: &state)
@@ -138,12 +137,10 @@ struct AgentProtocolTests {
         #expect(!request.isForwarded)
         #expect(request.connectionID == 7)
 
-        // Signed data for another session is not treated as this connection's login.
         let other = userAuthData(sessionID: [1, 2, 3], user: "dev", algorithm: "ssh-ed25519", keyBlob: blob, hostKey: hostKey)
         _ = await f.handler.handle(signRequestMessage(keyBlob: blob, data: other, flags: 0), state: &state)
         #expect(f.authorizer.requests.last?.isUserAuthentication == false)
 
-        // Arbitrary data is not userauth either.
         _ = await f.handler.handle(signRequestMessage(keyBlob: blob, data: Array("git commit".utf8), flags: 0), state: &state)
         #expect(f.authorizer.requests.last?.isUserAuthentication == false)
         #expect(f.authorizer.requests.last?.user == nil)
@@ -191,7 +188,6 @@ struct AgentProtocolTests {
         #expect(plain?.hostKey == nil)
         let bound = UserAuthRequest(parsing: userAuthData(sessionID: [1], user: "root", algorithm: "ssh-ed25519", keyBlob: blob, hostKey: hostKey), keyBlob: blob)
         #expect(bound?.hostKey == hostKey)
-        // Another key's blob, or trailing bytes, do not count.
         #expect(UserAuthRequest(parsing: userAuthData(sessionID: [1], user: "root", algorithm: "ssh-ed25519", keyBlob: hostKey, hostKey: nil), keyBlob: blob) == nil)
         #expect(UserAuthRequest(parsing: userAuthData(sessionID: [1], user: "root", algorithm: "ssh-ed25519", keyBlob: blob, hostKey: nil) + [0], keyBlob: blob) == nil)
     }
@@ -321,7 +317,7 @@ struct SigningPolicyTests {
         let untrusted = PeerIdentity.fake(path: "/usr/bin/ssh", appleSSH: true, startedByApp: false)
         _ = await authorizer.authorize(request(policy: .oncePerSession, peer: untrusted, keyID: id))
         #expect(await !authorizer.hasSessionApproval(for: id))
-        _ = await authorizer.authorize(request(policy: .oncePerSession, keyID: id)) // trusted: asks, then remembers
+        _ = await authorizer.authorize(request(policy: .oncePerSession, keyID: id))
         #expect(verifier.callCount == 2)
         _ = await authorizer.authorize(request(policy: .oncePerSession, peer: untrusted, keyID: id))
         #expect(verifier.callCount == 3)

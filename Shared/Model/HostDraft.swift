@@ -67,14 +67,10 @@ struct HostDraft: Hashable, Sendable {
         monitored = host.monitored
     }
 
-    // MARK: - Limits
-
     static let maxNameLength = 64
     static let maxAddressLength = 253
     static let maxUserLength = 64
     static let maxTagLength = 32
-
-    // MARK: - Parsed values
 
     var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     var trimmedAddress: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -117,8 +113,6 @@ struct HostDraft: Hashable, Sendable {
             monitored: monitored
         )
     }
-
-    // MARK: - Validation
 
     /// Fields that can carry a validation message.
     enum Field: Hashable, CaseIterable, Sendable {
@@ -175,8 +169,6 @@ struct HostDraft: Hashable, Sendable {
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@")
     private static let tagCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.:/"))
 
-    // Closures, not `allowed.contains` passed as a function: Swift 6.4 -O miscompiles that for
-    // CharacterSet and release builds rejected "root" and "178.156.252.190".
     private static func only(_ text: String, in allowed: CharacterSet) -> Bool {
         text.unicodeScalars.allSatisfy { allowed.contains($0) }
     }

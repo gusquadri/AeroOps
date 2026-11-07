@@ -58,7 +58,6 @@ struct CommandActivityBufferTests {
         _ = buffer.drain()
         #expect(buffer.isEmpty)
         #expect(buffer.drain().isEmpty)
-        // Nothing stays open for merging across a drain.
         buffer.append(output(a, .stdout, "y"))
         #expect(buffer.drain() == [output(a, .stdout, "y")])
     }

@@ -114,7 +114,6 @@ public struct KubectlCommands: Sendable, Hashable {
     /// Splits ``pods(namespace:)`` output into the pods JSON and the metrics JSON (empty when
     /// the metrics call failed or the marker is missing).
     static func splitPodsOutput(_ output: Data) -> (pods: Data, metrics: Data) {
-        // JSON strings cannot hold a raw newline, so the marker line cannot occur inside the pods JSON.
         guard let marker = output.range(of: Data("\n\(metricsMarker)\n".utf8)) else { return (output, Data()) }
         return (output[..<marker.lowerBound], output[marker.upperBound...])
     }

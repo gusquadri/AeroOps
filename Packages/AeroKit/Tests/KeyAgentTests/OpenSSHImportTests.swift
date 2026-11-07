@@ -25,7 +25,6 @@ struct OpenSSHImportTests {
         #expect(publicKey.fingerprint == generated.fingerprint)
         #expect(publicKey.authorizedKeysLine(comment: key.comment) == generated.publicKeyLine)
 
-        // Sign with the imported key, and again with a key rebuilt from the stored secret.
         let data = Array("userauth data".utf8)
         let flags = algorithm == .rsa ? AgentMessage.flagRSASHA256 : 0
         for signer in [key.signingKey, try SigningKeyFactory.make(algorithm, secret: key.secret)] {
@@ -74,21 +73,17 @@ struct OpenSSHImportTests {
         let generated = try await GeneratedOpenSSHKey.make(type: "ed25519", in: dir)
         let binary = try #require(Self.binary(of: generated.privateKeyText))
 
-        // Mismatched check integers. Layout: magic(15) cipher(4+4) kdf(4+4) kdfopts(4) n(4) pub(4+51) priv-len(4).
         var badCheck = binary
         let checkOffset = 15 + 8 + 8 + 4 + 4 + 4 + 51 + 4
         badCheck[checkOffset] ^= 0xFF
         #expect(throws: KeyImportError.malformed("check integers differ")) { try OpenSSHPrivateKey.parse(binary: badCheck) }
 
-        // Truncated.
         #expect(throws: KeyImportError.self) { try OpenSSHPrivateKey.parse(binary: Array(binary.prefix(binary.count - 40))) }
 
-        // A flipped byte in the private key's public half.
         var badPublic = binary
         badPublic[checkOffset + 8 + 4 + 11 + 4 + 2] ^= 0x01
         #expect(throws: KeyImportError.self) { try OpenSSHPrivateKey.parse(binary: badPublic) }
 
-        // Bad padding.
         var badPadding = binary
         badPadding[badPadding.count - 1] ^= 0x40
         #expect(throws: KeyImportError.malformed("bad padding")) { try OpenSSHPrivateKey.parse(binary: badPadding) }

@@ -104,8 +104,6 @@ public actor HostMonitor {
         commandTask?.cancel()
     }
 
-    // MARK: - Control
-
     /// The latest published state.
     public var currentUpdate: HostMonitorUpdate { state }
 
@@ -172,8 +170,6 @@ public actor HostMonitor {
         }
     }
 
-    // MARK: - Schedule
-
     /// Arms the timer for the next poll, or polls now if it is overdue. Does nothing while a
     /// poll runs (it reschedules when it ends), while paused, or while held for a host key.
     private func reschedule() {
@@ -236,8 +232,6 @@ public actor HostMonitor {
         timerTask = nil
     }
 
-    // MARK: - Polling
-
     private func beginPoll() {
         guard !stopped, pollTask == nil else { return }
         cancelTimer()
@@ -275,7 +269,6 @@ public actor HostMonitor {
             )
         } catch let error as SSHError {
             if error == .hostKeyChanged { return .hostKey(.changed(await recordChangedKey())) }
-            // An in-process client (EmbeddedSSH) throws what ssh reports as a transport error.
             if error == .hostKeyUnknown { return .hostKey(.unknown) }
             return .failure(error)
         } catch {
@@ -313,7 +306,6 @@ public actor HostMonitor {
         do {
             if try await hostKeys.pinnedKeys(for: host).isEmpty { return .unknown }
         } catch {
-            // known_hosts unreadable: let ssh decide, and report what it says.
         }
         pinsChecked = true
         return nil

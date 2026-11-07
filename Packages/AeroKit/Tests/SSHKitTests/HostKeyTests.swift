@@ -21,7 +21,6 @@ struct HostKeyTests {
             let file = try scratch.write("k\(index).pub", "\(key.type) \(key.base64) test\(index)\n")
             let result = try await runTool("/usr/bin/ssh-keygen", ["-l", "-E", "sha256", "-f", file.filePath])
             #expect(result.status == 0, "\(result.stderr)")
-            // "256 SHA256:koNW6c... test0 (ED25519)"
             let expected = "\(key.bits.map(String.init) ?? "?") \(key.fingerprint) test\(index) (\(key.displayType))"
             #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == expected)
         }
@@ -154,7 +153,7 @@ struct HostKeyStoreTests {
         #expect(offered.map(\.displayType) == ["RSA", "ECDSA", "ED25519"])
         let ed = try #require(offered.first { $0.type == "ssh-ed25519" })
         try await store.trust(ed, for: host)
-        try await store.trust(ed, for: host) // idempotent
+        try await store.trust(ed, for: host)
 
         #expect(try await store.verify(host) == .trusted(ed))
         #expect(try await store.pinnedKeys(for: host) == [ed])
@@ -183,13 +182,11 @@ struct HostKeyStoreTests {
         #expect(await store.isBlocked(host))
         #expect(await store.blockedHosts["[localhost]:2222"]?.pinned == [pinned])
 
-        // The runner refuses before ssh starts.
         let runner = SSHRunner(context: context, hostKeys: store)
         await #expect(throws: SSHError.hostKeyChanged) { try await runner.run("true", on: host) }
         await #expect(throws: SSHError.hostKeyChanged) { try await runner.stream("true", on: host) }
         #expect(scratch.read("ssh.log") == nil)
 
-        // Adding the new key next to the old one is refused without explicit replacement.
         let real = DevServerKeys.ed25519Key
         await #expect(throws: HostKeyError.self) { try await store.trust(real, for: host) }
         try await store.trust(real, for: host, replacingPinned: true)

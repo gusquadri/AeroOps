@@ -36,12 +36,13 @@ struct SplitRootView: View {
         .onChange(of: hostInSection) { syncSelection() }
         .onChange(of: model.hosts.map(\.id)) { prune() }
         .onChange(of: model.terminals.map(\.id)) { prune() }
+        .onChange(of: model.folders.map(\.id)) { _, ids in navigator.closeFolders(notIn: Set(ids)) }
     }
 
     /// The server the current tab's stack shows.
     private var hostInSection: RemoteHost.ID? {
         switch navigator.section {
-        case .servers: navigator.serverPath.first
+        case .servers: navigator.serverPath.last?.hostID
         case .files: navigator.filePath.first
         case .containers: navigator.containerPath.first?.hostID
         case .terminals: navigator.terminalPath.last.flatMap { model.terminal(id: $0)?.hostID }
@@ -108,7 +109,7 @@ private struct SplitDetail: View {
 }
 
 /// Every server's card; picking one (here or in the sidebar) shows its details in their place,
-/// and Back returns to the cards. It shows the Servers tab's stack, so folding keeps it.
+/// as opening a folder shows its cards, and Back returns to the screen before. It shows the Servers tab's stack, so folding keeps it.
 ///
 /// Not the Mac's inspector beside the cards: beside the sidebar there is no room for both (an
 /// iPhone's `.inspector` lays itself over the cards and dims them instead). And the details are
@@ -119,14 +120,26 @@ private struct SplitServers: View {
 
     var body: some View {
         NavigationStack {
-            if let id = navigator.serverPath.last {
+            switch navigator.serverPath.last {
+            case .host(let id):
                 HostScreen(id: id)
                     .id(id)
-                    .sectionSwitcher(back: { navigator.serverPath = [] })
-            } else {
-                DashboardContent(onSelect: { navigator.select(host: $0, terminal: nil) }, showsAppItems: false)
+                    .sectionSwitcher(back: { navigator.serverPath.removeLast() })
+            case .folder(let id):
+                FolderScreen(id: id, onSelect: { navigator.push(host: $0) })
+                    .id(id)
+                    .sectionSwitcher(back: { navigator.serverPath.removeLast() })
+            case nil:
+                DashboardContent(onOpen: open, showsAppItems: false)
                     .sectionSwitcher()
             }
+        }
+    }
+
+    private func open(_ route: ServerRoute) {
+        switch route {
+        case .host(let id): navigator.select(host: id, terminal: nil)
+        case .folder: navigator.serverPath = [route]
         }
     }
 }
@@ -305,8 +318,8 @@ extension View {
 
     /// `searchable`, left out while the screen's tab is hidden, as ``tabToolbar(_:)`` leaves out
     /// its items. It sits on a view behind the screen, so leaving it out keeps the screen as it is.
-    func tabSearchable(text: Binding<String>, placement: SearchFieldPlacement = .automatic) -> some View {
-        modifier(TabSearchable(text: text, placement: placement))
+    func tabSearchable(text: Binding<String>, placement: SearchFieldPlacement = .automatic, prompt: LocalizedStringKey? = nil) -> some View {
+        modifier(TabSearchable(text: text, placement: placement, prompt: prompt))
     }
 }
 
@@ -322,12 +335,13 @@ private struct TabToolbar<Items: ToolbarContent>: ViewModifier {
 private struct TabSearchable: ViewModifier {
     @Binding var text: String
     let placement: SearchFieldPlacement
+    let prompt: LocalizedStringKey?
     @Environment(\.isTabShown) private var isTabShown
 
     func body(content: Content) -> some View {
         content.background {
             if isTabShown {
-                Color.clear.searchable(text: $text, placement: placement)
+                Color.clear.searchable(text: $text, placement: placement, prompt: prompt.map { Text($0) })
             }
         }
     }

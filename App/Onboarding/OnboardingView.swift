@@ -55,8 +55,6 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Header
-
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             OnboardingStepIndicator(current: flow.step)
@@ -74,8 +72,6 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Steps
-
     @ViewBuilder
     private var content: some View {
         switch flow.step {
@@ -86,8 +82,6 @@ struct OnboardingView: View {
         case .done: OnboardingDoneStep(flow: flow)
         }
     }
-
-    // MARK: - Navigation
 
     private var navigationBar: some View {
         HStack(spacing: 12) {
@@ -104,7 +98,6 @@ struct OnboardingView: View {
                     .keyboardShortcut("[", modifiers: .command)
                     .help("Previous step (⌘[)")
             }
-            // One primary button at a time: Continue steps back while the step's own owns Return.
             Button(continueTitle, action: advance)
                 .buttonStyle(AquaButtonStyle(continueOwnsReturn ? .primary : .secondary))
                 .keyboardShortcut(continueOwnsReturn ? .defaultAction : nil)
@@ -190,8 +183,6 @@ struct OnboardingView: View {
     }
 }
 
-// MARK: - Step indicator
-
 /// Numbered dots for the five steps: done ones ticked, the current one filled.
 struct OnboardingStepIndicator: View {
     let current: OnboardingFlow.Step
@@ -240,8 +231,6 @@ struct OnboardingStepIndicator: View {
         .frame(width: 18, height: 18)
     }
 }
-
-// MARK: - Previews
 
 #Preview("Onboarding · welcome") {
     OnboardingView()

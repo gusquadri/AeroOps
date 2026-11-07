@@ -29,7 +29,6 @@ struct FileDragPayload: Codable, Transferable {
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .aeroOpsFileSelection)
         ProxyRepresentation(importing: { (url: URL) in
-            // A folder's URL path ends in "/"; the item's name is the component before it.
             var path = url.standardizedFileURL.path(percentEncoded: false)
             if path.count > 1, path.hasSuffix("/") { path.removeLast() }
             return FileDragPayload(side: .local, hostID: nil, paths: [Data(path.utf8)])

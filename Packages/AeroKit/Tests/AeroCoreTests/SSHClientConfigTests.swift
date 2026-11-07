@@ -3,9 +3,6 @@ import Testing
 @testable import AeroCore
 import AeroTestSupport
 
-// Every test reads an in-memory file system or a fixture under dev/fixtures/ssh-config.
-// Nothing here touches the real ~/.ssh.
-
 /// An in-memory, read-only file system for `Include` tests.
 private struct MemoryFiles: SSHConfigFileReading {
     var files: [String: String] = [:]

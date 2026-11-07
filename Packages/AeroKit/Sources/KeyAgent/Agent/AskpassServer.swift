@@ -5,7 +5,6 @@ import Foundation
 import Security
 import Synchronization
 
-// The askpass helper and code-signature checks exist only on macOS.
 #if os(macOS)
 
 /// Hands password hosts' passwords to `aeroops-askpass` over `~/.aeroops/askpass.sock`.
@@ -62,7 +61,6 @@ public final class AskpassServer: Sendable {
 
     /// Creates the socket and starts answering. Does nothing if already running.
     public func start() throws(AgentServerError) {
-        // An overflowing connection is closed unanswered; the helper then fails like any refusal.
         try listener.start(serve: { [weak self] fd, _ in self?.serve(fd) }, onOverflow: {})
     }
 
@@ -70,8 +68,6 @@ public final class AskpassServer: Sendable {
     public func stop() {
         listener.stop()
     }
-
-    // MARK: Connections
 
     private func serve(_ fd: Int32) {
         let verdict = validator.validate(socket: fd)
@@ -138,8 +134,6 @@ public struct AskpassEvent: Sendable, Equatable {
     public var outcome: Outcome
 }
 
-// MARK: - Peer validation
-
 /// The verdict on an askpass connection's peer.
 public enum AskpassPeerVerdict: Sendable, Hashable {
     /// The peer may get a password; `sshPID` is the ssh process it asks for.
@@ -171,7 +165,6 @@ public struct SignedAskpassPeerValidator: AskpassPeerValidator {
     /// - Parameter teamIdentifier: Defaults to the running process's own team ID.
     public init(appProcessID: pid_t = getpid(), teamIdentifier: String? = SignedAskpassPeerValidator.ownTeamIdentifier()) {
         self.appProcessID = appProcessID
-        // Only a well-formed team ID goes into the requirement string.
         let team = teamIdentifier.flatMap { $0.wholeMatch(of: /[A-Z0-9]{10}/) != nil ? $0 : nil }
         self.teamIdentifier = team
         requirementText = team.map {

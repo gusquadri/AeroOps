@@ -56,7 +56,6 @@ public struct LineFramer: Sendable {
                 }
             }
             guard let end else { break }
-            // A newline completes the current line (or ends the discarded one).
             if discarding {
                 discarding = false
             } else {

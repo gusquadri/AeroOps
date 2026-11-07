@@ -16,8 +16,6 @@ struct KubernetesParserTests {
         try KubernetesParser.parsePods(try Fixtures.data("kubectl/pods-all.json"))
     }
 
-    // MARK: - Pods
-
     @Test("pods-all: names, namespaces, phases, nodes and creation times")
     func podList() throws {
         let pods = try fixturePods()
@@ -67,13 +65,11 @@ struct KubernetesParserTests {
         #expect(hello.health == .inactive)
         #expect(hello.displayStatus == "Completed")
 
-        // Unscheduled: the spec container is listed (0/1) even without a status.
         let pending = pods[3]
         #expect(pending.containers == [PodContainerStatus(name: "app", ready: false)])
         #expect(pending.health == .warning)
         #expect(pending.displayStatus == "Pending")
 
-        // Spec order (nginx first) even though kubectl lists statuses alphabetically.
         let web = pods[4]
         #expect(web.containers.map(\.name) == ["nginx", "log-sidecar"])
         #expect(web.containers.allSatisfy { $0.ready && !$0.isTerminated && $0.waitingReason == nil })
@@ -94,7 +90,6 @@ struct KubernetesParserTests {
         #expect(pod.health == .failing)
         #expect(pod.displayStatus == "Error")
 
-        // First run ending in an error is failing, but not (yet) a crash loop.
         let firstRun = PodInfo(namespace: "demo", name: "x", phase: .running, containers: [
             PodContainerStatus(name: "x", ready: false, restartCount: 0, terminatedReason: "Error", exitCode: 1),
         ])
@@ -162,8 +157,6 @@ struct KubernetesParserTests {
         #expect(pods[2].phase == .unknown)
     }
 
-    // MARK: - Owners
-
     @Test("pods-all: Deployment pods resolve their ReplicaSet to the Deployment; the Job pod keeps its Job")
     func podOwners() throws {
         let pods = try fixturePods()
@@ -214,8 +207,6 @@ struct KubernetesParserTests {
         #expect(pods[6].owner?.recreatesPods == false)
     }
 
-    // MARK: - Resources and metrics
-
     @Test("pods-all: memory limits summed over containers, no CPU limits")
     func podLimits() throws {
         let pods = try fixturePods()
@@ -255,7 +246,6 @@ struct KubernetesParserTests {
         let metrics = KubernetesParser.parsePodMetrics(try Fixtures.data("kubectl/synthetic-metrics-pods.json"))
         #expect(metrics == [
             PodMetrics(namespace: "demo", name: "crasher-89b4b56b4-djl5b", cpuMillicores: 0, memUsedBytes: 1_263_616),
-            // 152341n + 2003456n = 2.155797m; 3164Ki + 512Ki.
             PodMetrics(namespace: "demo", name: "web-7b56d94874-b8t9q", cpuMillicores: 3, memUsedBytes: 3_764_224),
             PodMetrics(namespace: "demo", name: "gone-6d4cf56db6-q2x7m", cpuMillicores: 7, memUsedBytes: 20 << 20),
             PodMetrics(namespace: "kube-system", name: "coredns-7cfb7bc9c7-sdcln", cpuMillicores: 3, memUsedBytes: 14_258_176),
@@ -318,8 +308,6 @@ struct KubernetesParserTests {
         #expect(KubernetesParser.parseQuantity(text) == nil)
     }
 
-    // MARK: - Events
-
     @Test("crasher events: counts, times and sources")
     func crasherEvents() throws {
         let events = try KubernetesParser.parseEvents(try Fixtures.data("kubectl/events-crasher.json"))
@@ -331,7 +319,6 @@ struct KubernetesParserTests {
         let scheduled = events[0]
         #expect(scheduled.id == "b6452066-86a6-4b31-8f9a-fc93176c11f7")
         #expect(scheduled.message == "Successfully assigned demo/crasher-89b4b56b4-djl5b to aeroops-vm")
-        // No first/lastTimestamp: eventTime is used for both.
         let scheduledAt = try #require(scheduled.firstSeen)
         #expect(abs(scheduledAt.timeIntervalSince1970 - (day + 6 * 3600 + 55 * 60 + 7.379521)) < 1e-5)
         #expect(scheduled.lastSeen == scheduled.firstSeen)
@@ -387,8 +374,6 @@ struct KubernetesParserTests {
         #expect(events[2].source == "kubelet")
     }
 
-    // MARK: - Errors
-
     @Test("kubeconfig unreadable (k3s warning plus error)")
     func kubeconfigUnreadable() throws {
         let text = try Fixtures.string("kubectl/error-kubeconfig-unreadable.txt")
@@ -396,11 +381,9 @@ struct KubernetesParserTests {
         #expect(error == .kubeconfigUnreadable(path: "/etc/rancher/k3s/k3s.yaml"))
         #expect(error.hint?.contains("sudo -n k3s kubectl") == true)
         #expect(error.errorDescription == "Cannot read the kubeconfig (/etc/rancher/k3s/k3s.yaml).")
-        // As stdout of a parse, the same text becomes the same error, not invalidOutput.
         #expect(throws: KubectlError.kubeconfigUnreadable(path: "/etc/rancher/k3s/k3s.yaml")) {
             try KubernetesParser.parsePods(text)
         }
-        // Only the warning line still identifies the path.
         let warningOnly = String(text.split(separator: "\n")[0])
         #expect(KubectlError.classify(warningOnly) == .kubeconfigUnreadable(path: "/etc/rancher/k3s/k3s.yaml"))
     }

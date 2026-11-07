@@ -39,7 +39,6 @@ struct HostScreen: View {
                 HostEditorScreen(request: .edit(id), onDelete: { dismiss() })
             }
         } else {
-            // Deleted while shown.
             AeroEmptyState(systemImage: "server.rack", title: "Server removed", message: "This server is no longer in AeroOps.")
         }
     }

@@ -15,7 +15,6 @@ struct BridgeMessagesTests {
         #expect(line.last == UInt8(ascii: "\n"))
         #expect(line.dropLast().contains(UInt8(ascii: "\n")) == false)
         #expect(try BridgeWire.decodeClientMessage(line.dropLast()) == .request(request))
-        // The integer stays an integer on the wire.
         #expect(text(line).contains("\"tail\":100"))
     }
 

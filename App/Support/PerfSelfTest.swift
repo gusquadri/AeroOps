@@ -93,8 +93,6 @@ struct PerfSelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -213,8 +211,6 @@ struct PerfSelfTest {
         }
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         let report = await run()
         if let url = Phase2SelfTest.outputURL {
@@ -250,12 +246,10 @@ struct PerfSelfTest {
         }
         r.step("services", true, "agent running, monitoring started; \(r.report.optimized ? "optimized" : "-Onone") build")
 
-        // 1. Key: Ed25519 in the self-test Keychain service, policy "always" (no Touch ID).
         guard let key = await Phase2SelfTest.generateKey(name: "AeroOps perf self-test", ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
 
-        // 2. Authorize it on every dev server.
         if await Phase2SelfTest.authorize(key, ssh: ssh, step: r.step) {
             await measureHosts(key, r)
         }
@@ -263,7 +257,6 @@ struct PerfSelfTest {
     }
 
     private func measureHosts(_ key: SSHKeyRecord, _ r: Recorder) async {
-        // 3. Hosts: every name of every server, round-robin, each its own alias and master.
         let keyID = key.id.uuidString
         let (hosts, serverOf, distinct) = await makeHosts(keyID: keyID)
         r.report.hostCount = hosts.count
@@ -271,10 +264,8 @@ struct PerfSelfTest {
         r.step("endpoints", hosts.count == Self.hostCount, "\(hosts.count) hosts over \(distinct) distinct (address, port, user)")
         guard !hosts.isEmpty else { return }
 
-        // 4. Scan each server once, pin its keys for every name it answers to.
         guard await pinHostKeys(r, hosts: hosts, serverOf: serverOf) else { return }
 
-        // 5. Add the hosts with the window up, and wait until every card has numbers.
         let tracker = Tracker()
         for host in hosts { tracker.hosts[host.id] = host }
         let monitoring = model.monitoring
@@ -326,7 +317,6 @@ struct PerfSelfTest {
     }
 
     private func runScenarios(_ hosts: [RemoteHost], serverOf: [RemoteHost.ID: Int], tracker: Tracker, _ r: Recorder) async {
-        // 6. Scenarios.
         let containersHost = hosts.first { $0.kubectlPrefix != nil }
         for scenario in Self.scenarios {
             guard let result = await measure(scenario, r: r, tracker: tracker, hosts: hosts, containersHost: containersHost) else {
@@ -351,8 +341,6 @@ struct PerfSelfTest {
         }
         model.monitoring.activityOverride = nil
     }
-
-    // MARK: - Hosts
 
     private func makeHosts(keyID: String) async -> ([RemoteHost], [RemoteHost.ID: Int], Int) {
         struct Endpoint: Hashable {
@@ -384,7 +372,6 @@ struct PerfSelfTest {
 
         var hosts: [RemoteHost] = []
         var serverOf: [RemoteHost.ID: Int] = [:]
-        // The Containers scenario's host: the VM's dev user on the VM's domain.
         let containers = order.first { Self.servers[$0.server].kubectlPrefix != nil && $0.user == "dev" }
         for number in 0..<Self.hostCount {
             let endpoint = order[number % order.count]
@@ -448,8 +435,6 @@ struct PerfSelfTest {
             )
         }
     }
-
-    // MARK: - Scenarios
 
     private func measure(
         _ scenario: Scenario, r: Recorder, tracker: Tracker, hosts: [RemoteHost], containersHost: RemoteHost?
@@ -517,7 +502,6 @@ struct PerfSelfTest {
         let sampler = Task.detached(priority: .userInitiated) {
             await PerfSampler.run(seconds: duration, needle: needle)
         }
-        // An authentication failure stops the sampler at once.
         let watcher = Task { @MainActor in
             while !Task.isCancelled {
                 if tracker.authFailure != nil { return sampler.cancel() }
@@ -557,7 +541,6 @@ struct PerfSelfTest {
         guard !seconds.isEmpty else { return }
         let wall = seconds.reduce(0) { $0 + $1.wallNs }
         func average(_ value: (PerfSampler.Second) -> Double) -> Double {
-            // Time-weighted: total CPU over total wall time.
             rounded(seconds.reduce(0) { $0 + value($1) * $1.wallNs } / wall)
         }
         func stats(_ value: (PerfSampler.Second) -> Double) -> Stats {
@@ -581,8 +564,6 @@ struct PerfSelfTest {
         result.clientsMax = seconds.map(\.clients).max() ?? 0
         result.appCPUPerSecond = seconds.map { rounded($0.appCPU) }
     }
-
-    // MARK: - Window
 
     private func mainWindow() -> NSWindow? {
         NSApp.windows.first(where: MonitorService.isMainWindow)
@@ -615,8 +596,6 @@ struct PerfSelfTest {
         return true
     }
 
-    // MARK: - Finish
-
     private func finish(_ r: Recorder, key: SSHKeyRecord?) async -> Report {
         let ssh = model.ssh
         let paths = ssh.paths
@@ -641,7 +620,6 @@ struct PerfSelfTest {
     }
 
     private func checkNothingLeftBehind(_ r: Recorder) async {
-        // No ssh process (master or client) may outlive the run.
         let needle = Phase2SelfTest.root.lastPathComponent
         var leftovers: [String] = []
         await waitUntil(seconds: 5) {
@@ -657,8 +635,6 @@ struct PerfSelfTest {
             r.report.touchIDRequests.isEmpty ? "none" : "\(r.report.touchIDRequests.count), denied: \(r.report.touchIDRequests)"
         )
     }
-
-    // MARK: - Helpers
 
     /// Waits until `condition` holds, checking every 50 ms. Returns whether it held in time.
     @discardableResult
@@ -869,7 +845,6 @@ enum PerfSampler {
             pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
         }
         guard status == 0 else { return nil }
-        // Mach absolute time units on Apple silicon.
         let ticks = info.ri_user_time + info.ri_system_time
         return (ticks * timebase.numer / timebase.denom, info.ri_phys_footprint)
     }

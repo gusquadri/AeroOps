@@ -7,9 +7,15 @@ import SwiftUI
 struct HostEditorScreen: View {
     enum Request: Identifiable, Hashable {
         case new
+        /// A new host, saved last into the folder with this ID.
+        case newIn(HostFolder.ID)
         case edit(RemoteHost.ID)
 
         var id: Self { self }
+
+        var folder: HostFolder.ID? {
+            if case .newIn(let id) = self { id } else { nil }
+        }
     }
 
     let request: Request
@@ -26,7 +32,9 @@ struct HostEditorScreen: View {
     @State private var isConfirmingDelete = false
     @State private var isLoaded = false
 
-    private var isNew: Bool { request == .new }
+    private var isNew: Bool {
+        if case .edit = request { false } else { true }
+    }
 
     var body: some View {
         let validation = draft.validate(
@@ -130,8 +138,6 @@ struct HostEditorScreen: View {
         .onAppear(perform: load)
     }
 
-    // MARK: - Fields
-
     /// A field with its validation message underneath.
     private func field(
         _ field: HostDraft.Field,
@@ -185,8 +191,6 @@ struct HostEditorScreen: View {
             .foregroundStyle(Aero.text.secondary)
     }
 
-    // MARK: - Actions
-
     private func load() {
         guard !isLoaded else { return }
         isLoaded = true
@@ -205,7 +209,7 @@ struct HostEditorScreen: View {
         let host = draft.makeHost()
         let password = host.auth == .password && !draft.password.isEmpty ? draft.password : nil
         do {
-            try model.save(host, password: password)
+            try model.save(host, password: password, folder: request.folder)
             dismiss()
         } catch {
             saveError = error.localizedDescription

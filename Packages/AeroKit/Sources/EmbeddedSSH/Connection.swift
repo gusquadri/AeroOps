@@ -59,8 +59,6 @@ final class SSHConnection: Sendable {
         let authenticated = loop.makePromise(of: Void.self)
         let deadline = loop.scheduleTask(in: handshakeTimeout) { authenticated.fail(SSHError.timeout) }
         defer { deadline.cancel() }
-        // TCP keepalive stands in for ssh's `ServerAliveInterval 15` / `ServerAliveCountMax 3`:
-        // NIOSSH cannot send OpenSSH's keepalive requests.
         let bootstrap = ClientBootstrap(group: loop)
             .connectTimeout(connectTimeout)
             .channelOption(ChannelOptions.socketOption(.tcp_nodelay), value: 1)
@@ -112,8 +110,6 @@ final class SSHConnection: Sendable {
                 let handler = try channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
                 handler.createChannel(opened, channelType: .session) { child, _ in
                     child.eventLoop.makeCompletedFuture {
-                        // The exit status often arrives after the server's EOF; without half-closure
-                        // NIOSSH would close the channel at the EOF and drop it.
                         try child.syncOptions?.setOption(ChannelOptions.allowRemoteHalfClosure, value: true)
                         try child.pipeline.syncOperations.addHandler(makeHandler())
                         control.attach(child)

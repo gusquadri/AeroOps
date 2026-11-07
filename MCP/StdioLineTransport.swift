@@ -30,37 +30,8 @@ actor StdioLineTransport: Transport {
     func connect() async throws {
         guard !started else { return }
         started = true
-        let continuation = self.continuation
-        let logger = self.logger
-        let requests = self.requests
-        let reader = Thread {
-            var framer = LineFramer(maxLineBytes: StdioLineTransport.maxLineBytes)
-            let size = 64 * 1024
-            var buffer = [UInt8](repeating: 0, count: size)
-            while true {
-                let count = buffer.withUnsafeMutableBytes { Darwin.read(STDIN_FILENO, $0.baseAddress, size) }
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    continuation.finish(throwing: POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO))
-                    return
-                }
-                if count == 0 { break }  // EOF: the client closed the pipe.
-                for event in framer.append(Data(buffer[0..<count])) {
-                    switch event {
-                    case .line(let line):
-                        requests.received(line)
-                        continuation.yield(line)
-                    case .oversized(let bytes):
-                        logger.warning("Dropped a JSON-RPC line over \(StdioLineTransport.maxLineBytes) bytes (\(bytes) so far)")
-                    }
-                }
-            }
-            if let line = framer.finish() {
-                requests.received(line)
-                continuation.yield(line)
-            }
-            continuation.finish()
-        }
+        let sink = StdinLineSink(continuation: continuation, logger: logger, requests: requests)
+        let reader = Thread { sink.run() }
         reader.name = "stdin-reader"
         reader.start()
     }
@@ -72,7 +43,6 @@ actor StdioLineTransport: Transport {
     func send(_ data: Data) async throws {
         var line = data
         line.append(UInt8(ascii: "\n"))
-        // Blocking write; SIGPIPE is ignored, so a closed stdout throws EPIPE instead of killing us.
         do {
             try FileHandle.standardOutput.write(contentsOf: line)
         } catch {
@@ -117,7 +87,6 @@ final class UnansweredRequests: Sendable {
         state.withLock { state in
             for message in messages {
                 if message["method"] as? String == "notifications/cancelled" {
-                    // A cancelled request gets no response.
                     if let id = Self.key((message["params"] as? [String: Any])?["requestId"]) { state.ids.remove(id) }
                 } else if message["method"] != nil, let id = Self.key(message["id"]) {
                     state.ids.insert(id)
@@ -154,5 +123,53 @@ final class UnansweredRequests: Sendable {
         case let number as NSNumber: "n:" + number.stringValue
         default: nil
         }
+    }
+}
+
+private struct StdinLineSink: Sendable {
+    let continuation: AsyncThrowingStream<Data, any Error>.Continuation
+    let logger: Logger
+    let requests: UnansweredRequests
+
+    func run() {
+        var framer = LineFramer(maxLineBytes: StdioLineTransport.maxLineBytes)
+        if let failure = pump(&framer) {
+            continuation.finish(throwing: failure)
+            return
+        }
+        if let line = framer.finish() {
+            deliver(line)
+        }
+        continuation.finish()
+    }
+
+    private func pump(_ framer: inout LineFramer) -> POSIXError? {
+        let size = 64 * 1024
+        var buffer = [UInt8](repeating: 0, count: size)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { Darwin.read(STDIN_FILENO, $0.baseAddress, size) }
+            if count > 0 {
+                handle(framer.append(Data(buffer[0..<count])))
+                continue
+            }
+            if count == 0 { return nil }
+            if errno != EINTR { return POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        }
+    }
+
+    private func handle(_ events: [LineFramer.Event]) {
+        for event in events {
+            switch event {
+            case .line(let line):
+                deliver(line)
+            case .oversized(let bytes):
+                logger.warning("Dropped a JSON-RPC line over \(StdioLineTransport.maxLineBytes) bytes (\(bytes) so far)")
+            }
+        }
+    }
+
+    private func deliver(_ line: Data) {
+        requests.received(line)
+        continuation.yield(line)
     }
 }

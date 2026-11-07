@@ -21,11 +21,8 @@ struct PasswordAuthTests {
         socket: paths.askpassSocket
     )
 
-    // MARK: Config and environment
-
     @Test("a password host offers no key and sends one password per connection (golden)")
     func golden() throws {
-        // The key id is kept for switching back, but never offered while the host uses a password.
         let rendering = try SSHConfigWriter(context: SSHContext(paths: Self.paths)).render([Self.host])
         #expect(rendering.rejected.isEmpty)
         #expect(rendering.text == """
@@ -54,7 +51,6 @@ struct PasswordAuthTests {
 
         """)
 
-        // The system ssh-agent option does not hand a password host the user's keys either.
         let system = try SSHConfigWriter(context: SSHContext(paths: Self.paths, agent: .system)).render([Self.host]).text
         #expect(system.contains("\n  IdentityAgent none\n"))
         #expect(!system.contains("SSH_AUTH_SOCK"))
@@ -67,7 +63,6 @@ struct PasswordAuthTests {
         try SSHConfigWriter(context: SSHContext(paths: paths)).write([SSHConfigWriterTests.hostA, Self.host])
         let result = try await runTool("/usr/bin/ssh", ["-G", "-F", paths.sshConfig.filePath, Self.host.sshAlias])
         #expect(result.status == 0, "\(result.stderr)")
-        // OpenSSH 10 prints PubkeyAuthentication as true/false; older releases as yes/no.
         #expect(result.stdout.contains("\npubkeyauthentication false\n") || result.stdout.contains("\npubkeyauthentication no\n"))
         for line in [
             "passwordauthentication yes",
@@ -80,7 +75,6 @@ struct PasswordAuthTests {
         }
         #expect(!result.stdout.contains("key-1.pub"))
 
-        // The key host next to it is unaffected.
         let keyHost = try await runTool("/usr/bin/ssh", ["-G", "-F", paths.sshConfig.filePath, SSHConfigWriterTests.hostA.sshAlias])
         #expect(keyHost.stdout.contains("\nnumberofpasswordprompts 3\n"))
         #expect(!keyHost.stdout.contains("\npubkeyauthentication false\n") && !keyHost.stdout.contains("\npubkeyauthentication no\n"))
@@ -132,7 +126,6 @@ struct PasswordAuthTests {
         var context = SSHContext(paths: paths, sshExecutable: echo)
         let config = paths.sshConfig.filePath
 
-        // No route: BatchMode stays, so ssh fails instead of prompting nobody.
         let batch = try await SSHRunner(context: context).run("uptime", on: Self.host)
         #expect(batch.stdoutString.split(separator: "\n").map(String.init) == [
             "-F", config, "-o", "BatchMode=yes", "--", Self.host.sshAlias, "uptime", "ASKPASS=||",
@@ -163,8 +156,6 @@ struct PasswordAuthTests {
         #expect(SSHError.classify(stderr: "aeroops-askpass: the server rejected the password and asked again\n") == .authFailed)
     }
 
-    // MARK: Runner and gate
-
     /// A runner for a password host whose fake ssh appends a line to `runs` and then runs `body`.
     private func runner(_ scratch: ScratchDirectory, gate: PasswordAttemptGate, askpass: Bool = true, body: String) throws -> SSHRunner {
         let fake = try scratch.script("ssh", "echo run >> \(ShellQuote.quote(scratch.file("runs").filePath))\n" + body)
@@ -194,7 +185,6 @@ struct PasswordAuthTests {
         _ = try await runner.run("uptime", on: Self.host)
         #expect(runs(scratch) == 2)
 
-        // Key hosts never wait on the gate.
         let key = RemoteHost.test()
         _ = try await runner.run("uptime", on: key)
         #expect(runs(scratch) == 3)
@@ -209,8 +199,6 @@ struct PasswordAuthTests {
         #expect(await gate.isProven(Self.host.id))
         #expect(await !gate.isRejected(Self.host.id))
 
-        // Unreachable: says nothing about the password, so neither proven nor rejected, and the
-        // next run does not wait for the probe window.
         await gate.reset(Self.host.id)
         let refused = try runner(scratch, gate: gate, body: "echo 'ssh: connect to host nas.local port 22: Connection refused' >&2; exit 255")
         #expect(try await refused.run("uptime", on: Self.host).transportError == .connectionRefused)
@@ -220,7 +208,6 @@ struct PasswordAuthTests {
         _ = try await refused.run("uptime", on: Self.host)
         #expect(ContinuousClock.now - start < .seconds(10))
 
-        // A launch failure frees it too.
         let missing = SSHRunner(
             context: SSHContext(paths: scratch.paths(), sshExecutable: scratch.file("no-such-ssh")), passwords: gate)
         await #expect(throws: (any Error).self) { try await missing.run("uptime", on: Self.host) }
@@ -275,11 +262,9 @@ struct PasswordAuthTests {
         try await waiter.value
         #expect(admitted.withLock { $0 })
 
-        // Proven: everyone passes at once.
         try await gate.admit(host)
         try await gate.admit(host)
 
-        // After a reset the next login is a probe again; release lets the next one try.
         await gate.reset(host.id)
         try await gate.admit(host)
         await gate.release(host.id)
@@ -315,7 +300,7 @@ struct PasswordAuthTests {
         #expect(await updates.next() == [])
         await gate.reject(id)
         #expect(await updates.next() == [id])
-        await gate.reject(id) // already rejected: nothing new
+        await gate.reject(id)
         await gate.reset(id)
         #expect(await updates.next() == [])
         #expect(await gate.rejectedHosts.isEmpty)

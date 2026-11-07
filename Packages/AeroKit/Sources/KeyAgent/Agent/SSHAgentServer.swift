@@ -4,7 +4,6 @@ import Dispatch
 import Foundation
 import Synchronization
 
-// The agent socket serves /usr/bin/ssh, which exists only on macOS.
 #if os(macOS)
 
 /// Why the agent socket could not be started.
@@ -113,8 +112,6 @@ final class AgentServerCore: Sendable {
         continuation.yield(AgentEvent(connectionID: connectionID, kind: kind))
     }
 
-    // MARK: Start and stop
-
     func start() throws(AgentServerError) {
         try listener.start(
             serve: { [weak self] fd, id in self?.serve(fd, id) },
@@ -124,8 +121,6 @@ final class AgentServerCore: Sendable {
     func stop() {
         listener.stop()
     }
-
-    // MARK: Connections
 
     private func serve(_ fd: Int32, _ id: UInt64) {
         guard let uid = PeerInspector.peerUID(fd), uid == getuid() else {

@@ -58,8 +58,6 @@ final class MobileFileBrowser<Backend: FileTransferBackend> {
         try? FileManager.default.removeItem(at: scratch)
     }
 
-    // MARK: Downloads
-
     /// Copies remote items of `directory` (the folder shown unless given) to this device, then
     /// offers them in ``downloads``.
     func download(_ items: [FileItem], in directory: Backend.Path? = nil) {
@@ -86,8 +84,6 @@ final class MobileFileBrowser<Backend: FileTransferBackend> {
         let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         downloads[id] = items.isEmpty ? nil : items.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
-
-    // MARK: Uploads
 
     /// Uploads picked files into `directory` (the folder shown unless given), asking first if
     /// any already exist in the folder shown.
@@ -147,8 +143,6 @@ final class MobileFileBrowser<Backend: FileTransferBackend> {
         }
         return copies
     }
-
-    // MARK: Queue
 
     /// Removes an ended transfer and its downloaded copies.
     func remove(_ transfer: FileTransfer) {

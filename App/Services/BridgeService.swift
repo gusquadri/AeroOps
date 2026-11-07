@@ -100,8 +100,6 @@ final class BridgeService {
     /// Whether an agent command is running.
     var hasRunningCommands: Bool { liveCommands.contains(where: \.isRunning) }
 
-    // MARK: - Lifecycle
-
     /// Opens the socket. Call after ``SSHServices/start()`` and ``MonitorService/start()``.
     func start() {
         guard isEnabled, !isShutDown, bridge == nil else { return }
@@ -113,12 +111,12 @@ final class BridgeService {
             socketURL: socketURL,
             handler: AppBridgeHandler(source: dataSource, runner: runner),
             executor: executor,
-            peerValidator: CodeSignaturePeerValidator.forApp()
+            peerValidator: CodeSignaturePeerValidator.forApp(),
+            files: RemoteFiles { [runner] in try await runner.sftp(to: $0) }
         )
         self.bridge = bridge
         self.executor = executor
 
-        // Subscribe before the socket opens so no event is missed.
         observe(bridge.events()) { $0.receive($1) }
         observe(executor.activity()) { $0.receive($1) }
 
@@ -156,8 +154,6 @@ final class BridgeService {
         }
     }
 
-    // MARK: - Actions
-
     /// Stops a running command (the Activity tab's Cancel). ssh is killed and the remote watchdog
     /// kills the command's process group within a few seconds.
     @discardableResult
@@ -170,8 +166,6 @@ final class BridgeService {
     func clearFinishedCommands() {
         liveCommands.removeAll { !$0.isRunning }
     }
-
-    // MARK: - Events
 
     private func observe<Element: Sendable>(_ stream: AsyncStream<Element>, _ handler: @escaping @MainActor (BridgeService, Element) -> Void) {
         tasks.append(Task { [weak self] in
@@ -262,8 +256,6 @@ final class BridgeService {
         }
     }
 
-    // MARK: - Samples
-
     #if DEBUG
     /// Sample state for demo and snapshot launches: a running command with output, a finished
     /// one and a connection.
@@ -296,8 +288,6 @@ final class BridgeService {
 
     nonisolated static let logger = Logger(subsystem: "app.aeroops.AeroOps", category: "bridge")
 }
-
-// MARK: - Data for the read tools
 
 /// The model-side answers to the bridge's read tools. Main-actor work only (host list, live
 /// state); remote fetches run in ``AppBridgeHandler`` off the main actor.
@@ -457,8 +447,6 @@ struct AppBridgeHandler: BridgeToolHandler {
     }
 }
 
-// MARK: - Runner
-
 /// The bridge's command runner: the app's current ``SSHRunner`` (swapped when the agent choice
 /// changes), for both `run_command` (AgentBridge) and the collectors. Reading it takes a lock,
 /// not the main actor.
@@ -474,6 +462,10 @@ final class BridgeCommandRunner: RemoteCommandRunner, HostCommandRunning, HostCo
     }
 
     private var runner: SSHRunner { current.withLock { $0 } }
+
+    func sftp(to host: RemoteHost) async throws -> SFTPClient {
+        try await SFTPClient.connect(using: runner, to: host)
+    }
 
     func run(_ remoteCommand: String, on host: RemoteHost, timeout: Duration, outputLimit: Int,
              output: @escaping @Sendable (CommandOutputChunk) -> Void) async throws -> RemoteCommandOutcome {

@@ -1,6 +1,7 @@
 import AeroCore
 import BridgeProtocol
 import Foundation
+import SSHKit
 import os
 
 /// The app's MCP bridge: the socket server plus the request pipeline
@@ -37,11 +38,12 @@ public final class Bridge: Sendable {
         executor: CommandExecutor = CommandExecutor(runner: SSHCommandRunner()),
         peerValidator: any BridgePeerValidator = CodeSignaturePeerValidator.forApp(),
         policy: PolicyEngine = PolicyEngine(),
-        clock: any BridgeClock = SystemBridgeClock()
+        clock: any BridgeClock = SystemBridgeClock(),
+        files: RemoteFiles = .ssh(SSHRunner())
     ) {
         self.socketURL = socketURL
         self.executor = executor
-        pipeline = BridgePipeline(handler: handler, executor: executor, policy: policy, clock: clock)
+        pipeline = BridgePipeline(handler: handler, executor: executor, files: files, policy: policy, clock: clock)
         server = BridgeServer(socketURL: socketURL, handler: pipeline, validator: peerValidator)
     }
 
@@ -76,6 +78,7 @@ public final class Bridge: Sendable {
 struct BridgePipeline: BridgeRequestHandler {
     let handler: any BridgeToolHandler
     let executor: CommandExecutor
+    let files: RemoteFiles
     let policy: PolicyEngine
     let clock: any BridgeClock
 
@@ -83,67 +86,83 @@ struct BridgePipeline: BridgeRequestHandler {
 
     func handle(_ request: BridgeRequest, from peer: BridgePeer,
                 progress: @escaping @Sendable (String) -> Void) async -> BridgeReply? {
-        // 1. Tool and arguments.
+        let prepared: Prepared
+        do {
+            prepared = try await prepare(request)
+        } catch {
+            return refuse(request, error)
+        }
+        if Task.isCancelled { return nil }
+        do {
+            let reply = try await run(prepared, id: request.id, progress: progress)
+            try Task.checkCancellation()
+            return reply
+        } catch {
+            if error is CancellationError || Task.isCancelled { return nil }
+            let bridgeError = Self.bridgeError(for: error, tool: prepared.tool)
+            return .failure(id: request.id, bridgeError.code, bridgeError.message)
+        }
+    }
+
+    private struct Prepared {
+        let tool: BridgeTool
+        let call: ToolCall
+        let host: RemoteHost?
+        let states: [BridgeHostState]
+    }
+
+    private func prepare(_ request: BridgeRequest) async throws(BridgeError) -> Prepared {
         guard let tool = BridgeTool(rawValue: request.tool) else {
-            return refuse(request, BridgeError(code: .unknownTool, message: "Unknown tool \(String(reflecting: DisplayText.sanitized(request.tool, maxLength: 64)))."))
+            throw BridgeError(code: .unknownTool, message: "Unknown tool \(String(reflecting: DisplayText.sanitized(request.tool, maxLength: 64))).")
         }
         let call: ToolCall
         do {
             call = try ToolCall.parse(tool: tool, arguments: request.arguments)
         } catch {
-            return refuse(request, BridgeError(code: .invalidArguments, message: error.message))
+            throw BridgeError(code: .invalidArguments, message: error.message)
         }
-
-        // 2. Host and policy.
         let states = await handler.hosts()
-        var host: RemoteHost?
-        if let query = call.hostQuery {
-            switch HostResolver.resolve(query, in: states.map(\.host)) {
-            case .success(let resolved):
-                host = resolved
-            case .failure(let failure):
-                return refuse(request, failure.bridgeError)
-            }
-        }
-        if let host, case .reject(let error) = policy.evaluate(tool: tool, host: host) {
-            return refuse(request, error)
-        }
-        if Task.isCancelled { return nil }
+        guard let query = call.hostQuery else { return Prepared(tool: tool, call: call, host: nil, states: states) }
+        let host = try HostResolver.resolve(query, in: states.map(\.host)).mapError(\.bridgeError).get()
+        if case .reject(let error) = policy.evaluate(tool: tool, host: host) { throw error }
+        return Prepared(tool: tool, call: call, host: host, states: states)
+    }
 
-        // 3. Run it.
-        do {
-            let reply: BridgeReply
-            switch call {
-            case .listHosts(let arguments):
-                reply = ToolResults.reply(id: request.id, structured: ToolResults.hosts(states, tag: arguments.tag))
-            case .getHostMetrics:
-                let host = try requireHost(host)
-                let metrics = try await handler.metrics(for: host)
-                reply = ToolResults.reply(id: request.id, structured: ToolResults.metrics(metrics, host: host, now: clock.now))
-            case .listContainers(let arguments):
-                let host = try requireHost(host)
-                let containers = try await handler.containers(on: host, includeStopped: arguments.all)
-                reply = ToolResults.reply(id: request.id, structured: ToolResults.containers(containers, host: host))
-            case .listPods(let arguments):
-                let host = try requireHost(host)
-                let pods = try await handler.pods(on: host, namespace: arguments.namespace)
-                reply = ToolResults.reply(id: request.id, structured: ToolResults.pods(pods, host: host, now: clock.now))
-            case .getLogs(let arguments):
-                let host = try requireHost(host)
-                let text = try await handler.logs(arguments.logRequest(hostId: host.id), on: host)
-                reply = .success(id: request.id, content: [.text(ToolResults.logs(text, arguments: arguments, host: host))])
-            case .runCommand(let arguments):
-                let host = try requireHost(host)
-                progress("Running on \(host.name)")
-                let result = try await executor.execute(arguments.command, on: host, timeoutSeconds: arguments.timeoutSeconds)
-                reply = ToolResults.reply(id: request.id, structured: ToolResults.command(result, host: host))
-            }
-            try Task.checkCancellation()
-            return reply
-        } catch {
-            if error is CancellationError || Task.isCancelled { return nil }
-            let bridgeError = Self.bridgeError(for: error, tool: tool)
-            return .failure(id: request.id, bridgeError.code, bridgeError.message)
+    private func run(_ prepared: Prepared, id: Int, progress: @Sendable (String) -> Void) async throws -> BridgeReply {
+        switch prepared.call {
+        case .monitoring(let call):
+            return try await run(call, host: prepared.host, states: prepared.states, id: id)
+        case .runCommand(let arguments):
+            let host = try requireHost(prepared.host)
+            progress("Running on \(host.name)")
+            let result = try await executor.execute(arguments.command, on: host, timeoutSeconds: arguments.timeoutSeconds)
+            return ToolResults.reply(id: id, structured: ToolResults.command(result, host: host))
+        case .files(let call):
+            let host = try requireHost(prepared.host)
+            progress("SFTP on \(host.name)")
+            return ToolResults.reply(id: id, structured: try await files.run(call, on: host))
+        }
+    }
+
+    private func run(_ call: MonitoringCall, host: RemoteHost?, states: [BridgeHostState], id: Int) async throws -> BridgeReply {
+        switch call {
+        case .listHosts(let arguments):
+            return ToolResults.reply(id: id, structured: ToolResults.hosts(states, tag: arguments.tag))
+        case .getHostMetrics:
+            let host = try requireHost(host)
+            return ToolResults.reply(id: id, structured: ToolResults.metrics(try await handler.metrics(for: host), host: host, now: clock.now))
+        case .listContainers(let arguments):
+            let host = try requireHost(host)
+            let containers = try await handler.containers(on: host, includeStopped: arguments.all)
+            return ToolResults.reply(id: id, structured: ToolResults.containers(containers, host: host))
+        case .listPods(let arguments):
+            let host = try requireHost(host)
+            let pods = try await handler.pods(on: host, namespace: arguments.namespace)
+            return ToolResults.reply(id: id, structured: ToolResults.pods(pods, host: host, now: clock.now))
+        case .getLogs(let arguments):
+            let host = try requireHost(host)
+            let text = try await handler.logs(arguments.logRequest(hostId: host.id), on: host)
+            return .success(id: id, content: [.text(ToolResults.logs(text, arguments: arguments, host: host))])
         }
     }
 

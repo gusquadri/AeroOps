@@ -3,17 +3,19 @@ import AeroTheme
 import Collectors
 import SwiftUI
 
-/// The Containers tab: every server, then its Docker containers and Kubernetes pods. Holds the
+/// The Containers tab: every server matching the search field, then its Docker containers and Kubernetes pods. Holds the
 /// stack and the prompts of its screens, and ends logs and inspections when their screens close.
 struct ContainersScreen: View {
     @Environment(MobileModel.self) private var model
     @Environment(MobileNavigator.self) private var navigator
+    @State private var search = ""
 
     var body: some View {
         @Bindable var navigator = navigator
         NavigationStack(path: $navigator.containerPath) {
             content
                 .background { SkyBackground() }
+                .searchable(text: $search, prompt: "Name or address")
                 .navigationTitle("Containers")
                 .navigationDestination(for: ContainersRoute.self) { ContainersDestination(route: $0) }
         }
@@ -25,7 +27,8 @@ struct ContainersScreen: View {
         if model.hosts.isEmpty {
             NoServersView()
         } else {
-            List(model.hosts) { host in
+            let hosts = model.hosts.matching(search: search)
+            List(hosts) { host in
                 NavigationLink(value: ContainersRoute.host(host.id)) {
                     HostRow(
                         host: host,
@@ -36,6 +39,7 @@ struct ContainersScreen: View {
                 .listRowBackground(Aero.glass.fill)
             }
             .scrollContentBackground(.hidden)
+            .overlay { if hosts.isEmpty { NoMatchingHostsView(search: search).padding(16) } }
         }
     }
 }

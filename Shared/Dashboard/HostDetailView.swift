@@ -54,8 +54,6 @@ struct HostDetailView: View {
         .background { SkyBackground() }
     }
 
-    // MARK: Header
-
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             StatusBubble(tone: state.orbTone(blocked: keyBlock != nil), logo: state.systemLogo, size: 44)
@@ -107,8 +105,6 @@ struct HostDetailView: View {
         }
         .disabled(keyBlock != nil)
     }
-
-    // MARK: Sections
 
     private func statusSection(_ metrics: MetricsSnapshot?) -> some View {
         GlassSection("Status", systemImage: "waveform.path.ecg") {

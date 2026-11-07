@@ -44,13 +44,11 @@ die() { printf 'release: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 
-# Prints a command in copy-pasteable form, then runs it unless this is a dry run.
 run() {
     printf '+'; printf ' %q' "$@"; printf '\n'
     [ "$dry_run" = 1 ] || "$@"
 }
 
-# Like run, with stdout and stderr in a log file (the tail is shown when the command fails).
 run_logged() {
     local log=$1; shift
     printf '+'; printf ' %q' "$@"; printf ' > %q 2>&1\n' "$log"
@@ -101,20 +99,20 @@ done
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"
 
-# MARK: Inputs
-
 read_profile() {
     [ -f "$profile" ] || die "no provisioning profile at $profile"
-    local plist app_id all_devices
+    local plist app_id all_devices managed
     plist=$(mktemp)
     security cms -D -i "$profile" > "$plist" 2> /dev/null || die "$profile is not a provisioning profile"
     profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")
     profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")
     app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$plist" 2> /dev/null || true)
     all_devices=$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$plist" 2> /dev/null || true)
+    managed=$(/usr/libexec/PlistBuddy -c 'Print :IsXcodeManaged' "$plist" 2> /dev/null || true)
     rm -f "$plist"
     [ "$app_id" = "$team.$bundle_id" ] || die "$profile is for \"$app_id\", not $team.$bundle_id"
     [ "$all_devices" = true ] || die "$profile is not a Developer ID profile"
+    [ "$managed" != true ] || die "$profile is Xcode managed; create a Developer ID profile at developer.apple.com"
     case $profile_name in
         *[\"\\]*) die "the profile name has quotes or backslashes: $profile_name" ;;
     esac
@@ -212,11 +210,12 @@ run mkdir -p "$run_dir" "$updates_dir"
 step "Generating the Xcode project"
 run xcodegen generate
 
-if [ -n "$profile" ]; then
+profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+installed_profile="$profiles_dir/$profile_uuid.provisionprofile"
+if [ -n "$profile" ] && ! cmp -s "$profile" "$installed_profile"; then
     step "Installing the provisioning profile"
-    profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
     run mkdir -p "$profiles_dir"
-    run cp "$profile" "$profiles_dir/$profile_uuid.provisionprofile"
+    run cp "$profile" "$installed_profile"
 fi
 
 step "Archiving (Release, Developer ID)"
@@ -308,7 +307,6 @@ verify_helpers() {
     "$cli" --version > /dev/null || die "aeroops-mcp does not run (code signature or entitlements rejected?)"
     note "aeroops-mcp: satisfies the bridge peer requirement and runs"
 
-    # The askpass server only answers aeroops-askpass signed by the same team with this identifier.
     local askpass="$app/Contents/MacOS/aeroops-askpass"
     codesign --verify -R="anchor apple generic and certificate leaf[subject.OU] = \"$team\" and identifier \"app.aeroops.askpass\"" "$askpass" \
         || die "aeroops-askpass does not satisfy the askpass server's peer requirement"
@@ -332,9 +330,6 @@ else
     verify_app
 fi
 
-# MARK: Notarize
-
-# Submits $1 under the keychain profile and waits; on rejection fetches Apple's log.
 notarize() {
     local file=$1 label=$2
     local result="$run_dir/notary-$label.json" log="$run_dir/notary-$label-log.json"
@@ -363,8 +358,6 @@ run xcrun stapler staple "$app"
 run xcrun stapler validate "$app"
 run spctl --assess --type execute --verbose=2 "$app"
 
-# MARK: Package
-
 step "Sparkle update archive"
 run ditto -c -k --sequesterRsrc --keepParent "$app" "$update_zip"
 
@@ -379,8 +372,6 @@ notarize "$dmg" dmg
 run xcrun stapler staple "$dmg"
 run xcrun stapler validate "$dmg"
 run spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
-
-# MARK: Next steps
 
 if [ "$dry_run" = 1 ]; then
     step "Done (dry run: nothing was built, signed or submitted)"

@@ -79,29 +79,26 @@ public struct HostKeyScanner: HostKeyScanning {
 
     /// Parses `ssh-keyscan` output; throws a classified ``SSHError`` when it holds no keys.
     static func parse(stdout: String, stderr: String) throws(SSHError) -> [HostKey] {
+        let lines = stdout.split(whereSeparator: \.isNewline)
+        let keys = hostKeys(in: lines)
+        if !keys.isEmpty { return keys }
+        throw failure(stderr: stderr, sawBanner: lines.contains { $0.hasPrefix("#") })
+    }
+
+    private static func hostKeys(in lines: [Substring]) -> [HostKey] {
         var keys: [HostKey] = []
-        var sawBanner = false
-        for line in stdout.split(whereSeparator: \.isNewline) {
-            if line.hasPrefix("#") {
-                sawBanner = true // "# host:port SSH-2.0-OpenSSH_10.3"
-                continue
-            }
+        for line in lines where !line.hasPrefix("#") {
             let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
             guard fields.count >= 3, let key = try? HostKey(type: String(fields[1]), base64: String(fields[2])) else { continue }
             if !keys.contains(key) { keys.append(key) }
         }
-        if !keys.isEmpty { return keys }
+        return keys
+    }
 
-        // ssh-keyscan exits 1 with these patterns (OpenSSH 10.3):
-        //   refused:  "write (localhost): Broken pipe", repeated per key type
-        //   DNS:      "getaddrinfo <name>: nodename nor servname provided, or not known"
-        //   timeout:  no output at all
-        if stderr.contains("Broken pipe") && stderr.contains("write (") { throw .connectionRefused }
-        let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            throw sawBanner ? .other("The server offered no supported host keys.") : .timeout
-        }
-        throw SSHError.classify(stderr: stderr)
+    private static func failure(stderr: String, sawBanner: Bool) -> SSHError {
+        if stderr.contains("Broken pipe") && stderr.contains("write (") { return .connectionRefused }
+        guard stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return SSHError.classify(stderr: stderr) }
+        return sawBanner ? .other("The server offered no supported host keys.") : .timeout
     }
 }
 

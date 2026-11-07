@@ -38,7 +38,6 @@ struct TerminalAppearanceTests {
         #expect(dict["abnormal-command-exit-runtime"] == "0")
         #expect(dict["clipboard-read"] == "deny")
         #expect(dict["font-size"] == "13.50")
-        // A newline in the font name cannot inject another config line.
         #expect(dict["font-family"] == "Menlofont-size = 99")
         #expect(settings.allSatisfy { !$0.value.contains("\n") })
     }

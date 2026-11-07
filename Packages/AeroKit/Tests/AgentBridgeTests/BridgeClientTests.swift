@@ -50,7 +50,6 @@ struct BridgeClientTests {
         await client.setClientInfo(BridgeClientInfo(name: "claude-code", version: "2.1.296"))
         let who = try await client.call(tool: "whoami", arguments: [:], toolUseId: "toolu_42")
         #expect(who.text == "claude-code 2.1.296 toolu_42")
-        // App-side failures are replies, not thrown errors.
         let unknown = try await client.call(tool: "nope", arguments: [:])
         #expect(!unknown.ok && unknown.error?.code == .unknownTool)
         #expect(fixture.handler.started == [1, 2, 3], "ids start at 1 and go up")
@@ -106,7 +105,6 @@ struct BridgeClientTests {
         await #expect(throws: BridgeCallError.appQuit) { try await call.value }
         #expect(BridgeCallError.appQuit.description == "AeroOps quit while handling the request.")
 
-        // Without a launcher: not running.
         await #expect(throws: BridgeCallError.appNotRunning(detail: nil)) {
             try await client.call(tool: "echo", arguments: ["text": "anyone?"])
         }
@@ -155,7 +153,6 @@ struct BridgeClientTests {
         let server = fixture.server
         let client = fixture.client(launch: "app.aeroops.AeroOps") { bundle in
             launches.record(bundle)
-            // The "app" opens its socket a little later.
             Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 try? server.start()
@@ -182,8 +179,6 @@ struct BridgeClientTests {
 
     @Test func refusedPeerGetsTheAppsMessage() async throws {
         let fixture = try Fixture(validator: RejectAllPeers())
-        // The app replies and closes at once, so the refusal can arrive before, while or after
-        // the request is sent; every order must report the refusal, never "quit".
         try await withThrowingTaskGroup { group in
             for _ in 0..<20 {
                 let client = fixture.client()

@@ -53,8 +53,6 @@ private struct TerminalSessionView: View {
                 }
             }
             .task {
-                // Only the first time: after the shell ended or the connection dropped, the
-                // screen waits for Reconnect.
                 if session.connection == 0 { session.connect() }
             }
             .onChange(of: session.state, initial: true) { updateFocus() }

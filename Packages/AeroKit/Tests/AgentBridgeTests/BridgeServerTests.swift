@@ -58,11 +58,9 @@ struct BridgeServerTests {
 
     @Test func staleSocketIsReplacedButLiveOnesAndFilesAreNot() throws {
         let fixture = try Fixture()
-        // A second server on the same path: the first one is alive.
         let second = BridgeServer(socketURL: fixture.socketURL, handler: fixture.handler, validator: AcceptAllPeers())
         #expect(throws: BridgeServerError.alreadyRunning(fixture.path)) { try second.start() }
 
-        // Stale: a socket file nobody listens on.
         fixture.server.stop()
         let stale = socket(AF_UNIX, SOCK_STREAM, 0)
         #expect(BridgeServerCore.withAddress(fixture.path) { bind(stale, $0, $1) } == 0)
@@ -74,7 +72,6 @@ struct BridgeServerTests {
         defer { client.close() }
         second.stop()
 
-        // Not a socket: never deleted.
         FileManager.default.createFile(atPath: fixture.path, contents: Data("keep".utf8))
         #expect(throws: BridgeServerError.notASocket(fixture.path)) { try second.start() }
         #expect(FileManager.default.contents(atPath: fixture.path) == Data("keep".utf8))
@@ -82,7 +79,6 @@ struct BridgeServerTests {
 
     @Test func stopDoesNotRemoveAnotherServersSocket() throws {
         let fixture = try Fixture()
-        // Someone replaced the socket file (e.g. a second app instance after a crash).
         unlink(fixture.path)
         let other = BridgeServer(socketURL: fixture.socketURL, handler: fixture.handler, validator: AcceptAllPeers())
         try other.start()
@@ -122,7 +118,6 @@ struct BridgeServerTests {
         #expect(await client.waitForReply(6)?.text == "still here")
         try await Task.sleep(for: .milliseconds(100))
         #expect(client.reply(for: 5) == nil, "a cancelled call gets no reply")
-        // A cancel for an unknown id is ignored, and the id can be reused.
         client.send(.cancel(id: 99))
         client.send(Self.request(5, "echo", ["text": "again"]))
         #expect(await client.waitForReply(5)?.text == "again")
@@ -166,7 +161,6 @@ struct BridgeServerTests {
 
     @Test func malformedLines() async throws {
         let fixture = try Fixture()
-        // With a usable id: that request fails, the connection stays.
         let client = try fixture.client()
         defer { client.close() }
         client.sendRaw(Data(#"{"type":"request","id":7,"tool":42}"#.utf8 + [0x0A]))
@@ -176,7 +170,6 @@ struct BridgeServerTests {
         client.send(Self.request(8, "echo", ["text": "ok"]))
         #expect(await client.waitForReply(8)?.text == "ok")
 
-        // Without one: id-0 error and the connection is closed.
         let garbage = try fixture.client()
         defer { garbage.close() }
         garbage.sendRaw(Data("this is not json\n".utf8))

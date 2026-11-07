@@ -44,7 +44,6 @@ struct TerminalModeTrackerTests {
     func strings() {
         #expect(baseline(after: "\(esc)]0;title [?2004h\u{07}") == "")
         #expect(baseline(after: "\(esc)P+q544e[?1049h\(esc)\\") == "")
-        // ESC that is not a string terminator ends the string and starts a sequence.
         #expect(baseline(after: "\(esc)]0;title\(esc)[?2004h") == "\(esc)[?2004h")
     }
 
@@ -94,7 +93,6 @@ struct TerminalModeTrackerTests {
         #expect(tracker.workingDirectory == "/home/dev/My Dir")
         tracker.consume(bytes("\(esc)]7;kitty-shell-cwd://web-1/srv/100%\(esc)\\"))
         #expect(tracker.workingDirectory == "/srv/100%")
-        // An unusable value keeps the last good one; RIS keeps it too.
         tracker.consume(bytes("\(esc)]7;file://web-1\u{07}\(esc)]7;file://h/a%0Ab\u{07}\(esc)c"))
         #expect(tracker.workingDirectory == "/srv/100%")
     }
@@ -133,14 +131,11 @@ struct TerminalModeTrackerTests {
     func cursorAndColors() {
         #expect(baseline(after: "\(esc)[4 q\(esc)]4;1;rgb:ff/00/00;2;?\(esc)\\\(esc)]11;#101010\u{07}")
             == "\(esc)[4 q\(esc)]4;1;rgb:ff/00/00\(esc)\\\(esc)]11;#101010\(esc)\\")
-        // A blinking shape sets mode 12, which a later ?12l overrides.
         #expect(baseline(after: "\(esc)[5 q\(esc)[?12l") == "\(esc)[5 q\(esc)[?12l")
         #expect(baseline(after: "\(esc)[5 q\(esc)[0 q") == "")
-        // OSC 104 and 110 reset; OSC 10 with two specs sets 10 and 11.
         #expect(baseline(after: "\(esc)]4;1;red\(esc)\\\(esc)]4;2;blue\(esc)\\\(esc)]104;1\(esc)\\\(esc)]10;a;b\u{07}\(esc)]110\u{07}")
             == "\(esc)]4;2;blue\(esc)\\\(esc)]11;b\(esc)\\")
         #expect(baseline(after: "\(esc)]4;1;red\u{07}\(esc)]104\u{07}") == "")
-        // Modes whose fresh value comes from the configuration are kept as set.
         #expect(baseline(after: "\(esc)[?2027h\(esc)[?2031h\(esc)[?2048h\(esc)[?12l") == "\(esc)[?12l\(esc)[?2027h\(esc)[?2031h\(esc)[?2048h")
         #expect(baseline(after: "\(esc)[?2031h\(esc)[?2031l") == "")
         #expect(baseline(after: "\(esc)[4 q\(esc)]4;1;red\u{07}\(esc)[?2027h\(esc)c") == "")
@@ -151,12 +146,9 @@ struct TerminalModeTrackerTests {
         #expect(baseline(after: "\(esc)[1m\(esc)7\(esc)[31m\(esc)(0\(esc)8") == "\(esc)[1m")
         #expect(baseline(after: "\(esc)[1m\(esc)[s\(esc)[0m\(esc)[u") == "\(esc)[1m")
         #expect(baseline(after: "\(esc)[1m\(esc)[?1049h\(esc)[31m\(esc)(0\(esc)[?1049l") == "\(esc)[1m")
-        // Without a save, DECRC restores a fresh terminal's.
         #expect(baseline(after: "\(esc)[1m\(esc)8") == "")
-        // Each screen has its own cursor shape; blinking is shared.
         #expect(baseline(after: "\(esc)[2 q\(esc)[?1049h\(esc)[5 q\(esc)[?1049l") == "\(esc)[2 q\(esc)[?12h")
         #expect(baseline(after: "\(esc)[?1049h\(esc)[6 q") == "\(esc)[?1049h\(esc)[6 q")
-        // Leaving with 47 copies the cursor back.
         #expect(baseline(after: "\(esc)[?47h\(esc)[4 q\(esc)[?47l") == "\(esc)[4 q")
     }
 
@@ -182,7 +174,6 @@ struct TerminalModeTrackerTests {
         #expect(tracker.lastScreenSwitchMode == 1049)
         #expect(tracker.consumeUntilScreenSwitch(data.dropFirst(20)) == 2)
         #expect(tracker.screenSwitches == 2)
-        // Mode 1049 on the alternate screen of mode 47 switches nothing; RIS there does.
         #expect(tracker.consumeUntilScreenSwitch(bytes("\(esc)[?47h\(esc)[?1049hx\(esc)cy")) == 6)
         #expect(tracker.consumeUntilScreenSwitch(bytes("\(esc)[?1049hx\(esc)cy")) == 11)
         #expect(tracker.screenSwitches == 4)
@@ -240,7 +231,6 @@ struct TerminalHistoryTests {
         history.append(bytes(image + "end"))
         #expect(history.isTruncated)
         #expect(history.replay() == bytes(String(repeating: "x", count: 16) + image + "end"))
-        // Older images go with their text.
         history.append(bytes(String(repeating: "y", count: 100_000)))
         #expect(history.replay() == bytes(String(repeating: "y", count: 16)))
         #expect(history.graphicsByteCount == 0)
@@ -270,7 +260,6 @@ struct TerminalHistoryTests {
     func alternateScreenStandIn() {
         var history = TerminalHistory(limit: 1000, alternateLimit: 100)
         history.append(bytes("$ ls\r\nfile\r\n$ top\r\n\(esc)[?1049h\(esc)[?1h\(esc)[2;20r"))
-        // Frames far beyond both limits, in reads that split the sequences.
         let frames = String(repeating: "\(esc)[H\(esc)[2J\(esc)[1;31mframe\(esc)[m", count: 20_000)
         var rest = Substring(frames)
         while !rest.isEmpty {
@@ -295,7 +284,6 @@ struct TerminalHistoryTests {
         #expect(history.isAlternateScreenActive)
         #expect(history.replayNeedsRepaint)
         #expect(history.replay() == bytes("$ top\r\n\(esc)[?1049h\(esc)[?25l" + String(repeating: "x", count: 16)))
-        // Leaving drops all of it: the shell's output is complete again.
         history.append(bytes("\(esc)[?25h\(esc)[?1049l"))
         #expect(!history.isTruncated)
         #expect(!history.replayNeedsRepaint)

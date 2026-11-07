@@ -63,7 +63,6 @@ struct KittyGraphicsFilter: Sendable {
             while index < bytes.count {
                 switch state {
                 case .ground:
-                    // Copy everything up to the next ESC in one go.
                     var end = index
                     while end < bytes.count, bytes[end] != Self.escape {
                         end += 1
@@ -90,7 +89,6 @@ struct KittyGraphicsFilter: Sendable {
                         control.removeAll(keepingCapacity: true)
                         state = .control
                     } else {
-                        // Some other APC: hand it on and look at this byte again.
                         output.append(contentsOf: [Self.escape, UInt8(ascii: "_")])
                         state = .ground
                         continue
@@ -113,7 +111,6 @@ struct KittyGraphicsFilter: Sendable {
                             state = byte == Self.escape ? .droppingEscape : .dropping
                         }
                     case Self.cancel, Self.substitute:
-                        // Aborted: there is nothing for the terminal to run.
                         output.append(byte)
                         state = .ground
                     default:
@@ -139,7 +136,6 @@ struct KittyGraphicsFilter: Sendable {
                     if bytes[index] == UInt8(ascii: "\\") {
                         state = .ground
                     } else {
-                        // The command ended without a terminator; this ESC starts a sequence.
                         state = .escape
                         continue
                     }
@@ -155,7 +151,6 @@ struct KittyGraphicsFilter: Sendable {
     private mutating func decide(_ replies: inout Data) -> Bool {
         let keys = Self.keys(control)
         if droppingChunks {
-            // A later chunk of a blocked transmission.
             if keys[UInt8(ascii: "m")] != "1" {
                 droppingChunks = false
             }

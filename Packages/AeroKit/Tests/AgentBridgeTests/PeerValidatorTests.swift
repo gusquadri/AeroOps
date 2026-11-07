@@ -99,8 +99,6 @@ struct PeerValidatorTests {
     }
     #endif
 
-    // MARK: Helpers
-
     static func start(_ validator: any BridgePeerValidator) throws -> (BridgeServer, TempDirectory) {
         let dir = try TempDirectory()
         let server = BridgeServer(socketURL: dir.appending("bridge.sock"), handler: ScriptedRequestHandler(), validator: validator)

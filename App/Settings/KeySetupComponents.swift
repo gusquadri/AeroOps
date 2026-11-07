@@ -5,17 +5,11 @@ import KeyAgent
 import SSHKit
 import SwiftUI
 
-// Key setup pieces shared by Settings › Keys and onboarding's "Your key" step, so both create,
-// import and describe keys the same way. Private keys never pass through here: generation and
-// import go through ``SSHServices``, which keeps them in the Keychain or the Secure Enclave.
-
-// MARK: - Generate
-
 /// What the user chose for a new key: name, type and Touch ID policy.
 struct NewKeyDraft: Hashable {
     var name = ""
     var type: KeyGenerationType = .recommended
-    var policy: SigningPolicy = .oncePerSession
+    var policy: SigningPolicy = .always
 
     var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -53,15 +47,13 @@ struct KeyGenerationFields: View {
     }
 }
 
-// MARK: - Import
-
 /// Importing existing OpenSSH private key files: an open panel at `~/.ssh`, then
 /// ``SSHServices/importKey(contentsOf:policy:)`` reads each file into memory and stores the key
 /// in the Keychain. Afterwards offer ``SwiftUI/View/trashImportedKeyDialog(files:onError:)``.
 @MainActor
 enum KeyFileImport {
     /// Touch ID policy for imported keys; it can be changed in Settings › Keys.
-    static let policy: SigningPolicy = .oncePerSession
+    static let policy: SigningPolicy = .always
 
     /// Shows the open panel. Returns the chosen files, or none when the user cancels. Files that
     /// are never private keys (`.pub`, `known_hosts`, `config`…) are greyed out.
@@ -173,8 +165,6 @@ private struct TrashImportedKeyDialog: ViewModifier {
     }
 }
 
-// MARK: - System agent
-
 /// "Use system ssh-agent instead": ssh then signs with the agent in `$SSH_AUTH_SOCK` and AeroOps'
 /// keys are not offered (``SSHServices/setAgentChoice(_:)``, remembered across launches).
 struct SystemAgentToggle: View {
@@ -199,8 +189,6 @@ struct SystemAgentToggle: View {
         .toggleStyle(.switch)
     }
 }
-
-// MARK: - Helpers
 
 /// A `Binding<Bool>` that is true while `item` is set and clears it when dismissed.
 func isPresent<Item>(_ item: Binding<Item?>) -> Binding<Bool> {

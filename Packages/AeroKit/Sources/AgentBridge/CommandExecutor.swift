@@ -225,24 +225,18 @@ public actor CommandExecutor {
         return true
     }
 
+    private func heartbeatByteAllowance(seconds: Int) -> Int {
+        let heartbeats = seconds / heartbeatSeconds
+        let finalHeartbeatSlack = 8
+        return heartbeats + finalHeartbeatSlack
+    }
+
     /// Runs `command` on `host`. Throws ``CommandExecutionError`` or, when the calling task is
     /// cancelled, `CancellationError`.
     public func execute(_ command: String, on host: RemoteHost, timeoutSeconds: Int, id: UUID = UUID()) async throws -> CommandResult {
         let seconds = min(max(timeoutSeconds, BridgeLimits.timeoutRange.lowerBound), BridgeLimits.timeoutRange.upperBound)
         try Task.checkCancellation()
-        let remote = Self.remoteCommand(for: command, timeoutSeconds: seconds, heartbeatSeconds: heartbeatSeconds)
-        let runner = runner
-        let limit = outputLimit
-        // Room for the heartbeat bytes, which the runner counts as stdout.
-        let runnerLimit = limit + seconds / heartbeatSeconds + 8
-        let broadcaster = broadcaster
-        let task = Task<RemoteCommandOutcome, any Error> {
-            try await runner.run(remote, on: host, timeout: .seconds(seconds), outputLimit: runnerLimit) { chunk in
-                var chunk = chunk
-                if chunk.stream == .stdout { chunk.data = RunCommandScript.removingHeartbeats(chunk.data) }
-                if !chunk.data.isEmpty { broadcaster.yield(.output(id: id, chunk)) }
-            }
-        }
+        let task = launch(command, on: host, seconds: seconds, id: id)
         let info = RunningCommand(id: id, hostID: host.id, hostName: host.name, command: command, startedAt: clock.now)
         tasks[id] = task
         commands[id] = info
@@ -252,31 +246,61 @@ public actor CommandExecutor {
             commands[id] = nil
             cancelledByUser.remove(id)
         }
+        let outcome = try await awaitOutcome(of: task, id: id)
+        try checkCompleted(outcome, id: id, seconds: seconds)
+        let result = Self.result(from: outcome, limit: outputLimit)
+        broadcaster.yield(.finished(id: id, result))
+        return result
+    }
 
-        let outcome: RemoteCommandOutcome
+    private func launch(
+        _ command: String, on host: RemoteHost, seconds: Int, id: UUID
+    ) -> Task<RemoteCommandOutcome, any Error> {
+        let remote = Self.remoteCommand(for: command, timeoutSeconds: seconds, heartbeatSeconds: heartbeatSeconds)
+        let runner = runner
+        let runnerLimit = outputLimit + heartbeatByteAllowance(seconds: seconds)
+        let broadcaster = broadcaster
+        return Task {
+            try await runner.run(remote, on: host, timeout: .seconds(seconds), outputLimit: runnerLimit) { chunk in
+                var chunk = chunk
+                if chunk.stream == .stdout { chunk.data = RunCommandScript.removingHeartbeats(chunk.data) }
+                if !chunk.data.isEmpty { broadcaster.yield(.output(id: id, chunk)) }
+            }
+        }
+    }
+
+    private func awaitOutcome(
+        of task: Task<RemoteCommandOutcome, any Error>, id: UUID
+    ) async throws -> RemoteCommandOutcome {
         do {
-            outcome = try await withTaskCancellationHandler {
+            return try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: {
                 task.cancel()
             }
         } catch {
-            if cancelledByUser.contains(id) {
-                broadcaster.yield(.cancelled(id: id, byUser: true))
-                throw CommandExecutionError.cancelledByUser
-            }
-            if error is CancellationError || Task.isCancelled {
-                broadcaster.yield(.cancelled(id: id, byUser: false))
-                throw CancellationError()
-            }
-            let message = "\(error)"
-            broadcaster.yield(.failed(id: id, message: message))
-            throw CommandExecutionError.sshFailed(message)
+            throw stopped(by: error, id: id)
         }
-        if cancelledByUser.contains(id) {
-            broadcaster.yield(.cancelled(id: id, byUser: true))
-            throw CommandExecutionError.cancelledByUser
+    }
+
+    private func stopped(by error: any Error, id: UUID) -> any Error {
+        if cancelledByUser.contains(id) { return userCancellation(id) }
+        if error is CancellationError || Task.isCancelled {
+            broadcaster.yield(.cancelled(id: id, byUser: false))
+            return CancellationError()
         }
+        let message = "\(error)"
+        broadcaster.yield(.failed(id: id, message: message))
+        return CommandExecutionError.sshFailed(message)
+    }
+
+    private func userCancellation(_ id: UUID) -> CommandExecutionError {
+        broadcaster.yield(.cancelled(id: id, byUser: true))
+        return .cancelledByUser
+    }
+
+    private func checkCompleted(_ outcome: RemoteCommandOutcome, id: UUID, seconds: Int) throws {
+        if cancelledByUser.contains(id) { throw userCancellation(id) }
         if let failure = outcome.transportFailure {
             broadcaster.yield(.failed(id: id, message: failure))
             throw CommandExecutionError.sshFailed(failure)
@@ -286,16 +310,17 @@ public actor CommandExecutor {
             broadcaster.yield(.failed(id: id, message: error.description))
             throw error
         }
-        let stdout = Self.capped(RunCommandScript.removingHeartbeats(outcome.stdout), limit: limit)
-        let stderr = Self.capped(outcome.stderr, limit: limit)
-        let result = CommandResult(
+    }
+
+    private static func result(from outcome: RemoteCommandOutcome, limit: Int) -> CommandResult {
+        let stdout = capped(RunCommandScript.removingHeartbeats(outcome.stdout), limit: limit)
+        let stderr = capped(outcome.stderr, limit: limit)
+        return CommandResult(
             exitCode: outcome.exitCode,
             stdout: LogText.stripANSI(stdout.text), stderr: LogText.stripANSI(stderr.text),
             stdoutTruncated: outcome.stdoutTruncated || stdout.truncated,
             stderrTruncated: outcome.stderrTruncated || stderr.truncated,
             durationMs: max(0, outcome.duration.milliseconds))
-        broadcaster.yield(.finished(id: id, result))
-        return result
     }
 
     /// At most `limit` bytes as UTF-8 text, never splitting a character.

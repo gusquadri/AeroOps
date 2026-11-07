@@ -82,7 +82,6 @@ final class FileTransfer: Identifiable {
         self.totalBytes = totalBytes
         fileCount = files
         self.skipped = skipped
-        // Speed counts from here, not from connecting and walking folders.
         started = .now
         phase = .copying
     }

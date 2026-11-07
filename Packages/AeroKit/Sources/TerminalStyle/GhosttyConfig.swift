@@ -32,22 +32,12 @@ package enum GhosttyConfig {
             ("cursor-style-blink", "true"),
             ("window-padding-x", "4"),
             ("window-padding-y", "4"),
-            // Report the exit (close callback) as soon as the program ends ...
             ("wait-after-command", "false"),
-            // ... even when it fails fast (ssh to a closed port exits 255 within milliseconds).
             ("abnormal-command-exit-runtime", "0"),
-            // xterm-ghostty where the host has its terminfo, else xterm-256color (the app
-            // decides).
             ("term", term),
-            // Nothing is injected into remote shells. Prompt marks (OSC 133) still work when
-            // the remote shell sends them itself (fish 4 does).
             ("shell-integration", "none"),
-            // OSC 9/777 notifications, the bell, progress and command ends are read from the
-            // live output by TerminalKit (`TerminalOutputEvent`): a surface rebuilt from a
-            // replay would report them all again, and a suspended session has no surface.
             ("desktop-notifications", "false"),
             ("image-storage-limit", String(imageStorageLimit)),
-            // Remote programs may set the clipboard (vim/tmux yank) but never read it.
             ("clipboard-read", "deny"),
             ("clipboard-write", "allow"),
             ("clipboard-paste-protection", "true"),
@@ -82,7 +72,6 @@ package enum GhosttyConfig {
         "super+end=scroll_to_bottom",
         "super+page_up=scroll_page_up",
         "super+page_down=scroll_page_down",
-        // Previous / next shell prompt, where the remote shell marks them (OSC 133).
         "super+arrow_up=jump_to_prompt:-1",
         "super+arrow_down=jump_to_prompt:1",
     ]
@@ -117,7 +106,6 @@ package enum GhosttyConfig {
         if rounded == rounded.rounded() {
             return String(Int(rounded))
         }
-        // String(format:) without a locale is not localized: always a `.` separator.
         return String(format: "%.2f", Double(rounded))
     }
 }

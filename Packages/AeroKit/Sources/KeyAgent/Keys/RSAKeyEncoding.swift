@@ -8,7 +8,11 @@ struct DERReader {
 
     var isAtEnd: Bool { reader.isAtEnd }
 
-    private mutating func element(tag: UInt8, _ what: String) throws(SSHWireError) -> [UInt8] {
+    /// The next element's tag, without reading it.
+    var nextTag: UInt8? { reader.peek() }
+
+    /// The contents of the next element, which must have `tag`.
+    mutating func element(tag: UInt8, _ what: String) throws(SSHWireError) -> [UInt8] {
         guard try reader.next(what) == tag else { throw .malformed("DER \(what): unexpected tag") }
         var length = Int(try reader.next(what))
         if length & 0x80 != 0 {
@@ -41,6 +45,8 @@ struct DERCursor {
     init(_ bytes: [UInt8]) { self.bytes = bytes }
 
     var isAtEnd: Bool { index >= bytes.count }
+
+    func peek() -> UInt8? { index < bytes.count ? bytes[index] : nil }
 
     mutating func next(_ what: String) throws(SSHWireError) -> UInt8 {
         guard index < bytes.count else { throw .truncated("DER \(what)") }
@@ -87,6 +93,8 @@ struct RSAPrivateComponents: Sendable {
     var prime1: [UInt8]
     var prime2: [UInt8]
 
+    private static let twoPrimeVersion: [UInt8] = []
+
     /// PKCS#1 `RSAPrivateKey` DER, as `SecKeyCreateWithData` expects.
     ///
     /// OpenSSH files carry no CRT exponents, so `dP = d mod (p-1)` and `dQ = d mod (q-1)` are
@@ -99,7 +107,7 @@ struct RSAPrivateComponents: Sendable {
         let dP = d.remainder(dividingBy: p.subtractingOne())
         let dQ = d.remainder(dividingBy: q.subtractingOne())
         return DERWriter.sequence([
-            DERWriter.integer(unsigned: []), // version 0 (two-prime)
+            DERWriter.integer(unsigned: Self.twoPrimeVersion),
             DERWriter.integer(unsigned: modulus),
             DERWriter.integer(unsigned: publicExponent),
             DERWriter.integer(unsigned: privateExponent),

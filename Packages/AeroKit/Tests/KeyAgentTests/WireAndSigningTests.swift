@@ -97,11 +97,10 @@ struct EncodingTests {
     }
 
     @Test func rsaComponentsRebuildTheSameKey() throws {
-        // Take a Security.framework key apart into OpenSSH's n, e, d, iqmp, p, q and rebuild it.
         let der = try makeRSAKeyDER()
         var outer = DERReader(Array(der))
         var seq = try outer.sequence()
-        _ = try seq.unsignedInteger() // version
+        _ = try seq.unsignedInteger()
         let n = try seq.unsignedInteger(), e = try seq.unsignedInteger(), d = try seq.unsignedInteger()
         let p = try seq.unsignedInteger(), q = try seq.unsignedInteger()
         let dP = try seq.unsignedInteger(), dQ = try seq.unsignedInteger(), iqmp = try seq.unsignedInteger()
@@ -132,7 +131,6 @@ struct SigningTests {
     }
 
     @Test func ecdsaP256ManyTimes() throws {
-        // About half of all r and s values need the mpint 0x00 pad; 200 rounds hit both cases.
         let key = P256SigningKey(privateKey: .init())
         for i in 0..<200 {
             #expect(try verify(key, data: Array("message \(i)".utf8)) == "ecdsa-sha2-nistp256")
@@ -141,8 +139,8 @@ struct SigningTests {
 
     @Test func ecdsaSignatureEncodesRAndSAsMPInts() throws {
         var raw = [UInt8](repeating: 0, count: 64)
-        raw[0] = 0x80 // r needs a pad byte
-        raw[33] = 0x01 // s has a leading zero to strip
+        raw[0] = 0x80
+        raw[33] = 0x01
         let blob = ecdsaP256SignatureBlob(raw: Data(raw))
         var r = SSHReader(blob)
         #expect(try r.text() == "ecdsa-sha2-nistp256")

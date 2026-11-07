@@ -57,8 +57,6 @@ struct ActivityView: View {
     }
 }
 
-// MARK: - Header
-
 /// Bridge status, connected agents and the way to MCP settings.
 private struct ActivityHeader: View {
     @Environment(AppModel.self) private var model

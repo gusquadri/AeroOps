@@ -26,8 +26,6 @@ final class DemoFileBackend: FileTransferBackend {
         seed()
     }
 
-    // MARK: Browsing
-
     func home() async throws -> String { homePath }
 
     func list(_ directory: String) async throws -> [FileItem] {
@@ -96,8 +94,6 @@ final class DemoFileBackend: FileTransferBackend {
         }
     }
 
-    // MARK: Transfers
-
     func download(_ sources: [String], into directory: String, for transfer: FileTransfer, progress: TransferProgress) async throws {
         let files = nodes.filter { path, node in
             node.kind == .file && sources.contains { path == $0 || path.hasPrefix($0 + "/") }
@@ -107,7 +103,6 @@ final class DemoFileBackend: FileTransferBackend {
         for (path, node) in files {
             progress.record(.file(path))
             try await Self.copy(node.size ?? 0, bytesPerSecond: Self.downloadBytesPerSecond, progress: progress)
-            // Keep each item's path below the folder it was picked from.
             let source = sources.first { path == $0 || path.hasPrefix($0 + "/") } ?? path
             let base = parent(of: source) ?? "/"
             let relative = path.dropFirst(base.count).drop { $0 == "/" }
@@ -144,8 +139,6 @@ final class DemoFileBackend: FileTransferBackend {
             left -= chunk
         }
     }
-
-    // MARK: Sample tree
 
     private func seed() {
         let day: TimeInterval = 86_400
@@ -188,7 +181,6 @@ extension MobileFileBrowser where Backend == DemoFileBackend {
             [FileItem(rawName: Data("nginx.conf".utf8), name: "nginx.conf", kind: .file, size: 4_096, modified: nil, mode: nil)],
             in: home
         )
-        // A sparse local file: big enough to show progress, free to make.
         let file = URL.temporaryDirectory.appending(path: "AeroOpsDemo/site-assets.tar.gz")
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.createFile(atPath: file.path(percentEncoded: false), contents: nil),

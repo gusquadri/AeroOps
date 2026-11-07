@@ -66,8 +66,6 @@ public enum SystemLogo: String, CaseIterable, Sendable, Hashable {
         Self.artwork[self]?.path
     }
 
-    // MARK: - Matching
-
     /// The logo for a host, or `nil` for a system without one (the bubble then shows a generic
     /// server glyph).
     ///
@@ -111,7 +109,7 @@ public enum SystemLogo: String, CaseIterable, Sendable, Hashable {
     private static let idTable: [String: SystemLogo] = [
         "almalinux": .almaLinux,
         "alpine": .alpine,
-        "amzn": .linux, // Amazon Linux's ID_LIKE (centos rhel fedora) would show someone else's logo.
+        "amzn": .linux,
         "arch": .archLinux, "archarm": .archLinux, "archlinux": .archLinux,
         "centos": .centOS,
         "debian": .debian,
@@ -145,8 +143,6 @@ public enum SystemLogo: String, CaseIterable, Sendable, Hashable {
         "void": .void,
         "zorin": .zorin,
     ]
-
-    // MARK: - Artwork
 
     struct Artwork: Sendable {
         let title: String

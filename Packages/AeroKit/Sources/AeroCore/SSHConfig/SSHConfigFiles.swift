@@ -75,7 +75,6 @@ public struct LocalSSHConfigFiles: SSHConfigFileReading {
     public init() {}
 
     public func contents(ofFile path: String) throws(SSHConfigFileError) -> String? {
-        // O_NONBLOCK: opening a FIFO must not hang; it is refused below as not a regular file.
         let descriptor = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else {
             let code = errno
@@ -98,7 +97,6 @@ public struct LocalSSHConfigFiles: SSHConfigFileReading {
             }
             if count == 0 { break }
             data.append(contentsOf: buffer[..<count])
-            // The file may have grown since fstat.
             guard data.count <= Self.maxFileSize else { throw .tooLarge }
         }
         return String(decoding: data, as: UTF8.self)

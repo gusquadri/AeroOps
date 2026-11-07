@@ -43,7 +43,6 @@ public enum SSHError: Error, Sendable, Hashable, LocalizedError {
     /// Maps ssh's stderr (after exit status 255) to an error.
     public static func classify(stderr: String) -> SSHError {
         let text = stderr
-        // Order matters: the "changed" banner also ends in "Host key verification failed.".
         if text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
             || (text.contains("Host key for ") && text.contains(" has changed"))
             || text.contains("POSSIBLE DNS SPOOFING DETECTED") {

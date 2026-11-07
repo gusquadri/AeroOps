@@ -52,8 +52,6 @@ public struct PeerIdentity: Sendable, Hashable {
     }
 }
 
-// Peer inspection reads code signatures and process ancestry: macOS only (iOS has no ssh
-// processes to inspect).
 #if os(macOS)
 /// Reads a connected Unix socket's peer: credentials, audit token, code signature and ancestry.
 enum PeerInspector {
@@ -87,7 +85,6 @@ enum PeerInspector {
             startedByApp: ancestors.contains(appProcessID))
     }
 
-    // `SecRequirement` is immutable once created.
     nonisolated(unsafe) private static let appleSSHRequirement: SecRequirement? = {
         var requirement: SecRequirement?
         SecRequirementCreateWithString("identifier \"com.apple.ssh\" and anchor apple" as CFString, [], &requirement)

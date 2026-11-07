@@ -43,7 +43,6 @@ public struct StatusBubble: View {
                 ],
                 startPoint: .top, endPoint: .bottom
             ))
-            // Caustic: light pooling at the bottom.
             if !strong {
                 Circle().fill(EllipticalGradient(
                     colors: [fill.glow.opacity(0.85), fill.glow.opacity(0)],
@@ -54,7 +53,6 @@ public struct StatusBubble: View {
             glyph
                 .frame(width: size * Self.glyphFraction, height: size * Self.glyphFraction)
                 .offset(y: size * 0.02)
-            // Specular cap over the top of the logo, as if it sat under the glass.
             Ellipse()
                 .fill(LinearGradient(
                     colors: [.white.opacity(0.85), .white.opacity(0)],
@@ -93,7 +91,6 @@ public struct StatusBubble: View {
                     colors: [Aero.text.onAccent, Aero.text.onAccent.opacity(0.9)],
                     startPoint: .top, endPoint: .bottom
                 ))
-                // A soft dark edge under the white logo lifts it off the gel, like a button label.
                 .shadow(color: Aero.ink.opacity(0.55), radius: 0.5, x: 0, y: 0.6)
         } else {
             Image(systemName: "server.rack")
@@ -116,7 +113,6 @@ extension AquaFill {
             AquaFill(top: Aero.leaf, band: Aero.leafDeep, bottom: Color(hex: 0x55B03C),
                      glow: Color(hex: 0xA6EB8A), rim: Color(hex: 0x24601A))
         case .warning:
-            // Deeper than `sunDeep`: white on sun yellow would not reach 3:1.
             AquaFill(top: Aero.sun, band: Color(hex: 0xB87A00), bottom: Color(hex: 0xE0A21C),
                      glow: Color(hex: 0xFFE38F), rim: Color(hex: 0x7A5100))
         case .error:
@@ -127,8 +123,6 @@ extension AquaFill {
         }
     }
 }
-
-// MARK: - Previews
 
 #Preview("StatusBubble: every tone, logos and the fallback") {
     VStack(spacing: 18) {

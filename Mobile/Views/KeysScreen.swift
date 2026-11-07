@@ -95,8 +95,6 @@ private struct KeyRow: View {
     }
 }
 
-// MARK: - New key
-
 private struct NewKeySheet: View {
     @Environment(MobileModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -172,8 +170,6 @@ private struct NewKeySheet: View {
         }
     }
 }
-
-// MARK: - Key details
 
 private struct KeyDetailScreen: View {
     let id: SSHKeyRecord.ID

@@ -64,11 +64,9 @@ struct EmbeddedSSHIntegrationTests {
             try await concurrency(client, host: host)
             try await sessions(client, env: env, host: host)
         }
-        // The key is "once per session": one approval for every login on both servers.
         #expect(env.verifier.reasons.count == 1, "\(env.verifier.reasons)")
         try await monitor(client, hostKeys: env.hostKeys)
 
-        // The single authentication failure: a key the servers do not know.
         let unknown = try await env.keyStore.generate(.ed25519, name: "unauthorized", policy: .always)
         var stranger = servers[1]
         stranger.id = UUID()
@@ -102,7 +100,6 @@ struct EmbeddedSSHIntegrationTests {
     }
 
     private func commands(_ client: EmbeddedSSHClient, host: RemoteHost) async throws {
-        // The first login: anything but a result stops the test before sshd's penalties add up.
         let first = try await client.run("echo hello; echo oops >&2; exit 3", on: host)
         #expect(first.exitCode == 3)
         #expect(first.stdoutString == "hello\n")
@@ -151,7 +148,6 @@ struct EmbeddedSSHIntegrationTests {
         }
         #expect(seen == ["x"])
 
-        // Leaving the loop early closes the command's channel.
         for try await line in try await client.stream("while :; do echo y; sleep 1; done", on: host) {
             #expect(line == "y")
             break

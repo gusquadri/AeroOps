@@ -32,6 +32,16 @@ enum MobileSection: Hashable, Identifiable, SwitcherTab {
     }
 }
 
+/// A screen pushed in the Servers tab.
+enum ServerRoute: Hashable {
+    case host(RemoteHost.ID)
+    case folder(HostFolder.ID)
+
+    var hostID: RemoteHost.ID? {
+        if case .host(let id) = self { id } else { nil }
+    }
+}
+
 /// A screen pushed in the Containers tab.
 enum ContainersRoute: Hashable {
     case host(RemoteHost.ID)
@@ -58,7 +68,7 @@ enum ContainersRoute: Hashable {
 @Observable
 final class MobileNavigator {
     var section: MobileSection
-    var serverPath: [RemoteHost.ID] = []
+    var serverPath: [ServerRoute] = []
     var terminalPath: [MobileTerminal.ID] = []
     var filePath: [RemoteHost.ID] = []
     var containerPath: [ContainersRoute] = []
@@ -69,6 +79,14 @@ final class MobileNavigator {
 
     init(section: MobileSection = .servers) {
         self.section = section
+    }
+
+    /// Pops every folder not in `folders` off the Servers tab: it was deleted, here or
+    /// on another device.
+    func closeFolders(notIn folders: Set<HostFolder.ID>) {
+        serverPath.removeAll { route in
+            if case .folder(let id) = route { !folders.contains(id) } else { false }
+        }
     }
 
     func show(terminal id: MobileTerminal.ID) {
@@ -114,8 +132,14 @@ final class MobileNavigator {
         }
     }
 
+    /// Shows server `id`'s details over the split layout's folder: Back returns to it.
+    func push(host id: RemoteHost.ID) {
+        selectedHost = id
+        serverPath.append(.host(id))
+    }
+
     private func showDetails(of id: RemoteHost.ID, opening: Bool) {
-        if opening || !serverPath.isEmpty { serverPath = [id] }
+        if opening || serverPath.last?.hostID != nil { serverPath = [.host(id)] }
     }
 
     /// Keeps the screens pushed over the server's workloads when it is already shown.
@@ -135,7 +159,7 @@ final class MobileNavigator {
     /// Drops the screens of servers and terminals that are gone.
     func prune(hosts: Set<RemoteHost.ID>, terminals: Set<MobileTerminal.ID>) {
         if let id = selectedHost, !hosts.contains(id) { selectedHost = nil }
-        serverPath.removeAll { !hosts.contains($0) }
+        serverPath.removeAll { $0.hostID.map { !hosts.contains($0) } ?? false }
         filePath.removeAll { !hosts.contains($0) }
         if let first = containerPath.first, !hosts.contains(first.hostID) { containerPath = [] }
         terminalPath.removeAll { !terminals.contains($0) }

@@ -41,7 +41,6 @@ enum EmbeddedSSHErrors {
             default: return SSHError.other(String(describing: error))
             }
         case let error as any LocalizedError:
-            // KeyStore's errors (a missing or unsupported key) and HostKeyStore's.
             return SSHError.other(error.errorDescription ?? String(describing: error))
         default:
             return SSHError.other(String(describing: error))

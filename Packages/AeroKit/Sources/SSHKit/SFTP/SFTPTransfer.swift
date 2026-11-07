@@ -71,8 +71,6 @@ enum SFTPTransferPlanner {
 }
 
 extension SFTPClient {
-    // MARK: - Planning
-
     /// Plans copying each of `sources` (files or folders, by their own name) into the local
     /// directory `directory`.
     public nonisolated func planDownload(_ sources: [SFTPPath], into directory: String) async throws -> SFTPDownloadPlan {
@@ -193,8 +191,6 @@ extension SFTPClient {
         }
     }
 
-    // MARK: - Running plans
-
     /// Creates the plan's folders, then downloads its files one after another. A file or
     /// folder that fails is reported and the rest carry on; a lost session or cancellation
     /// stops the transfer (the file in progress is removed).
@@ -215,7 +211,6 @@ extension SFTPClient {
         }
         for file in plan.files {
             try Task.checkCancellation()
-            // Files in a folder that could not be created fail with it.
             if failedDirectories.contains(where: { file.destination.hasPrefix($0) }) { continue }
             onEvent(.file(file.displayPath))
             do {
@@ -261,12 +256,9 @@ extension SFTPClient {
         do {
             try await createDirectory(path, permissions: mode & 0o777)
         } catch let error as SFTPError {
-            // Most servers report an existing name as a plain FAILURE.
             guard let existing = try? await attributes(of: path), existing.kind == .directory else { throw error }
         }
     }
-
-    // MARK: - Single files
 
     /// Number of reads or writes kept in flight, about 8 MiB of data.
     nonisolated static func window(chunkSize: Int) -> Int {
@@ -292,9 +284,6 @@ extension SFTPClient {
             try await withThrowingTaskGroup(of: (UInt64, Int, Data?).self) { group in
                 var next: UInt64 = 0
                 var reachedEnd = false
-                // Reads are issued up to the size `fstat` reported (one more if it is a whole
-                // number of chunks), so a small file costs one or two requests. A file that turns
-                // out bigger (such as `/proc` files, which report 0) is then read until EOF.
                 var limit = attributes.size
                 var retries: [(UInt64, Int)] = []
                 var running = 0
@@ -325,7 +314,6 @@ extension SFTPClient {
                     progress(Int64(data.count))
                     let end = offset + UInt64(data.count)
                     if let known = limit, end > known { limit = nil }
-                    // A short read: fetch the rest of the range (an EOF reply ends it).
                     if data.count < length { retries.append((end, length - data.count)) }
                 }
             }
@@ -361,7 +349,6 @@ extension SFTPClient {
         guard fstat(fd, &info) == 0 else { throw SFTPError.local(source, errno: errno) }
         guard info.st_mode & S_IFMT == S_IFREG else { throw SFTPError.local(path: source, message: "Not a regular file.") }
 
-        // `lstat`, so a dangling symbolic link counts as existing and is never removed below.
         let existed: Bool
         do {
             _ = try await attributes(of: destination, followingSymlinks: false)
@@ -408,8 +395,6 @@ extension SFTPClient {
             throw error
         }
     }
-
-    // MARK: - Helpers
 
     /// Errors that concern one file or folder; anything else ends the transfer.
     nonisolated static func isPerItem(_ error: SFTPError) -> Bool {

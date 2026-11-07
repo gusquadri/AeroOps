@@ -35,7 +35,6 @@ public struct EmbeddedHostKeyScanner: HostKeyScanning {
             if let key = received.key { return [key] }
             throw EmbeddedSSHErrors.classify(error)
         }
-        // Not reached: the host-key check always ends the connection.
         connection.close()
         if let key = received.key { return [key] }
         throw SSHError.other("The server did not send a host key.")

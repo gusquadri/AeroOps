@@ -35,7 +35,7 @@ public struct PolicyEngine: Sendable {
             guard tool.access == .read else {
                 return .reject(BridgeError(
                     code: .execNotAllowed,
-                    message: "Host \"\(host.name)\" allows read tools only; run_command needs the Read + Exec tier, which only the user can set in AeroOps."))
+                    message: "Host \"\(host.name)\" allows read tools only; \(tool.rawValue) needs the Read + Exec tier, which only the user can set in AeroOps."))
             }
             return .allow
         case .readExec:

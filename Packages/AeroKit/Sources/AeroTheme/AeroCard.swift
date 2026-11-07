@@ -72,8 +72,6 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                 }
             }
         Group {
-            // With Reduce Transparency the glass is skipped rather than set to `.identity`,
-            // so the solid fill is all there is.
             if liquidGlass && !accessibility.reduceTransparency {
                 surface.glassEffect(.regular, in: shape)
             } else {
@@ -85,17 +83,9 @@ struct AeroGlassModifier<S: InsettableShape>: ViewModifier {
                 shape.strokeBorder(Aero.glass.rimStrong, lineWidth: 1.5)
             } else {
                 ZStack {
-                    // A faint ink hairline defines the edge on the pale lower sky (and on the
-                    // lit clouds by night); the rim sits just inside it.
                     shape.strokeBorder(Aero.ink.opacity(0.10), lineWidth: 0.5)
-                    // The rim's gradient is a view masked by the stroke, not a gradient stroke:
-                    // a gradient-stroked shape is a card-sized layer that SwiftUI redraws on the
-                    // CPU on every frame of any animation inside the card (the gauges). Same
-                    // pixels.
                     Aero.glass.rim.mask { shape.inset(by: 0.5).strokeBorder(lineWidth: 1) }
                 }
-                // Decoration only. A mask clips pixels, not hit testing: without this the rim
-                // gradient covers the whole card and takes every click meant for its buttons.
                 .allowsHitTesting(false)
             }
         }
@@ -123,8 +113,6 @@ struct OuterShadow<S: Shape>: View {
             .accessibilityHidden(true)
     }
 }
-
-// MARK: - Previews
 
 #Preview("AeroCard") {
     AeroCard {

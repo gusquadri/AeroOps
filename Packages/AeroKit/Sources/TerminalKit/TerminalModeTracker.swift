@@ -37,8 +37,6 @@ enum TerminalOutputEvent: Sendable, Hashable {
 /// progress, command start and end). Only the tracker that follows the live output does: it
 /// sees every byte once, also while the session has no surface, and never a replay.
 struct TerminalModeTracker: Sendable {
-    // MARK: - Parser
-
     private enum ParseState: Sendable {
         case ground
         case escape
@@ -84,8 +82,6 @@ struct TerminalModeTracker: Sendable {
     private(set) var screenSwitches = 0
     /// The mode of the last screen change: 47, 1047 or 1049; `nil` for RIS.
     private(set) var lastScreenSwitchMode: Int?
-
-    // MARK: - Followed state
 
     /// DEC private modes whose value differs from a fresh terminal's.
     private var privateModes: [Int: Bool] = [:]
@@ -141,8 +137,6 @@ struct TerminalModeTracker: Sendable {
     private static let maxKeyboardFlagsDepth = 8
     private static let maxGraphicRenditions = 32
 
-    // MARK: - Input
-
     /// Whether a replay may start at `next`: outside any escape sequence and not inside a
     /// UTF-8 character.
     func isAtBoundary(next: UInt8) -> Bool {
@@ -175,8 +169,6 @@ struct TerminalModeTracker: Sendable {
         let switches = screenSwitches
         var index = 0
         while index < buffer.count {
-            // Fast paths for text and for the payload of strings that are not read (images):
-            // their bytes change nothing that is followed.
             switch parseState {
             case .ground:
                 while index < buffer.count, !Self.actsInGround(buffer[index]) {
@@ -216,7 +208,6 @@ struct TerminalModeTracker: Sendable {
     }
 
     mutating func consume(_ byte: UInt8) {
-        // CAN and SUB abort any sequence; ESC starts a new one (except as a string terminator).
         switch byte {
         case 0x18, 0x1A:
             parseState = .ground
@@ -292,7 +283,6 @@ struct TerminalModeTracker: Sendable {
             escapeDispatch(byte)
             parseState = .ground
         default:
-            // C0 controls execute inside an escape sequence without ending it.
             break
         }
     }
@@ -348,8 +338,6 @@ struct TerminalModeTracker: Sendable {
             break
         }
     }
-
-    // MARK: - Strings
 
     private mutating func startString(osc: Bool, applicationCommand: Bool) {
         stringIsOSC = osc
@@ -455,7 +443,6 @@ struct TerminalModeTracker: Sendable {
             if fields.first == "4" {
                 return progressEvent(fields.dropFirst())
             }
-            // ConEmu's other OSC 9 commands (9;1 sleep, 9;9 working directory, ...) are numbers.
             if let first = fields.first, !first.isEmpty, first.allSatisfy({ $0.isASCII && $0.isNumber }) {
                 return nil
             }
@@ -505,8 +492,6 @@ struct TerminalModeTracker: Sendable {
         }
         return nil
     }
-
-    // MARK: - Control sequences
 
     private mutating func controlSequenceDispatch(_ final: UInt8) {
         let marker = parameters.first.flatMap { (0x3C...0x3F).contains($0) ? $0 : nil }
@@ -665,7 +650,6 @@ struct TerminalModeTracker: Sendable {
     }
 
     private mutating func selectGraphicRendition(_ body: [UInt8], values: [Int?]) {
-        // `CSI m`, `CSI 0 m` and lists that start with 0 reset everything before them.
         if values.isEmpty || (values.first.flatMap(\.self) ?? 0) == 0 {
             graphicRendition.removeAll()
             guard values.count > 1 else { return }
@@ -687,8 +671,6 @@ struct TerminalModeTracker: Sendable {
         shiftedOut = false
         graphicRendition.removeAll()
     }
-
-    // MARK: - Kitty keyboard flags
 
     /// The kitty keyboard flags in effect on the active screen; 0 when the program set none.
     var activeKeyboardFlags: Int {
@@ -736,8 +718,6 @@ struct TerminalModeTracker: Sendable {
         keyboardFlags = stack
     }
 
-    // MARK: - Output
-
     /// A copy that collects no events, to follow part of the output from here on.
     var withoutEvents: TerminalModeTracker {
         var copy = self
@@ -754,9 +734,6 @@ struct TerminalModeTracker: Sendable {
     /// Bytes that take a terminal in the `earlier` state to this one (as far as followed).
     func changes(since earlier: TerminalModeTracker) -> Data {
         var out = Data()
-        // What the terminal is in so far: each sequence written goes through it too, so what
-        // one sequence changes as a side effect (DECSCUSR sets blinking, leaving 1049 restores
-        // the cursor) is seen by the comparisons after it.
         var terminal = earlier.withoutEvents
         func write(_ bytes: [UInt8]) {
             out.append(contentsOf: bytes)
@@ -786,8 +763,6 @@ struct TerminalModeTracker: Sendable {
             }
         }
 
-        // Each screen has its own keyboard flags and cursor shape: set the main screen's before
-        // entering the alternate one.
         if alternateScreenMode != nil, terminal.alternateScreenMode == nil {
             keyboardAndCursor(mainKeyboardFlags, mainCursorStyle)
         }
@@ -870,8 +845,6 @@ struct TerminalModeTracker: Sendable {
         guard alternateScreenMode == nil, let mode = lastScreenSwitchMode else { return nil }
         var out = Data()
         var terminal = entry.withoutEvents
-        // DECSTBM moves the cursor home: set the scroll region while the main screen's cursor
-        // is still put away.
         if scrollRegion != terminal.scrollRegion {
             let region = [0x1B, UInt8(ascii: "[")] + (scrollRegion ?? []) + [UInt8(ascii: "r")]
             out.append(contentsOf: region)

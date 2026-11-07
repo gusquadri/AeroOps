@@ -147,8 +147,6 @@ extension Font.Weight {
     }
 }
 
-// MARK: - Internal palette
-
 /// Shades the components derive from the public tokens. Internal so the public token surface
 /// stays the plan's table; views outside AeroTheme use components or public tokens.
 extension Aero {
@@ -169,8 +167,6 @@ extension Aero {
     /// moonlight by night. Gels keep a white gloss in both.
     static let sheen = Color(day: .white, night: .white.opacity(0.2))
 }
-
-// MARK: - Token groups
 
 /// The `sky.*` tokens.
 public struct SkyTokens: Sendable {
@@ -307,8 +303,6 @@ extension Color {
         self.init(day: Color(hex: day), night: Color(hex: night))
     }
 }
-
-// MARK: - Variants
 
 /// The two looks of the Aero theme. AeroOps follows the macOS appearance, so there is nothing
 /// to pick: light mode shows ``day``, dark mode shows ``night``.

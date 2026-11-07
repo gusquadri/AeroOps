@@ -61,8 +61,6 @@ final class SSHConfigImportModel {
     /// Hosts that use the local account name because the config has no `User`.
     var localUserName: String { NSUserName() }
 
-    // MARK: - Loading
-
     /// Reads and plans the import against `existingHosts`. Safe to call again to re-read.
     func load(existingHosts: [RemoteHost]) async {
         phase = .loading
@@ -113,10 +111,12 @@ final class SSHConfigImportModel {
     /// The host editor's validation as a last gate: a host that the editor wouldn't save is
     /// never added. (The planner applies the same rules; this keeps the two from drifting.)
     nonisolated static func checkedWithEditorRules(
-        _ candidate: SSHConfigImportCandidate, existingNames: [String]
+        _ candidate: SSHConfigImportCandidate, existingNames: [String], password: String = ""
     ) -> SSHConfigImportCandidate {
         guard candidate.isSelectable else { return candidate }
-        let validation = HostDraft(host: candidate.host).validate(otherHostNames: existingNames)
+        var draft = HostDraft(host: candidate.host)
+        draft.password = password
+        let validation = draft.validate(otherHostNames: existingNames)
         guard let message = HostDraft.Field.allCases.lazy.compactMap(validation.message(for:)).first else {
             return candidate
         }
@@ -124,8 +124,6 @@ final class SSHConfigImportModel {
         refused.status = .unsupported(reason: message)
         return refused
     }
-
-    // MARK: - Selection
 
     func isSelected(_ candidate: SSHConfigImportCandidate) -> Bool {
         candidate.isSelectable && selection.contains(candidate.id)
@@ -148,8 +146,6 @@ final class SSHConfigImportModel {
     func selectNone() {
         selection = []
     }
-
-    // MARK: - Import
 
     /// Adds the checked hosts to `model`, in config order, and returns their ids. Stops at the
     /// first store error (the Keychain refused the write); hosts whose name was taken

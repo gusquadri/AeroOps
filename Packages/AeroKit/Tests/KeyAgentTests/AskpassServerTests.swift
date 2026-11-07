@@ -46,7 +46,6 @@ struct HostPasswordVaultTests {
         #expect(store.items().allSatisfy { $0.syncs && !$0.record.contains(Data("hunter2".utf8)) })
         #expect(vault.answer(request) == .success("hunter2 ünïcode"))
 
-        // Switched back to a key: the saved password stays but is no longer handed out.
         vault.setPasswordHosts([])
         #expect(!vault.hasPassword(for: host))
         #expect(vault.isSaved(host))
@@ -98,7 +97,6 @@ struct HostPasswordVaultTests {
         vault.setPasswordHosts([host, UUID()])
         #expect(vault.hasPassword(for: host))
 
-        // A stored value ssh cannot use is treated as no password, and the cache forgets it.
         store.save(KeychainItem(account: host.uuidString, syncs: true), secret: Data("two\nlines".utf8))
         #expect(vault.answer(AskpassRequest(host: host, prompt: "Password:")) == .failure(.noPassword))
         #expect(!vault.hasPassword(for: host))
@@ -124,7 +122,6 @@ struct HostPasswordVaultTests {
         let vault = HostPasswordVault(keychain: store)
         let token = try vault.beginTemporary("draft", for: host)
         #expect(Askpass.isValidToken(token))
-        // Not a password host yet, nothing saved: the token is enough.
         #expect(vault.answer(AskpassRequest(host: host, token: token, prompt: "Password:")) == .success("draft"))
         #expect(vault.answer(AskpassRequest(host: UUID(), token: token, prompt: "Password:")) == .failure(.unknownToken))
         #expect(vault.answer(AskpassRequest(host: host, token: Askpass.makeToken(), prompt: "Password:")) == .failure(.unknownToken))
@@ -180,7 +177,6 @@ struct AskpassServerTests {
 
         #expect(await ask(server, host: host) == .success("s3cret"))
         #expect(await events.next() == AskpassEvent(host: host, viaToken: false, outcome: .answered))
-        // PAM's keyboard-interactive prompt is a password prompt too.
         #expect(await ask(server, host: host, prompt: "(admin@nas) Password: ") == .success("s3cret"))
         #expect(await events.next()?.outcome == .answered)
     }
@@ -266,7 +262,6 @@ struct AskpassServerTests {
         vault.setPasswordHosts([host])
         try vault.save("s3cret", for: host)
 
-        // The client checks the prompt too, so talk to the socket directly.
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         defer { close(fd) }
         #expect(connectUnixSocket(fd, server.socketURL.path(percentEncoded: false)) == 0)
@@ -280,7 +275,6 @@ struct AskpassServerTests {
 
     @Test("the production validator rejects anything but the signed helper under ssh")
     func productionValidator() async throws {
-        // A malformed team ID never reaches the requirement string.
         #expect(SignedAskpassPeerValidator(teamIdentifier: "ABC\" or 1").teamIdentifier == nil)
         #expect(SignedAskpassPeerValidator(teamIdentifier: "ABCDE12345").teamIdentifier == "ABCDE12345")
 
@@ -291,7 +285,6 @@ struct AskpassServerTests {
             defer { server.stop() }
             vault.setPasswordHosts([host])
             try vault.save("s3cret", for: host)
-            // This test process is neither the helper nor a child of /usr/bin/ssh.
             guard case .failure(let failure) = await ask(server, host: host) else {
                 Issue.record("the test process got the password")
                 continue

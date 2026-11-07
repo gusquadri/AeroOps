@@ -79,8 +79,6 @@ public struct SSHRunner: Sendable {
         Target(host: host, context: context)
     }
 
-    // MARK: - Run to completion
-
     /// Runs `command` and collects its output.
     ///
     /// Failures of ssh itself are reported in ``SSHResult/transportError``, the remote status in
@@ -176,8 +174,6 @@ public struct SSHRunner: Sendable {
         }
     }
 
-    // MARK: - Streaming
-
     /// Runs `command` and yields its stdout line by line (without line terminators).
     ///
     /// The stream finishes normally on exit status 0 and throws ``SSHError`` otherwise
@@ -259,8 +255,6 @@ public struct SSHRunner: Sendable {
         continuation.onTermination = { _ in child.terminate() }
         return stream
     }
-
-    // MARK: - Helpers
 
     func refuseIfBlocked(_ host: RemoteHost) async throws {
         try Task.checkCancellation()
@@ -401,7 +395,6 @@ public struct SSHResult: Sendable, Hashable {
     /// Timeouts map to ``SSHError/timeout``; exit status 255 is classified from stderr.
     public var transportError: SSHError? {
         if timedOut { return .timeout }
-        // `aeroops-askpass` terminates ssh when it has no password to give.
         if signal != nil, stderrString.contains(SSHError.askpassMarker) { return .authFailed }
         if let signal { return .other("ssh was terminated by signal \(signal)") }
         if exitCode == 255 { return SSHError.classify(stderr: stderrString) }

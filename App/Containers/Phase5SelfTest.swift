@@ -45,8 +45,6 @@ struct Phase5SelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -114,8 +112,6 @@ struct Phase5SelfTest {
         }
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         let report = await run()
         if let url = Phase2SelfTest.outputURL {
@@ -127,7 +123,6 @@ struct Phase5SelfTest {
         }
         Self.log("[phase5] \(report.ok ? "OK" : "FAILED")")
         guard report.ok else {
-            // Services are already shut down in finish(); a failed run must not look like success.
             exit(1)
         }
         NSApp.terminate(nil)
@@ -137,9 +132,6 @@ struct Phase5SelfTest {
         let r = Recorder()
         r.report.vm = Self.vmAddress
         let ssh = model.ssh
-        // Launched from a shell, the app is usually behind other windows: App Nap would then
-        // coalesce timers (the 10 ms heartbeat and the burst producer's sleeps) and the
-        // numbers would measure macOS throttling instead of the log view.
         let activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiated, .latencyCritical], reason: "AeroOps phase 5 self-test timing"
         )
@@ -147,7 +139,6 @@ struct Phase5SelfTest {
         NSApp.activate()
         await pause(1.0)
 
-        // 1. Key in the Keychain, authorized for dev@ and nodocker@ on the VM.
         guard let key = await Phase2SelfTest.generateKey(name: Self.keyName, ssh: ssh, step: r.step) else {
             return await finish(r, key: nil)
         }
@@ -170,7 +161,6 @@ struct Phase5SelfTest {
     }
 
     private func checkHosts(_ key: SSHKeyRecord, _ r: Recorder) async {
-        // 2. Hosts: dev (docker group; k3s through sudo -n) and nodocker.
         let dev = RemoteHost(
             name: "VM dev", address: Self.vmAddress, user: "dev", keyId: key.id.uuidString, kubectlPrefix: Self.k3sPrefix
         )
@@ -183,7 +173,6 @@ struct Phase5SelfTest {
             return
         }
 
-        // 3. Trust the host keys (self-test only) and sign in once. No retry on failure.
         for host in [dev, nodocker] {
             guard await trustAndConnect(host, r) else { return }
         }
@@ -225,11 +214,8 @@ struct Phase5SelfTest {
         }
     }
 
-    // MARK: - Docker
-
     private func checkDocker(_ containers: HostContainersModel, _ r: Recorder) async {
         await containers.refresh(reprobe: true)
-        // Two overlapping requests (plus the tab's own poll) must not run two refreshes at once.
         async let first: Void = containers.refresh()
         async let second: Void = containers.refresh()
         _ = await (first, second)
@@ -263,7 +249,6 @@ struct Phase5SelfTest {
         await pause(1.0)
         await snapshotMain("docker-table", r, between: containers)
 
-        // The Memory header sorts the most memory first, containers without stats last.
         containers.containerSortOrder = [KeyPathComparator(\.memUsedBytes, order: .reverse)]
         let memory = containers.filteredContainers.map(\.memUsedBytes)
         r.step(
@@ -282,7 +267,6 @@ struct Phase5SelfTest {
         containers.inspect(target)
         guard let inspection = containers.inspection else { return r.step("inspect", false, "no sheet") }
         await waitUntil(seconds: 20) { !inspection.isLoading }
-        // Only sizes are recorded: the JSON holds the container's environment.
         r.report.inspectJSONBytes = inspection.json.utf8.count
         r.step(
             "inspect", inspection.summary?.name == target.name && !inspection.json.isEmpty,
@@ -291,8 +275,6 @@ struct Phase5SelfTest {
         containers.inspection = nil
         await pause(0.6)
     }
-
-    // MARK: - Follow
 
     private func checkFollow(_ containers: HostContainersModel, dev: RemoteHost, heartbeat: MainThreadHeartbeat, _ r: Recorder) async {
         guard let logger = containers.containers.first(where: { $0.name == "demo-logger" && $0.state == .running })
@@ -312,7 +294,6 @@ struct Phase5SelfTest {
         let remote = await remoteProcessCount("[d]ocker logs -f --tail 500 ", on: dev)
         r.step("remote docker follow running", remote > 0, "\(remote) matching process(es) on the VM")
 
-        // ~10 s of the real logger.
         r.report.follow = await measure(viewer, heartbeat: heartbeat, seconds: 10)
         r.step(
             "follow 10 s", r.report.follow.linesReceived > 0 && r.report.follow.maxMainThreadLagMilliseconds < Self.maxLagBudget,
@@ -320,7 +301,6 @@ struct Phase5SelfTest {
                    r.report.follow.linesReceived, r.report.follow.linesPerSecond, r.report.follow.maxMainThreadLagMilliseconds)
         )
 
-        // Search with highlights.
         r.report.searchQuery = "slow query"
         viewer.search(r.report.searchQuery)
         viewer.nextMatch()
@@ -329,7 +309,6 @@ struct Phase5SelfTest {
         r.step("search", viewer.matchCount > 0, "\(viewer.matchCount) matches for “\(r.report.searchQuery)”")
         await snapshotSheet("logs-search", r)
 
-        // A synthetic burst through the same inbox and flush path: 50k lines at ~10k/s.
         heartbeat.reset()
         let before = viewer.stats
         let start = ContinuousClock.now
@@ -352,10 +331,6 @@ struct Phase5SelfTest {
         r.report.burst = burst
         r.report.maxMainThreadLagMilliseconds = max(r.report.follow.maxMainThreadLagMilliseconds, burst.maxMainThreadLagMilliseconds)
         let capped = viewer.lineCount <= LogTextController.maxLines && viewer.droppedLines > 0
-        // A stress run well beyond the spec's follow check: every flush must stay under budget,
-        // and so must the main thread at the 99th percentile. The single worst heartbeat is
-        // reported but not gated: on a loaded Mac one scheduler hiccup can exceed 100 ms with
-        // no app work at all.
         r.step(
             "burst 50k lines",
             burst.maxFlushMilliseconds < Self.maxLagBudget && burst.p99MainThreadLagMilliseconds < Self.maxLagBudget
@@ -365,7 +340,6 @@ struct Phase5SelfTest {
                    burst.p99MainThreadLagMilliseconds, burst.maxMainThreadLagMilliseconds, burst.linesShown, burst.linesDropped)
         )
 
-        // Close the sheet: the reading task is cancelled and the remote follow must end.
         containers.logs = nil
         let gone = await waitForRemoteExit("[d]ocker logs -f --tail 500 ", on: dev)
         r.report.dockerFollowGoneAfterSeconds = gone
@@ -395,8 +369,6 @@ struct Phase5SelfTest {
         return numbers
     }
 
-    // MARK: - Kubernetes
-
     private func checkPods(_ containers: HostContainersModel, dev: RemoteHost, _ r: Recorder) async {
         containers.section = .kubernetes
         containers.namespace = nil
@@ -422,7 +394,6 @@ struct Phase5SelfTest {
 
     /// Dead pods from earlier runs keep the crasher's name, so it is the one with the most restarts.
     private func waitForCrasher(_ containers: HostContainersModel) async -> PodInfo? {
-        // The crasher is red with its restart count; between restarts it can look healthy briefly.
         var crasher: PodInfo?
         for attempt in 0..<8 {
             if attempt > 0 { await pause(5) }
@@ -449,7 +420,6 @@ struct Phase5SelfTest {
     }
 
     private func checkRestartSort(_ containers: HostContainersModel, crasher: PodInfo?, _ r: Recorder) async {
-        // The Restarts header sorts the most restarts first, so the crasher leads.
         containers.podSortOrder = [KeyPathComparator(\.restarts, order: .reverse)]
         let sorted = containers.filteredPods
         let restarts = sorted.map(\.restarts)
@@ -464,7 +434,6 @@ struct Phase5SelfTest {
     }
 
     private func checkPreviousLogs(_ crasher: PodInfo, _ containers: HostContainersModel, _ r: Recorder) async {
-        // One click: the crashed instance's logs.
         progress("opening previous logs")
         containers.showPreviousLogs(crasher)
         guard let viewer = containers.logs else {
@@ -488,7 +457,6 @@ struct Phase5SelfTest {
     }
 
     private func checkPendingPod(_ containers: HostContainersModel, _ r: Recorder) async {
-        // Pending pod: events include FailedScheduling, in the inspector.
         let pending = containers.pods.first { $0.namespace == "demo" && $0.name.hasPrefix("pending-") }
             ?? containers.pods.first { $0.phase == .pending }
         r.report.pendingPod = pending?.id
@@ -527,7 +495,6 @@ struct Phase5SelfTest {
     }
 
     private func checkPodFollow(_ containers: HostContainersModel, dev: RemoteHost, _ r: Recorder) async {
-        // kubectl follow ends remotely when the sheet closes.
         guard let web = runningWebPod(containers) else {
             return r.step("kubectl follow", false, "no running web pod")
         }
@@ -559,8 +526,6 @@ struct Phase5SelfTest {
         return remote
     }
 
-    // MARK: - nodocker
-
     private func checkNodocker(_ host: RemoteHost, _ r: Recorder) async {
         model.selection = host.id
         let containers = model.containers(for: host.id)
@@ -577,8 +542,6 @@ struct Phase5SelfTest {
         await snapshotMain("permission-hint", r, between: containers)
         model.selection = nil
     }
-
-    // MARK: - Remote processes
 
     /// Processes on the VM whose command line matches `pattern` (a `pgrep -f` regex written so
     /// it doesn't match its own command line, e.g. `[d]ocker logs -f`).
@@ -602,15 +565,12 @@ struct Phase5SelfTest {
         return nil
     }
 
-    // MARK: - Finish
-
     private func finish(_ r: Recorder, key: SSHKeyRecord?) async -> Report {
         model.containerService.stopAll()
         await pause(0.5)
         _ = await model.shutdownServices()
 
         if let key {
-            // Remove the key line from every server add-key.sh wrote it to.
             r.report.authorizedKeysRemaining = await Self.stripAuthorizedKey(key.authorizedKeysLine)
             r.step(
                 "authorized keys removed", r.report.authorizedKeysRemaining == "0",
@@ -670,8 +630,6 @@ struct Phase5SelfTest {
         }
     }
 
-    // MARK: - Snapshots
-
     private var mainWindow: NSWindow? {
         NSApp.windows.first { $0.isVisible && $0.canBecomeMain && !$0.isSheet }
     }
@@ -711,8 +669,6 @@ struct Phase5SelfTest {
         NSApp.appearance = nil
         await pause(0.3)
     }
-
-    // MARK: - Helpers
 
     /// Unbuffered progress on stderr, so a crash still leaves the last step in the log.
     nonisolated static func log(_ message: String) {

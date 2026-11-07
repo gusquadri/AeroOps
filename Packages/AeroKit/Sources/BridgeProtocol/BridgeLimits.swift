@@ -34,4 +34,7 @@ public enum BridgeLimits {
     public static let defaultTimeoutSeconds = 60
     /// Cap on each of stdout and stderr of `run_command` (64 KB).
     public static let maxCommandOutputBytes = 64 * 1024
+
+    public static let maxPathBytes = 4096
+    public static let maxListedFiles = 1000
 }

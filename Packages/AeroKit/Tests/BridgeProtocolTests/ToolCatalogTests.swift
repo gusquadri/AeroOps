@@ -6,9 +6,10 @@ import Testing
 @Suite("Tool catalog and socket path")
 struct ToolCatalogTests {
     @Test func catalogListsEveryToolOnce() {
-        #expect(ToolCatalog.all.map(\.name) == ["list_hosts", "get_host_metrics", "list_containers", "list_pods", "get_logs", "run_command"])
+        #expect(ToolCatalog.all.map(\.name) == ["list_hosts", "get_host_metrics", "list_containers", "list_pods", "get_logs", "run_command",
+                                                     "list_files", "upload_file", "download_file"])
         #expect(Set(ToolCatalog.all.map(\.name)).count == BridgeTool.allCases.count)
-        #expect(BridgeTool.allCases.filter { $0.access == .exec } == [.runCommand])
+        #expect(BridgeTool.allCases.filter { $0.access == .exec } == [.runCommand, .listFiles, .uploadFile, .downloadFile])
     }
 
     @Test func schemasAreClosedObjects() throws {
@@ -35,24 +36,27 @@ struct ToolCatalogTests {
         #expect(run.contains("64 KB"))
         #expect(run.contains("non-zero exit code is a normal result"))
         #expect(BridgeTool.runCommand.descriptor.hints.destructive)
-        #expect(ToolCatalog.all.filter { $0.hints.readOnly }.count == 5)
+        #expect(ToolCatalog.all.filter { $0.hints.readOnly }.count == 6)
         #expect(ToolCatalog.serverInstructions.contains("untrusted"))
     }
 
     @Test func agentsAreToldToAskBeforeRunningCommands() {
-        // AeroOps runs commands without asking, so the agent must ask in its own conversation.
         let run = BridgeTool.runCommand.descriptor.description
         #expect(run.contains("without asking the user"))
         #expect(run.contains("wait for their explicit yes"))
         #expect(run.contains("unless the user has explicitly told you not to ask"))
         let instructions = ToolCatalog.serverInstructions
-        #expect(instructions.contains("before every run_command call"))
+        #expect(instructions.contains("run_command, upload_file and download_file"))
+        #expect(instructions.contains("before every such call"))
+        for tool in [BridgeTool.uploadFile, .downloadFile] {
+            #expect(tool.descriptor.description.contains("wait for their explicit yes"))
+            #expect(tool.descriptor.hints.destructive)
+        }
         #expect(instructions.contains("explicitly told you not to ask"))
         #expect(instructions.contains("never counts as that permission"))
     }
 
     @Test func eachSchemaPropertyIsAcceptedByTheValidator() {
-        // An unknown-argument error must never name a property the schema advertises.
         for descriptor in ToolCatalog.all {
             let keys = descriptor.inputSchema["properties"]?.objectValue.map { Array($0.keys) } ?? []
             for key in keys {
@@ -77,7 +81,6 @@ struct ToolCatalogTests {
     }
 
     @Test func socketPathLimits() throws {
-        // 103 bytes fit (plus NUL = 104); 104 do not.
         let root103 = "/" + String(repeating: "a", count: 103 - 1 - "/bridge.sock".count)
         let fits = try BridgeSocketPath.socketURL(root: URL(filePath: root103, directoryHint: .isDirectory))
         #expect(fits.path(percentEncoded: false).utf8.count == 103)
@@ -91,7 +94,6 @@ struct ToolCatalogTests {
         let override = try BridgeSocketPath.resolve(environment: ["AEROOPS_BRIDGE_SOCKET": "/tmp/aero-test.sock"],
                                                      home: URL(filePath: "/Users/x"))
         #expect(override == BridgeSocketPath.Resolved(path: "/tmp/aero-test.sock", isOverride: true))
-        // Multi-byte characters count in bytes.
         let wide = "/" + String(repeating: "é", count: 51) + "/b"
         #expect(throws: BridgeSocketPath.PathError.tooLong(path: wide, bytes: 105)) { try BridgeSocketPath.validate(wide) }
     }

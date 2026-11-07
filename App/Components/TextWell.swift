@@ -39,7 +39,6 @@ enum VisibleText {
         case .spaceSeparator:
             return scalar != " "
         default:
-            // Combining marks on nothing visible and variation selectors can hide or alter text.
             return scalar.properties.isVariationSelector || scalar.properties.isDefaultIgnorableCodePoint
         }
     }

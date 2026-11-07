@@ -16,7 +16,6 @@ enum LineEditingKeys {
 
     /// The libghostty binding action for a key press, `nil` when it is no line-editing key.
     static func action(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
-        // Arrow keys carry .function and .numericPad; neither changes what they mean.
         let pressed = modifiers.intersection([.command, .option, .control, .shift])
         switch (pressed, keyCode) {
         case (.command, leftArrow): return "text:\\x01"

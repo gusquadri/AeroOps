@@ -84,8 +84,6 @@ struct KeysSettingsPane: View {
         .trashImportedKeyDialog(files: $importedFiles) { actionError = $0 }
     }
 
-    // MARK: - Sections
-
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
@@ -127,8 +125,6 @@ struct KeysSettingsPane: View {
         }
     }
 
-    // MARK: - Actions
-
     private func hostNames(using key: SSHKeyRecord) -> [String] {
         model.hosts.filter { $0.keyId == key.id.uuidString }.map(\.name)
     }
@@ -167,8 +163,6 @@ struct KeysSettingsPane: View {
         }
     }
 }
-
-// MARK: - Key card
 
 /// One key: name, type, fingerprint, created date, hosts using it, Touch ID policy, and actions.
 private struct KeyCard: View {
@@ -291,8 +285,6 @@ enum Clipboard {
     }
 }
 
-// MARK: - Agent
-
 /// Agent status, recent peer and signing events, and the system-agent fallback toggle.
 private struct AgentSection: View {
     @Environment(AppModel.self) private var model
@@ -379,8 +371,6 @@ extension AgentEvent {
     }
 }
 
-// MARK: - Generate
-
 /// Name, type and Touch ID policy for a new key.
 private struct GenerateKeySheet: View {
     @Environment(AppModel.self) private var model
@@ -440,8 +430,6 @@ private struct GenerateKeySheet: View {
         }
     }
 }
-
-// MARK: - Previews
 
 /// The Keys pane with sample keys (generated in memory).
 private struct KeysPanePreview: View {

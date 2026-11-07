@@ -286,8 +286,6 @@ extension ContainerInfo {
     }
 }
 
-// MARK: - JSON shapes
-
 /// One `docker ps --format '{{json .}}'` line. Every field is optional and type-tolerant.
 private struct PSRow: Decodable {
     var id, names, image, state, status, createdAt, runningFor, ports: String?
@@ -310,7 +308,6 @@ private struct PSRow: Decodable {
     }
 
     func container() -> ContainerInfo? {
-        // Linked containers list several names ("web,other/web"); the first is the container's own.
         let firstName = names?.split(separator: ",").first.map { String($0.drop { $0 == "/" }) }
         guard let id = id ?? firstName else { return nil }
         let name = firstName ?? id

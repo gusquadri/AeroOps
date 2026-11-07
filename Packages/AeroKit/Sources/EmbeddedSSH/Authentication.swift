@@ -64,7 +64,6 @@ final class UserAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     ) async throws -> NIOSSHUserAuthenticationOffer {
         switch host.auth {
         case .password:
-            // One try, like the generated ssh_config's `NumberOfPasswordPrompts 1`.
             guard attempt == 0, methods.contains(.password), let vault = credentials.passwords,
                   case .success(let password) = vault.loginPassword(for: host.id)
             else { throw SSHError.authFailed }
@@ -75,7 +74,6 @@ final class UserAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
             guard attempt < candidates.count else { throw SSHError.authFailed }
             let (record, key) = try await credentials.keyStore.clientPrivateKey(id: candidates[attempt])
             let decision = await credentials.authorizer.authorizeClientSignature(key: record, user: host.user, host: host.address)
-            // A refused Touch ID is what the agent's refusal is to ssh: a failed login.
             guard decision == .allow else { throw SSHError.authFailed }
             return NIOSSHUserAuthenticationOffer(username: host.user, serviceName: "ssh-connection", offer: .privateKey(.init(privateKey: key.nioKey)))
         }

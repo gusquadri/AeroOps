@@ -121,8 +121,6 @@ public struct SSHConfigWriter: Sendable {
         }
     }
 
-    // MARK: - Rendering
-
     private func validatePaths() throws(SSHConfigError) {
         let controlDirectory = context.controlMasterDirectory.filePath.trimmingSuffix("/")
         if controlDirectory.utf8.count + Self.controlSocketSuffixLength > Self.maxSocketPathLength {
@@ -198,8 +196,6 @@ public struct SSHConfigWriter: Sendable {
             ("ServerAliveInterval", "15"),
             ("ServerAliveCountMax", "3"),
             ("ConnectTimeout", "8"),
-            // `-F` skips /etc/ssh/ssh_config, which sends the locale on macOS. Servers accept
-            // LANG and LC_* by default (AcceptEnv), COLORTERM where they allow it.
             ("SendEnv", "LANG LC_* COLORTERM"),
             ("LogLevel", "ERROR"),
         ]

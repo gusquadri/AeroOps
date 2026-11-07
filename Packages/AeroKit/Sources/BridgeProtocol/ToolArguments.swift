@@ -104,39 +104,19 @@ public struct RunCommandArguments: Sendable, Hashable {
     }
 }
 
-/// A validated tool call.
 public enum ToolCall: Sendable, Hashable {
-    case listHosts(ListHostsArguments)
-    case getHostMetrics(HostArguments)
-    case listContainers(ListContainersArguments)
-    case listPods(ListPodsArguments)
-    case getLogs(GetLogsArguments)
+    case monitoring(MonitoringCall)
     case runCommand(RunCommandArguments)
+    case files(FileCall)
 
-    public var tool: BridgeTool {
-        switch self {
-        case .listHosts: .listHosts
-        case .getHostMetrics: .getHostMetrics
-        case .listContainers: .listContainers
-        case .listPods: .listPods
-        case .getLogs: .getLogs
-        case .runCommand: .runCommand
-        }
-    }
-
-    /// The `host` argument; `nil` for `list_hosts`.
     public var hostQuery: String? {
         switch self {
-        case .listHosts: nil
-        case .getHostMetrics(let a): a.host
-        case .listContainers(let a): a.host
-        case .listPods(let a): a.host
-        case .getLogs(let a): a.host
-        case .runCommand(let a): a.host
+        case .monitoring(let call): call.hostQuery
+        case .runCommand(let arguments): arguments.host
+        case .files(let call): call.host
         }
     }
 
-    /// Validates `arguments` for the tool named `name`.
     public static func parse(toolName name: String, arguments: [String: JSONValue]) throws(ToolArgumentError) -> ToolCall {
         guard let tool = BridgeTool(rawValue: name) else {
             throw ToolArgumentError("Unknown tool '\(ArgumentReader.clip(name))'.")
@@ -144,15 +124,39 @@ public enum ToolCall: Sendable, Hashable {
         return try parse(tool: tool, arguments: arguments)
     }
 
-    /// Validates `arguments` for `tool`.
     public static func parse(tool: BridgeTool, arguments: [String: JSONValue]) throws(ToolArgumentError) -> ToolCall {
+        switch tool.family {
+        case .monitoring: .monitoring(try MonitoringCall.parse(tool, arguments))
+        case .exec: .runCommand(try RunCommandArguments(reading: ArgumentReader(tool, arguments, allowed: RunCommandArguments.keys)))
+        case .files: .files(try FileCall.parse(tool, arguments))
+        }
+    }
+}
+
+public enum MonitoringCall: Sendable, Hashable {
+    case listHosts(ListHostsArguments)
+    case getHostMetrics(HostArguments)
+    case listContainers(ListContainersArguments)
+    case listPods(ListPodsArguments)
+    case getLogs(GetLogsArguments)
+
+    public var hostQuery: String? {
+        switch self {
+        case .listHosts: nil
+        case .getHostMetrics(let a): a.host
+        case .listContainers(let a): a.host
+        case .listPods(let a): a.host
+        case .getLogs(let a): a.host
+        }
+    }
+
+    static func parse(_ tool: BridgeTool, _ arguments: [String: JSONValue]) throws(ToolArgumentError) -> MonitoringCall {
         switch tool {
         case .listHosts:
             let r = try ArgumentReader(tool, arguments, allowed: ["tag"])
             return .listHosts(ListHostsArguments(tag: try r.text("tag", maxLength: BridgeLimits.maxNameLength)))
         case .getHostMetrics:
-            let r = try ArgumentReader(tool, arguments, allowed: ["host"])
-            return .getHostMetrics(HostArguments(host: try r.host()))
+            return .getHostMetrics(HostArguments(host: try ArgumentReader(tool, arguments, allowed: ["host"]).host()))
         case .listContainers:
             let r = try ArgumentReader(tool, arguments, allowed: ["host", "all"])
             return .listContainers(ListContainersArguments(host: try r.host(), all: try r.bool("all") ?? false))
@@ -160,36 +164,53 @@ public enum ToolCall: Sendable, Hashable {
             let r = try ArgumentReader(tool, arguments, allowed: ["host", "namespace"])
             return .listPods(ListPodsArguments(host: try r.host(), namespace: try r.safeName("namespace")))
         case .getLogs:
-            let r = try ArgumentReader(tool, arguments,
-                                       allowed: ["host", "kind", "name", "namespace", "container", "tail", "since", "previous"])
-            let host = try r.host()
-            let kindText = try r.requiredText("kind", maxLength: 16)
-            guard let kind = LogRequest.Kind(rawValue: kindText.lowercased()) else {
-                throw ToolArgumentError("Argument 'kind' must be \"container\" or \"pod\" (got \(ArgumentReader.quoted(kindText))).")
-            }
-            guard let name = try r.safeName("name") else {
-                throw ToolArgumentError("Missing required argument 'name'.")
-            }
-            let namespace = try r.safeName("namespace")
-            let container = try r.safeName("container")
-            let previous = try r.bool("previous") ?? false
-            if kind == .container {
-                if namespace != nil { throw ToolArgumentError("Argument 'namespace' only applies to kind \"pod\".") }
-                if container != nil { throw ToolArgumentError("Argument 'container' only applies to kind \"pod\".") }
-                if previous { throw ToolArgumentError("Argument 'previous' only applies to kind \"pod\".") }
-            }
-            let tail = try r.int("tail", range: 1...BridgeLimits.maxTail) ?? BridgeLimits.defaultTail
-            let since = try r.duration("since", range: 1...BridgeLimits.maxSinceSeconds)
-            return .getLogs(GetLogsArguments(host: host, kind: kind, name: name, namespace: namespace,
-                                             container: container, tail: tail, sinceSeconds: since, previous: previous))
-        case .runCommand:
-            let r = try ArgumentReader(tool, arguments, allowed: ["host", "command", "reason", "timeoutSec"])
-            let host = try r.host()
-            let command = try r.command()
-            let reason = try r.requiredText("reason", maxLength: BridgeLimits.maxReasonCharacters)
-            let timeout = try r.int("timeoutSec", range: BridgeLimits.timeoutRange) ?? BridgeLimits.defaultTimeoutSeconds
-            return .runCommand(RunCommandArguments(host: host, command: command, reason: reason, timeoutSeconds: timeout))
+            return .getLogs(try GetLogsArguments(reading: ArgumentReader(tool, arguments, allowed: GetLogsArguments.keys)))
+        default:
+            throw ToolArgumentError("Unknown tool '\(tool.rawValue)'.")
         }
+    }
+}
+
+extension GetLogsArguments {
+    static let keys = ["host", "kind", "name", "namespace", "container", "tail", "since", "previous"]
+
+    init(reading r: ArgumentReader) throws(ToolArgumentError) {
+        let host = try r.host()
+        let kind = try Self.kind(r)
+        guard let name = try r.safeName("name") else {
+            throw ToolArgumentError("Missing required argument 'name'.")
+        }
+        let namespace = try r.safeName("namespace")
+        let container = try r.safeName("container")
+        let previous = try r.bool("previous") ?? false
+        if kind == .container { try Self.checkContainerOptions(namespace, container, previous) }
+        self.init(host: host, kind: kind, name: name, namespace: namespace, container: container,
+                  tail: try r.int("tail", range: 1...BridgeLimits.maxTail) ?? BridgeLimits.defaultTail,
+                  sinceSeconds: try r.duration("since", range: 1...BridgeLimits.maxSinceSeconds), previous: previous)
+    }
+
+    private static func kind(_ r: ArgumentReader) throws(ToolArgumentError) -> LogRequest.Kind {
+        let text = try r.requiredText("kind", maxLength: 16)
+        guard let kind = LogRequest.Kind(rawValue: text.lowercased()) else {
+            throw ToolArgumentError("Argument 'kind' must be \"container\" or \"pod\" (got \(ArgumentReader.quoted(text))).")
+        }
+        return kind
+    }
+
+    private static func checkContainerOptions(_ namespace: String?, _ container: String?, _ previous: Bool) throws(ToolArgumentError) {
+        if namespace != nil { throw ToolArgumentError("Argument 'namespace' only applies to kind \"pod\".") }
+        if container != nil { throw ToolArgumentError("Argument 'container' only applies to kind \"pod\".") }
+        if previous { throw ToolArgumentError("Argument 'previous' only applies to kind \"pod\".") }
+    }
+}
+
+extension RunCommandArguments {
+    static let keys = ["host", "command", "reason", "timeoutSec"]
+
+    init(reading r: ArgumentReader) throws(ToolArgumentError) {
+        self.init(host: try r.host(), command: try r.command(),
+                  reason: try r.requiredText("reason", maxLength: BridgeLimits.maxReasonCharacters),
+                  timeoutSeconds: try r.int("timeoutSec", range: BridgeLimits.timeoutRange) ?? BridgeLimits.defaultTimeoutSeconds)
     }
 }
 
@@ -210,8 +231,6 @@ struct ArgumentReader {
             throw ToolArgumentError("\(label) for \(tool.rawValue). Allowed: \(allowedText).")
         }
     }
-
-    // MARK: Primitive readers
 
     func string(_ key: String) throws(ToolArgumentError) -> String? {
         guard let value = arguments[key] else { return nil }
@@ -251,8 +270,6 @@ struct ArgumentReader {
             throw ToolArgumentError("Argument '\(key)' must be true or false (got \(got)).")
         }
     }
-
-    // MARK: Domain readers
 
     /// Optional free text: no control or invisible characters, at most `maxLength` characters.
     func text(_ key: String, maxLength: Int) throws(ToolArgumentError) -> String? {
@@ -346,8 +363,6 @@ struct ArgumentReader {
         try Self.checkCharacters(command, key: "command", allowNewlines: true)
         return command
     }
-
-    // MARK: Helpers
 
     /// Rejects C0/C1 controls (except tab, and newline when allowed), DEL, and invisible or
     /// direction-changing characters that could make the Activity tab show something other

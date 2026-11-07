@@ -27,14 +27,13 @@ struct AgentServerTests {
         #expect(socketMode & S_IFMT == S_IFSOCK)
         #expect(socketMode & 0o777 == 0o600)
         #expect(mode(dir.appending("agent").path).map { $0 & 0o777 } == 0o700)
-        // Only the socket is left in the directory: the temporary bind name was renamed.
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir.appending("agent").path) == ["agent.sock"])
 
-        try await server.start() // already running: no-op
+        try await server.start()
         await server.stop()
         #expect(await !server.isRunning)
         #expect(mode(server.socketURL.path) == nil)
-        try await server.start() // restartable
+        try await server.start()
         #expect(mode(server.socketURL.path) != nil)
         await server.stop()
     }
@@ -42,7 +41,6 @@ struct AgentServerTests {
     @Test func replacesAStaleSocket() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        // What a crashed agent leaves behind: a bound socket file nobody listens on.
         try FileManager.default.createDirectory(at: dir.appending("agent"), withIntermediateDirectories: false)
         let path = dir.appending("agent/agent.sock").path
         let stale = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -82,19 +80,16 @@ struct AgentServerTests {
     @Test func refusesUnsafePaths() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        // A regular file where the socket should be.
         try FileManager.default.createDirectory(at: dir.appending("agent"), withIntermediateDirectories: false)
         try Data("x".utf8).write(to: dir.appending("agent/agent.sock"))
         let (server, _) = try makeServer(dir)
         await #expect(throws: AgentServerError.notASocket(server.socketURL.path)) { try await server.start() }
         #expect(FileManager.default.fileExists(atPath: server.socketURL.path))
 
-        // A file where the directory should be.
         try Data("x".utf8).write(to: dir.appending("file"))
         let (inFile, _) = try makeServer(dir, socket: "file/agent.sock")
         await #expect(throws: AgentServerError.insecureDirectory(dir.appending("file").path)) { try await inFile.start() }
 
-        // sun_path holds 104 bytes.
         let (tooLong, _) = try makeServer(dir, socket: String(repeating: "x", count: 100) + ".sock")
         do {
             try await tooLong.start()
@@ -128,7 +123,6 @@ struct AgentServerTests {
     @Test func servesRequestsAndReportsThePeer() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        // The test process is its own peer; naming its parent as "the app" makes it "started by the app".
         let (server, store) = try makeServer(dir, appProcessID: getppid())
         let recorder = EventRecorder(server.events)
         defer { recorder.stop() }
@@ -138,7 +132,6 @@ struct AgentServerTests {
         let client = try AgentTestClient(path: server.socketURL.path)
         let identities = try parseIdentities(#require(await client.request([AgentMessage.requestIdentities])))
         #expect(identities.map(\.blob) == [Array(record.publicKeyBlob)])
-        // Mutations are refused and the connection stays usable.
         #expect(await client.request([AgentMessage.removeAllIdentities]) == [AgentMessage.failure])
         #expect(await client.request([AgentMessage.addIdentity, 0, 0, 0, 0]) == [AgentMessage.failure])
         let data = Array("over the socket".utf8)
@@ -170,7 +163,7 @@ struct AgentServerTests {
     @Test func peerIsNotStartedByAppWhenTheAppIsItself() async throws {
         let dir = try TempDirectory()
         defer { dir.remove() }
-        let (server, _) = try makeServer(dir) // appProcessID = getpid(): the peer's ancestors exclude itself
+        let (server, _) = try makeServer(dir)
         let recorder = EventRecorder(server.events)
         defer { recorder.stop() }
         try await server.start()
@@ -225,6 +218,6 @@ struct AgentServerTests {
         let writer = Thread { _ = AgentServerCore.writeAll(a, SSHWriter.frame(payload) + [0, 0, 0, 0]) }
         writer.start()
         #expect(AgentServerCore.readFrame(b) == payload)
-        #expect(AgentServerCore.readFrame(b) == nil) // a zero-length frame is invalid
+        #expect(AgentServerCore.readFrame(b) == nil)
     }
 }

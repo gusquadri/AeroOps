@@ -51,7 +51,6 @@ struct ProbeParserTests {
     func junk() {
         let caps = HostCapabilities(probeOutput: "motd banner\r\ndocker\r\n  kubectl  kube-ok\nDOCKER\ndocker-okay\npodman2\n\u{0}")
         #expect(caps == [.docker, .kubectl, .kubeOK])
-        // kubectl without k3s: no prefix suggestion even when the cluster is unreachable.
         #expect(HostCapabilities(probeOutput: "kubectl").suggestedKubectlPrefix == nil)
     }
 

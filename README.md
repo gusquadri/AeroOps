@@ -31,8 +31,8 @@ The screenshots show the app's built-in demo data and the dev VM described below
 - **Keys.** Generate Secure Enclave P-256 or Ed25519 keys, or import unencrypted OpenSSH keys. You can copy the `authorized_keys` line for each key.
 - **MCP tools for AI agents.** Each host has an access tier: **Off**, **Read** (the default) or **Read + Exec**.
   - Read tools: `list_hosts`, `get_host_metrics`, `list_containers`, `list_pods` and `get_logs`.
-  - Exec tool: `run_command`.
-- **Asking before commands.** AeroOps runs `run_command` on a Read + Exec host as soon as the agent calls it. The MCP server's instructions and the tool's description tell the agent to show you the host, the exact command and its reason, and to wait for your yes in the conversation first. The agent skips asking only if you have told it not to ask. This is an instruction to the agent, not something AeroOps enforces. Keep hosts at Read when that matters.
+  - Exec tools: `run_command`, plus SFTP file tools `list_files`, `upload_file` and `download_file` (one regular file per call; an existing destination is replaced only with `overwrite`). `aeroops-mcp` resolves local paths from its working directory and checks them with the agent's own permissions before the app transfers anything.
+- **Asking before commands and transfers.** AeroOps runs `run_command`, `upload_file` and `download_file` on a Read + Exec host as soon as the agent calls them. The MCP server's instructions and the tools' descriptions tell the agent to show you the host, the exact command or both file paths, and its reason, and to wait for your yes in the conversation first. The agent skips asking only if you have told it not to ask. This is an instruction to the agent, not something AeroOps enforces. Keep hosts at Read when that matters.
 - **MCPs.** The MCPs tab shows running and recent agent commands with their live output, and you can cancel a running command there.
 - **Import from `~/.ssh/config`.** The importer follows `Include`, `Host` patterns and `Match all` the way OpenSSH does. It imports each host's name, address, port and user. It only reads the config: key files are never opened and nothing under `~/.ssh` is written. Hosts that use `ProxyJump` or `ProxyCommand` are listed with the reason they can't be imported.
 - **Onboarding.** On first run, a sheet walks through five steps: Welcome, Key, Server, AI agents and Done. It covers creating or importing a key, adding or importing a first server, and connecting an agent. Existing users never see it.
@@ -48,7 +48,7 @@ Xcode resolves the Swift packages. Most are pinned to exact versions:
 
 | Package | Version |
 | --- | --- |
-| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) | 2.2.2026101003 |
+| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) | 2.2.2026103001 |
 | [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) | 0.12.1 |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.10.0 |
 | [swift-log](https://github.com/apple/swift-log) | 1.5.0 or later |
@@ -165,50 +165,11 @@ Set each host's tier in Settings › MCP or in the host editor. New hosts start 
 - **Agents never get SSH.**
   - `aeroops-mcp` has no access to the agent socket or the keys.
   - The bridge accepts only an `aeroops-mcp` whose code signature carries AeroOps's team ID and identifier.
-  - Every call goes through the policy engine. Off and Read hosts reject `run_command`. Read + Exec hosts run it without a prompt in AeroOps; the agent is told to ask you first.
-- **Remote output is untrusted.** Logs and command output are labelled as untrusted remote content for the agent.
+  - Every call goes through the policy engine. Off and Read hosts reject `run_command` and the file tools. Read + Exec hosts run them without a prompt in AeroOps; the agent is told to ask you first.
+- **Remote output is untrusted.** Logs, command output and file listings are labelled as untrusted remote content for the agent.
   - Output is capped at 64 KB per stream and 2,000 log lines.
   - `run_command` times out after at most 300 seconds.
   - A cancelled or timed-out command has its remote process group killed.
-
-## Project layout
-
-```text
-App/                    SwiftUI app: Dashboard, Containers, Terminals, Activity, Settings,
-                        Onboarding, Shell, Services, Model, Components, Support
-MCP/                    aeroops-mcp, the stdio MCP server that forwards to the app
-Packages/AeroKit/       Swift package with one target per module:
-  Sources/AeroCore        models, parsers, ShellQuote, HostStore, ssh config importer
-  Sources/SSHKit          system ssh, generated ssh_config, ControlMaster, host-key trust
-  Sources/KeyAgent        in-app ssh-agent, Keychain and Secure Enclave key store
-  Sources/Collectors      metrics, Docker and Kubernetes collectors, polling actors
-  Sources/TerminalKit     libghostty wrapper
-  Sources/BridgeProtocol  bridge.sock messages and client, shared with aeroops-mcp
-  Sources/AgentBridge     bridge server, PolicyEngine, run_command
-  Sources/AeroTheme       theme tokens and shared views (AeroCard, GlossyGauge, StatusBubble, ...) and the system logos
-  Tests/                  one test target per module, plus BridgeHarness and test helpers
-Scripts/remote/         POSIX sh scripts run on servers (metrics.sh, probe.sh, run-command.sh)
-Scripts/release.sh      signed, notarized release build
-Scripts/verify-appcast.swift  checks a release's Sparkle signature against the app's public key
-.github/workflows/      release.yml: tag vX.Y.Z → tested, signed, notarized GitHub Release + appcast
-dev/                    dev servers, VM, fixtures and self-test helpers
-docs/screenshots/       README screenshots
-spikes/                 Phase 0 throwaway spikes
-project.yml             XcodeGen spec
-```
-
-## Status
-
-Done: the host inventory, keys and transport, the dashboard, terminal tabs, Docker, Kubernetes, the MCP read tier, the exec tier, ssh-config import and onboarding.
-
-Still open:
-
-- **Release signing.**
-  - Done: the hardened runtime, Sparkle wiring, `Scripts/release.sh` and the GitHub Actions release. Pushing a `vX.Y.Z` tag publishes a GitHub Release, and installed copies check its appcast every hour.
-  - Left: making the repository public so Sparkle can download the feed. A build with no feed URL and key never starts Sparkle, and Settings › Updates says so.
-- **Performance pass (in progress).** The target is that 20 polled hosts keep the app under 3% CPU.
-
-The backlog after v1 includes a hub for history and alerts, tmux-backed tabs, password auth and Podman.
 
 ## License
 

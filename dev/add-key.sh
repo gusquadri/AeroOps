@@ -19,7 +19,6 @@ ok=0
 
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 
-# dev@localhost:2222 (linuxserver/openssh-server; dev's home is /config)
 if running aeroops-ssh; then
   docker exec -i aeroops-ssh sh -c '
     f=/config/.ssh/authorized_keys
@@ -36,7 +35,6 @@ else
   echo "aeroops-ssh     not running, skipped (docker compose -f dev/compose.yml up -d ssh)"
 fi
 
-# dev@localhost:2223 (BusyBox Alpine)
 if running aeroops-alpine; then
   docker exec -i aeroops-alpine sh -c '
     f=/home/dev/.ssh/authorized_keys
@@ -53,9 +51,7 @@ else
   echo "aeroops-alpine  not running, skipped (docker compose -f dev/compose.yml up -d alpine)"
 fi
 
-# dev@ and nodocker@ the OrbStack VM
 if command -v orb >/dev/null 2>&1 && orb list -r -q 2>/dev/null | grep -qx aeroops-vm; then
-  # shellcheck disable=SC2016  # expanded by the remote shell
   orb -m aeroops-vm -u root sh -c '
     read -r k
     for u in dev nodocker; do

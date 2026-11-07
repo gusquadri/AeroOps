@@ -73,6 +73,8 @@ final class MobileModel {
     private(set) var activity: MonitorActivity = .visible
     /// The open terminals, oldest first.
     private(set) var terminals: [MobileTerminal] = []
+    /// Why the last folder change or drag and drop could not be saved.
+    var layoutError: HostStoreError?
 
     /// Whether this device can make Secure Enclave keys (not the Simulator).
     let canUseSecureEnclave = SecureEnclave.isAvailable
@@ -135,13 +137,10 @@ final class MobileModel {
         )
     }
 
-    // MARK: - Lifecycle
-
     /// Loads keys and host-key blocks, then starts monitoring. Idempotent.
     func start() async {
         guard !isStarted else { return }
         isStarted = true
-        // Downloads left from the last run.
         MobileFileBrowser<RemoteFileBackend>.removeAllDownloads()
         await reloadKeys()
         await refreshHostKeys()
@@ -180,8 +179,6 @@ final class MobileModel {
         }
     }
 
-    // MARK: - Monitoring
-
     /// The live state of host `id`, created on first use.
     func displayState(for id: RemoteHost.ID) -> HostDisplayState {
         if let state = displayStates[id] { return state }
@@ -208,7 +205,6 @@ final class MobileModel {
         let blockChanged = Self.isChanged(update.hostKeyIssue) != Self.isChanged(state.hostKeyIssue)
         state.apply(update)
         if blockChanged {
-            // The store blocked the host (or lifted the block); mirror it for the card and banner.
             Task { await refreshHostKeyBlocks() }
         }
     }
@@ -217,21 +213,20 @@ final class MobileModel {
         if case .changed = issue { true } else { false }
     }
 
-    // MARK: - Hosts
-
     func host(id: RemoteHost.ID) -> RemoteHost? {
         hostStore.host(id: id)
     }
 
     /// Adds or updates `host`. A typed `password` is saved to the Keychain first, so a password
     /// host never exists without it; a new host's password is removed again if saving fails.
-    func save(_ host: RemoteHost, password: String?) throws {
+    /// A new host goes last into the folder with `folder` (`nil`: the top level).
+    func save(_ host: RemoteHost, password: String?, folder: HostFolder.ID? = nil) throws {
         let isNew = hostStore.host(id: host.id) == nil
         if let password, host.auth == .password {
             try passwords.save(password, for: host.id)
         }
         do {
-            if isNew { try hostStore.add(host) } else { try hostStore.update(host) }
+            if isNew { try hostStore.add(host, toFolder: folder) } else { try hostStore.update(host) }
         } catch {
             if password != nil, isNew { try? passwords.delete(for: host.id) }
             throw error
@@ -292,7 +287,6 @@ final class MobileModel {
 
     private func hostsDidChange() {
         refreshPasswordHosts()
-        // The coordinator skips hosts with monitoring off.
         coordinator?.setHosts(hosts)
         containerService.hostsDidChange(hosts)
         for host in hosts {
@@ -314,8 +308,6 @@ final class MobileModel {
             }
         }
     }
-
-    // MARK: - Terminals and files
 
     /// Whether a terminal or the file browser can try host `host`: its key has not changed and
     /// the keys could be opened.
@@ -408,8 +400,6 @@ final class MobileModel {
         return (client, host)
     }
 
-    // MARK: - Host keys
-
     /// Whether `host` has a pinned key, so a session can connect without the trust sheet.
     func isHostKeyPinned(_ host: RemoteHost) async -> Bool {
         (try? await hostKeys.pinnedKeys(for: host).isEmpty) == false
@@ -468,8 +458,6 @@ final class MobileModel {
         await refreshHostKeyBlocks()
         refresh(host.id)
     }
-
-    // MARK: - Keys
 
     /// Re-reads the keys from the Keychain, including ones synced from the user's other devices.
     func reloadKeys() async {
@@ -571,12 +559,19 @@ extension MobileModel {
             passwordKeychain: InMemoryKeychain(), hostKeyKeychain: InMemoryKeychain()
         )
         for host in hosts { try? model.hostStore.add(host) }
-        // Hosts with monitoring off get no update.
         for update in SampleData.liveUpdates(for: model.hosts) {
             model.displayState(for: update.hostID).apply(update)
         }
         model.isStarted = true
         model.isPreview = true
         return model
+    }
+}
+
+extension MobileModel: HostLayoutEditing {
+    var layoutStore: HostStore { hostStore }
+
+    func layoutDidChange() {
+        hostsDidChange()
     }
 }

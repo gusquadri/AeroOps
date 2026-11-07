@@ -79,8 +79,6 @@ enum AeroTagFill {
     static let tintOpacity = 0.22
 }
 
-// MARK: - Previews
-
 #Preview("AeroTag") {
     VStack(alignment: .leading, spacing: 12) {
         HStack {

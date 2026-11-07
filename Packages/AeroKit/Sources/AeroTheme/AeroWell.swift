@@ -48,8 +48,6 @@ enum AeroWellFill {
     static let shadeOpacity = 0.08
 }
 
-// MARK: - Previews
-
 #Preview("AeroWell: every tone") {
     AeroCard {
         VStack(alignment: .leading, spacing: 10) {

@@ -21,12 +21,12 @@ struct RootView: View {
                 .background { SkyBackground() }
                 .environment(\.sidebarVisibility, $columnVisibility)
         }
+        .searchable(text: $model.hostSearch, placement: .sidebar, prompt: "Name or address")
         .navigationTitle("AeroOps")
         .toolbar {
             ToolbarItem(placement: .principal) {
                 TabSwitcher(tabs: AppTab.allCases, selection: $model.selectedTab)
             }
-            // On every tab; on the Dashboard it sits left of Refresh and Details.
             ToolbarItem(placement: .primaryAction) {
                 SettingsToolbarButton()
             }
@@ -34,10 +34,25 @@ struct RootView: View {
         .sheet(item: $model.editorRequest) { request in
             HostEditorSheet(request: request)
         }
+        .folderNameSheet($model.folderRequest) { request, name in
+            try model.saveFolder(request, name: name)
+        }
+        .folderDeletionConfirmation($model.folderDeletion) { model.deleteFolder($0) }
+        .alert(
+            "Couldn’t save the change",
+            isPresented: Binding(get: { model.layoutError != nil }, set: { if !$0 { model.layoutError = nil } }),
+            presenting: model.layoutError
+        ) { _ in
+            Button("OK") {}
+        } message: { error in
+            Text(error.localizedDescription)
+        }
         .sshConfigImportSheet(isPresented: $model.isImportingSSHConfig) { ids in
             if let first = ids.first { model.selection = first }
         }
-        // Closing the sheet any other way than its own buttons still counts as skipped.
+        .termiusImportSheet(isPresented: $model.isImportingTermius) { ids in
+            if let first = ids.first { model.selection = first }
+        }
         .sheet(isPresented: $model.onboarding.isPresented, onDismiss: { model.onboarding.complete() }) {
             OnboardingView()
         }
@@ -66,9 +81,6 @@ struct TabContent: View {
 
     var body: some View {
         content
-            // Dashboard and Activity scroll under the toolbar and need the system's scroll edge
-            // blur there. The other tabs never do, and without a scroll view at the top macOS
-            // paints a pale backdrop behind the toolbar instead of the sky.
             .toolbarBackgroundVisibility(scrollsUnderToolbar ? .automatic : .hidden, for: .windowToolbar)
     }
 

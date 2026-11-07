@@ -18,7 +18,6 @@ struct ShowcaseRenderTests {
     func showcase() throws {
         let image = try render(AeroThemeShowcase(), to: "theme-showcase.png")
         #expect(image.width == Int(AeroThemeShowcase.size.width * 2))
-        // The top-left corner is sky: blue dominates red.
         let corner = try #require(pixel(of: image, x: 4, y: 4))
         #expect(corner.b > corner.r)
     }
@@ -34,7 +33,6 @@ struct ShowcaseRenderTests {
     func nightShowcase() throws {
         let image = try render(AeroThemeShowcase(variant: .night), to: "theme-showcase-night.png")
         #expect(image.width == Int(AeroThemeShowcase.size.width * 2))
-        // The top-left corner is night sky: dark, and blue dominates red.
         let corner = try #require(pixel(of: image, x: 4, y: 4))
         #expect(corner.b > corner.r)
         #expect(Int(corner.r) + Int(corner.g) + Int(corner.b) < 3 * 110)

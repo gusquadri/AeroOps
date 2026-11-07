@@ -90,7 +90,6 @@ struct IntegrationTests {
     }
 
     @Test func sshAddSignatureTestNeedsUserPresence() async throws {
-        // ssh-add is not /usr/bin/ssh, so even an "always" key needs Touch ID for it.
         let agent = try await Agent(policy: .always, verifierAnswer: true)
         do {
             for record in agent.records {
@@ -119,7 +118,6 @@ struct IntegrationTests {
                 let result = try await ssh(agent, record)
                 #expect(result.status == 0, "\(record.algorithm): \(result.stderr)")
             }
-            // /usr/bin/ssh started by this process with "always" keys: no user presence needed.
             #expect(agent.verifier.callCount == 0)
             #expect(await agent.recorder.wait { events in
                 agent.records.allSatisfy { record in
@@ -159,8 +157,6 @@ struct IntegrationTests {
         await deauthorize(agent.tag)
         await agent.shutdown()
     }
-
-    // MARK: Dev server helpers
 
     private static let repositoryRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

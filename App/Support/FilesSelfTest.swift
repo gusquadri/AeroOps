@@ -32,8 +32,6 @@ struct FilesSelfTest {
 
     let model: AppModel
 
-    // MARK: - Report
-
     struct Step: Codable {
         var name: String
         var ok: Bool
@@ -54,8 +52,6 @@ struct FilesSelfTest {
             print("[selftest] \(ok ? "PASS" : "FAIL") \(name): \(detail)")
         }
     }
-
-    // MARK: - Run
 
     func runAndQuit() async {
         let report = await run()
@@ -106,15 +102,12 @@ struct FilesSelfTest {
         return await finish(r, key: key, hosts: hosts)
     }
 
-    // MARK: - Per host
-
     private func check(_ r: Recorder, host: RemoteHost, source: URL) async {
         let files = model.fileService
         let pane = files.remotePane(for: host)
         let label = host.name
         let sourceName = source.lastPathComponent
 
-        // 1. First contact: the listing stops and the trust sheet's request appears.
         pane.start()
         let asked = await waitUntil(seconds: 30) { files.trustRequest?.host.id == host.id && !pane.isLoading }
         guard asked, let request = files.trustRequest else {
@@ -128,7 +121,6 @@ struct FilesSelfTest {
             return r.step("\(label): trust", false, error.localizedDescription)
         }
 
-        // 2. Home listed over SFTP.
         let started = Date.now
         guard await waitUntil(seconds: 30, { pane.directory != nil && !pane.isLoading }), let home = pane.directory else {
             return r.step("\(label): list home", false, Self.describe(pane.loadError))
@@ -138,7 +130,6 @@ struct FilesSelfTest {
             "\(home.string): \(pane.items.count) items in \(Self.milliseconds(since: started)) ms, session \(pane.backend.session.status)"
         )
 
-        // 3. New Folder, then go there by typed path (resolves `~/`).
         let folderName = "aeroops-files-selftest-\(UUID().uuidString.prefix(8).lowercased())"
         await pane.createFolder(named: folderName)
         let created = await waitUntil(seconds: 20) { !pane.isLoading && pane.items.contains { $0.name == folderName } }
@@ -151,7 +142,6 @@ struct FilesSelfTest {
         }
         r.step("\(label): go to path", pane.items.isEmpty && pane.canGoBack, "\(folder.string), empty \(pane.items.isEmpty)")
 
-        // 4. Upload the tree; the pane lists it when the transfer ends.
         var before = files.transfers.count
         await files.upload([source.path(percentEncoded: false)], to: host, into: folder)
         guard let upload = await waitForTransfer(r, "\(label): upload", after: before) else { return }
@@ -163,7 +153,6 @@ struct FilesSelfTest {
             "\(Self.summary(upload)); pane refreshed \(refreshed)"
         )
 
-        // 5. Again: the folder exists, so a conflict is asked; Replace copies into it.
         before = files.transfers.count
         await files.upload([source.path(percentEncoded: false)], to: host, into: folder)
         if let conflict = files.conflict, conflict.names == [sourceName] {
@@ -180,7 +169,6 @@ struct FilesSelfTest {
             r.step("\(label): upload again (Replace)", false, "expected a conflict on \(sourceName), got \(files.conflict?.names ?? [])")
         }
 
-        // 6. Download it back and compare with the source.
         let downloads = Phase2SelfTest.root.appending(path: "down-\(host.port)", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
         let remoteTree = folder.appending(component: sourceName)
@@ -194,7 +182,6 @@ struct FilesSelfTest {
             )
         }
 
-        // 7. Again: Skip leaves the copy alone and queues nothing.
         let queued = files.transfers.count
         files.download([remoteTree], from: host, into: downloads.path(percentEncoded: false))
         if let conflict = files.conflict, conflict.names == [sourceName] {
@@ -206,7 +193,6 @@ struct FilesSelfTest {
             r.step("\(label): download again (Skip)", false, "expected a conflict on \(sourceName)")
         }
 
-        // 8. Rename; renaming onto an existing name is refused; delete.
         if let uploaded = pane.items.first(where: { $0.name == sourceName }) {
             await pane.rename(uploaded, to: "renamed")
             let renamed = await waitUntil(seconds: 10) { !pane.isLoading && pane.items.map(\.name) == ["renamed"] }
@@ -226,7 +212,6 @@ struct FilesSelfTest {
             r.step("\(label): rename", false, "\(sourceName) not listed")
         }
 
-        // 9. Remove the test folder.
         pane.goUp()
         _ = await waitUntil(seconds: 10) { !pane.isLoading && pane.directory == home }
         if let item = pane.items.first(where: { $0.name == folderName }) {
@@ -252,8 +237,6 @@ struct FilesSelfTest {
         }
         return transfer
     }
-
-    // MARK: - Finish
 
     private func finish(_ r: Recorder, key: SSHKeyRecord?, hosts: [RemoteHost]) async -> Report {
         let ssh = model.ssh
@@ -282,8 +265,6 @@ struct FilesSelfTest {
         r.report.ok = !r.report.steps.isEmpty && r.report.steps.allSatisfy(\.ok)
         return r.report
     }
-
-    // MARK: - Helpers
 
     /// `Upload ü/`: files at two depths, non-ASCII names, an empty file, a large one, a link to a
     /// file (copied as the file) and a link to a folder (skipped).

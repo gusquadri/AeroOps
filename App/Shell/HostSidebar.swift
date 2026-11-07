@@ -4,46 +4,40 @@ import SSHKit
 import SwiftUI
 import TerminalKit
 
-/// The main window's sidebar: every host with its status orb, name and tags, Add Host and
-/// update buttons, and a context menu per host. Under each host, its open terminal tabs (click one to
+/// The main window's sidebar: every host matching the search field (``AppModel/hostSearch``) with its status orb, name and tags, Add Host and
+/// update buttons, and a context menu per host. Without a search, hosts sit under their folders;
+/// drag a host onto a folder or another host, or a folder onto a folder, to rearrange them. Under each host, its open terminal tabs (click one to
 /// show it in Terminals; the Terminals tab has no tab strip of its own) and a New Terminal row.
 struct HostSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var deletionCandidate: RemoteHost?
     /// Hosts whose terminals are listed. A host opens when a terminal to it starts opening.
     @State private var expanded: Set<RemoteHost.ID> = []
+    @State private var collapsedFolders: Set<HostFolder.ID> = []
 
     var body: some View {
         List(selection: selection) {
             Section("Hosts") {
-                ForEach(model.hosts) { host in
-                    DisclosureGroup(isExpanded: isExpanded(host.id)) {
-                        HostTerminalRows(host: host)
-                    } label: {
-                        HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
-                            .contextMenu {
-                                HostContextMenu(
-                                    host: host,
-                                    onEdit: { model.requestEdit(host.id) },
-                                    onDelete: { deletionCandidate = host }
-                                )
-                            }
+                if model.hostSearch.isEmpty {
+                    ForEach(model.folders) { folder in
+                        folderGroup(folder)
                     }
-                    .tag(SidebarItem.host(host.id))
+                    hostRows(model.hosts(inFolder: nil))
+                } else {
+                    hostRows(model.searchedHosts)
                 }
             }
         }
         .overlay {
-            if model.hosts.isEmpty {
-                Text("No hosts yet")
+            if model.hosts.isEmpty || model.searchedHosts.isEmpty {
+                Text(model.hosts.isEmpty ? "No hosts yet" : "No matching hosts")
                     .font(Aero.font(.callout))
                     .foregroundStyle(Aero.text.secondary)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 8) {
-                AddHostButton()
-                    .help("Add a server to monitor (⌘N)")
+                AddMenu()
                 SidebarUpdateButton()
             }
             .frame(maxWidth: .infinity)
@@ -55,6 +49,42 @@ struct HostSidebar: View {
         }
         .hostDeletionConfirmation($deletionCandidate)
         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 340)
+    }
+
+    private func folderGroup(_ folder: HostFolder) -> some View {
+        let hosts = model.hosts(inFolder: folder.id)
+        return DisclosureGroup(isExpanded: isFolderExpanded(folder.id)) {
+            hostRows(hosts)
+        } label: {
+            SidebarFolderRow(folder: folder, hostCount: hosts.count)
+                .hostArranging(.folder(folder.id), target: .item(.folder(folder.id)), cornerRadius: 6, onDrop: model.arrange)
+                .contextMenu {
+                    Button("Rename…", systemImage: "pencil") { model.folderRequest = .rename(folder) }
+                    Button("Delete Folder…", systemImage: "trash", role: .destructive) { model.folderDeletion = folder }
+                }
+        }
+    }
+
+    private func hostRows(_ hosts: [RemoteHost]) -> some View {
+        ForEach(hosts) { host in
+            DisclosureGroup(isExpanded: isExpanded(host.id)) {
+                HostTerminalRows(host: host)
+            } label: {
+                HostRow(host: host, state: model.displayState(for: host.id), keyBlock: model.hostKeyBlock(for: host.id))
+                    .hostArranging(.host(host.id), target: .item(.host(host.id)), cornerRadius: 6, isEnabled: model.hostSearch.isEmpty, onDrop: model.arrange)
+                    .contextMenu { HostMenu(host: host) { deletionCandidate = host } }
+            }
+            .tag(SidebarItem.host(host.id))
+        }
+    }
+
+    private func isFolderExpanded(_ id: HostFolder.ID) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedFolders.contains(id) },
+            set: { open in
+                if open { collapsedFolders.remove(id) } else { collapsedFolders.insert(id) }
+            }
+        )
     }
 
     /// Hosts with an open terminal or one still checking the host key.
@@ -106,6 +136,30 @@ struct HostSidebar: View {
                 }
             }
         )
+    }
+}
+
+/// A folder in the sidebar: its gel, name and host count.
+private struct SidebarFolderRow: View {
+    let folder: HostFolder
+    let hostCount: Int
+
+    @Environment(\.isHostDropTarget) private var isTargeted
+
+    var body: some View {
+        HStack(spacing: 8) {
+            FolderGel(size: 20, isOpen: isTargeted)
+            Text(folder.name)
+                .font(Aero.font(.body, weight: .medium))
+                .foregroundStyle(Aero.text.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(String(hostCount))
+                .font(Aero.font(.caption))
+                .foregroundStyle(Aero.text.secondary)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -239,7 +293,6 @@ private struct SidebarTerminalRow: View {
             }
         }
         .help(help)
-        // Terminals shows the confirmations and sheets these can lead to.
         .contextMenu {
             Button("Reconnect", systemImage: "arrow.clockwise") {
                 model.selectedTab = .terminals

@@ -102,8 +102,6 @@ final class Phase4SelfTest {
         self.model = model
     }
 
-    // MARK: - Run
-
     func runAndQuit() async {
         savePasteboard()
         await run()
@@ -129,7 +127,6 @@ final class Phase4SelfTest {
         }
         step("agent running", true, ssh.paths.agentSocket.path(percentEncoded: false))
 
-        // 1. A fresh key, authorized on every dev server.
         guard let key = await Phase2SelfTest.generateKey(name: "AeroOps phase 4 self-test", ssh: ssh, step: step) else { return }
         self.key = key
         guard await authorize(key), let (hosts, down) = await addHosts(keyID: key.id.uuidString) else { return }
@@ -150,18 +147,15 @@ final class Phase4SelfTest {
         let (status, output) = await Phase2SelfTest.runProcess(script, arguments: [publicKeyPath])
         let authorized = output.components(separatedBy: "authorized:").count - 1
         step("authorize key", status == 0 && authorized == 3, "\(authorized) of 3 servers: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
-        // Never connect to a server that did not take the key (PerSourcePenalties).
         return status == 0 && authorized == 3
     }
 
     private func addHosts(keyID: String) async -> (hosts: [RemoteHost], down: RemoteHost)? {
-        // 2. Hosts.
         let hosts = [
             RemoteHost(name: "dev-ssh", address: "localhost", port: 2222, user: "dev", keyId: keyID),
             RemoteHost(name: "dev-alpine", address: "localhost", port: 2223, user: "dev", keyId: keyID),
             RemoteHost(name: "dev-vm", address: "aeroops-vm.orb.local", port: 22, user: "dev", keyId: keyID),
         ]
-        // Port 1 refuses connections: ssh fails before authenticating, so no penalty.
         let down = RemoteHost(name: "dev-down", address: "localhost", port: 1, user: "dev", keyId: keyID)
         let keyless = RemoteHost(name: "no-key", address: "localhost", port: 2222, user: "dev")
         do {
@@ -182,7 +176,6 @@ final class Phase4SelfTest {
     }
 
     private func openMainWindow(showing host: RemoteHost) async -> NSWindow? {
-        // 3. The real main window, Terminals tab.
         guard let window = await mainWindow() else {
             step("main window", false, "no main window")
             return nil
@@ -200,7 +193,6 @@ final class Phase4SelfTest {
     }
 
     private func openShellTabs(_ hosts: [RemoteHost], window: NSWindow) async -> [TerminalSession]? {
-        // 4. Five shell tabs: each host once (first contact), then two repeats.
         var shells: [TerminalSession] = []
         var lineages: [(ok: Bool, detail: String)] = []
         for (index, host) in (hosts + hosts.prefix(2)).enumerated() {
@@ -240,12 +232,10 @@ final class Phase4SelfTest {
         guard let shells = await openShellTabs(hosts, window: window) else { return }
         let rootPIDs = shells.map(\.processRootPID)
 
-        // 5. A remote-command tab.
         guard await checkRemoteCommand(on: hosts[2]) != nil else { return }
         await checkUnreachable(down)
 
         report.tabTitles = terminals.sessions.map { terminals.tab(for: $0.id)?.title ?? $0.title }
-        // Grouped by host in the host list's order, each host's tabs in the order they opened.
         let expected = ["dev-ssh", "dev-ssh (2)", "dev-alpine", "dev-alpine (2)", "dev-vm", "dev-vm · exit test"]
         step("tab titles", report.tabTitles == expected, report.tabTitles.joined(separator: " | "))
 
@@ -260,7 +250,6 @@ final class Phase4SelfTest {
     }
 
     private func checkSizes(_ shells: [TerminalSession], rootPIDs: [pid_t?]) async {
-        // 6. stty size and tput cols in every shell tab, against the surface grid.
         for (index, session) in shells.enumerated() {
             await checkSize(session, label: "SZ_\(index + 1)")
         }
@@ -271,30 +260,22 @@ final class Phase4SelfTest {
     }
 
     private func checkInteractiveUse(_ shells: [TerminalSession], hosts: [RemoteHost], window: NSWindow, windowSize: NSSize) async {
-        // 7. Full-screen programs.
         await checkVi(shells[2])
         await checkTop(shells[0])
 
-        // 8. Resize.
         await checkResize(shown: shells[2], hidden: shells[3], window: window)
 
-        // 9. Copy and paste between tabs; an unsafe paste asks first.
         await checkCopyPaste(from: shells[2], to: shells[3])
         await checkUnsafePaste(into: shells[1], window: window)
 
-        // 10. Shortcuts through the menus while a terminal has focus.
         await checkShortcuts(focus: shells[2], vm: hosts[2], window: window, windowSize: windowSize)
 
-        // 11. Close every tab: only ControlPersist masters may remain.
         await checkCloseAll()
 
-        // 12. Quit path: a running tab closes before the agent stops.
         await checkQuitPath(hosts[1])
 
         step("stays on Terminals", tabSwitches.isEmpty, tabSwitches.isEmpty ? "the window never left the Terminals tab" : tabSwitches.joined(separator: " | "))
     }
-
-    // MARK: - Steps
 
     private func checkLaunchSpecs(_ host: RemoteHost) {
         let context = model.ssh.context
@@ -389,7 +370,6 @@ final class Phase4SelfTest {
         )
         guard exited else { return session }
 
-        // Reconnect replaces the tab in place and runs the command again.
         let index = terminals.sessions.firstIndex { $0.id == session.id }
         let canReconnect = terminals.canReconnect(session.id)
         terminals.reconnect(session.id)
@@ -416,7 +396,6 @@ final class Phase4SelfTest {
         let text = lines(session).joined(separator: "\n")
         let shown = text.contains("Connection refused") || text.contains("connect to host")
         let pressAnyKey = text.contains("Press any key to close")
-        // libghostty's "Press any key to close the terminal": a key closes the ended tab.
         let stillOpen = terminals.session(id: session.id) != nil
         session.type("x")
         let closed = await wait(5) {
@@ -449,16 +428,12 @@ final class Phase4SelfTest {
         await show(session)
         session.type("vi /tmp/aero-phase4-\(getpid()).txt\n")
         let drawn = await wait { self.lines(session).filter { $0 == "~" }.count >= 3 }
-        // A key press clears the select-all that reading the screen leaves behind.
         session.pressEscape()
         await pause(0.8)
         await capture("vi")
         session.pressEscape()
-        // A lone ESC followed at once by more keys reads as an escape sequence to vi.
         await pause(0.3)
         session.type(":q!\n")
-        // Keys typed while vim still runs are encoded for it (it turns on modifyOtherKeys) and
-        // it flushes typed-ahead input when it restores the tty: wait for the shell's screen.
         _ = await wait(5) { self.lines(session).filter { $0 == "~" }.count < 3 }
         await pause(0.5)
         let back = await runCommand(session, "true", marker: "VI_DONE") != nil
@@ -470,12 +445,10 @@ final class Phase4SelfTest {
         await show(session)
         session.type("top\n")
         let drawn = await wait { self.lines(session).contains { $0.hasPrefix("top - ") || $0.hasPrefix("Tasks:") || $0.hasPrefix("Mem:") } }
-        // Space redraws top and clears the select-all left by reading the screen.
         session.type(" ")
         await pause(1.2)
         await capture("top")
         session.type("q")
-        // top restores the tty with TCSAFLUSH, discarding input typed before it is gone.
         await pause(0.5)
         let back = await runCommand(session, "true", marker: "TOP_DONE") != nil
         step("top", drawn && back, "drawn \(drawn), back at the prompt \(back)")
@@ -527,7 +500,6 @@ final class Phase4SelfTest {
         let pasted = await wait(5) { self.lines(target).contains { $0.contains("#aero-copy-4242") } }
         let prompted = target.clipboardPrompt != nil
         target.clipboardPrompt?.deny()
-        // Run the pasted line: a shell comment.
         target.type("\n")
         let back = await runCommand(target, "true", marker: "CP_DONE") != nil
         report.pastedIntoOtherTab = pasted

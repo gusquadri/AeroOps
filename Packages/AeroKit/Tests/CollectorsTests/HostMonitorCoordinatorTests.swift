@@ -53,7 +53,6 @@ struct HostMonitorCoordinatorTests {
         let monitorA = try #require(coordinator.monitor(for: a.id))
         let monitorB = try #require(coordinator.monitor(for: b.id))
 
-        // Renaming and retagging keep the monitor; a new port restarts it.
         var renamedA = a
         renamedA.name = "a2"
         renamedA.tags = ["prod"]
@@ -70,15 +69,12 @@ struct HostMonitorCoordinatorTests {
         try await runner.waitForCalls(1, for: c)
         try await monitorEventually("new b's first poll") { runner.calls.contains { $0.host.port == 2222 } }
 
-        // The replaced monitor polls no more: after 5 s only the new endpoint is polled.
-        // (stop() is idempotent: this returns once the coordinator's stop has taken effect.)
         await monitorB.stop()
         try await monitorEventually("timers for a, b and c") { clock.pendingDeadlines.count == 3 }
         clock.advance(to: .seconds(5))
         try await runner.waitForCalls(3, for: b)
         #expect(runner.calls(for: b).map(\.host.port) == [22, 2222, 2222])
 
-        // User, address, key and login method changes restart too.
         for change in [\RemoteHost.user, \RemoteHost.address] as [WritableKeyPath<RemoteHost, String>] {
             var changed = renamedA
             changed[keyPath: change] += "x"
@@ -97,12 +93,10 @@ struct HostMonitorCoordinatorTests {
         coordinator.setHosts([password, movedB, c])
         #expect(coordinator.monitor(for: a.id) !== beforeAuth)
 
-        // Removing hosts stops their monitors.
         coordinator.setHosts([c])
         #expect(coordinator.monitoredHostIDs == [c.id])
         #expect(coordinator.latestUpdate(for: a.id) == nil)
         #expect(coordinator.latestUpdate(for: b.id) == nil)
-        // Wait until every removed or replaced monitor has stopped (stop() is idempotent).
         for entry in created.entries where entry.host.id != c.id {
             await entry.monitor.stop()
         }
@@ -131,14 +125,12 @@ struct HostMonitorCoordinatorTests {
         try await settle()
         #expect(runner.calls(for: b).isEmpty)
 
-        // On: a monitor starts and polls.
         b.monitored = true
         coordinator.setHosts([a, b])
         #expect(coordinator.monitoredHostIDs == [a.id, b.id])
         try await updates.waitForAny("b online") { $0.hostID == b.id && $0.status == .online }
         let monitorB = try #require(coordinator.monitor(for: b.id))
 
-        // Off again: the monitor stops and polls no more.
         b.monitored = false
         coordinator.setHosts([a, b])
         #expect(coordinator.monitoredHostIDs == [a.id])
@@ -214,7 +206,6 @@ struct HostMonitorCoordinatorTests {
 
         await coordinator.shutdown()
         try await updates.waitUntilFinished()
-        // The in-flight poll of b was cancelled, not answered.
         #expect(!updates.all.contains { $0.hostID == b.id && $0.status != .loading })
         #expect(coordinator.monitoredHostIDs.isEmpty)
 

@@ -48,8 +48,6 @@ struct AgentRequestHandler: Sendable {
         ([AgentMessage.failure], [event])
     }
 
-    // MARK: REQUEST_IDENTITIES
-
     private func identities() async -> (reply: [UInt8], events: [AgentEvent.Kind]) {
         let records = await keyStore.identities()
         var w = SSHWriter()
@@ -61,8 +59,6 @@ struct AgentRequestHandler: Sendable {
         }
         return (w.bytes, [.identitiesListed(count: records.count)])
     }
-
-    // MARK: SIGN_REQUEST
 
     private func sign(_ body: inout SSHReader, state: AgentConnectionState) async -> (reply: [UInt8], events: [AgentEvent.Kind]) {
         let keyBlob: [UInt8], data: [UInt8], flags: UInt32
@@ -83,13 +79,11 @@ struct AgentRequestHandler: Sendable {
         guard let (record, key) = found else {
             return failure(.signFailed(keyID: nil, reason: "unknown key \(SSHPublicKey.fingerprint(of: keyBlob))"))
         }
-        // Refuse SHA-1 before bothering the user with Touch ID.
         if record.algorithm == .rsa, flags & (AgentMessage.flagRSASHA256 | AgentMessage.flagRSASHA512) == 0 {
             return failure(.signFailed(keyID: record.id, reason: SigningError.sha1Refused(flags: flags).description))
         }
 
         let userAuth = UserAuthRequest(parsing: data, keyBlob: keyBlob)
-        // A request bound to a different session than the one ssh announced is not trusted as login.
         let sessionMatches = userAuth.map { auth in state.sessionBinds.last.map { $0.sessionID == auth.sessionID } ?? true } ?? false
         let request = SignRequest(
             connectionID: state.connectionID, key: record, peer: state.peer, user: userAuth?.user,
@@ -114,16 +108,12 @@ struct AgentRequestHandler: Sendable {
         return (w.bytes, [.signed(keyID: record.id, keyName: record.name, signatureAlgorithm: algorithm, user: request.user, hostKeyFingerprint: request.hostKeyFingerprint)])
     }
 
-    // MARK: EXTENSION
-
     private func handleExtension(_ body: inout SSHReader, state: inout AgentConnectionState) -> (reply: [UInt8], events: [AgentEvent.Kind]) {
         guard let name = try? body.text("extension name") else { return failure(.refused(request: "EXTENSION (malformed)")) }
         guard name == AgentMessage.sessionBindExtension else {
             let printable = String(name.unicodeScalars.filter { $0.isASCII && $0.value >= 0x20 && $0.value < 0x7f }.prefix(64).map(Character.init))
             return failure(.refused(request: "EXTENSION \(printable)"))
         }
-        // string hostkey, string session identifier, string signature, bool is_forwarding.
-        // The server's signature is not verified: the fingerprint is informational, as in the spike.
         let bind: AgentConnectionState.SessionBind
         do {
             let hostKey = try body.string("session-bind host key")

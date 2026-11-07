@@ -16,8 +16,6 @@ struct MetricsParserTests {
         try #require(try parse(name, previous: previous).successPair, "expected success for \(name)")
     }
 
-    // MARK: - Fixtures
-
     @Test("ubuntu VM sample 1: every section, first sample has no CPU %")
     func ubuntuFirstSample() throws {
         let (snapshot, sample) = try success("ubuntu-vm-1")
@@ -40,7 +38,6 @@ struct MetricsParserTests {
         #expect(snapshot.kernel == "Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64")
         #expect(snapshot.hostname == "aeroops-vm")
         #expect(snapshot.sampledAt == Date(timeIntervalSince1970: 1_000))
-        // The script runs df twice (two headers); the duplicate row is dropped.
         #expect(snapshot.disks == [
             DiskUsage(mount: "/", device: "/dev/vdb1", usedBytes: 22_392_144 * kib,
                       totalBytes: 51_904_512 * kib, availableBytes: 29_512_368 * kib),
@@ -54,7 +51,6 @@ struct MetricsParserTests {
         let (_, first) = try success("ubuntu-vm-1")
         let (snapshot, second) = try success("ubuntu-vm-2", previous: first)
         #expect(second.cpuTimes == CPUTimes(total: 726_205_398, idle: 717_173_271))
-        // Δtotal 2165, Δidle 2123 → Δbusy 42 (user +20, system +16, softirq +6).
         let percent = try #require(snapshot.cpuPercent)
         #expect(abs(percent - 42.0 / 2165.0 * 100) < 1e-9)
         #expect(snapshot.memUsedBytes == (3_052_020 - 1_516_580) * kib)
@@ -64,7 +60,7 @@ struct MetricsParserTests {
     @Test("CPU deltas for the other -1/-2 pairs, iowait counted as idle")
     func otherCPUDeltas() throws {
         let pairs: [(String, Double)] = [
-            ("debian", 75.0 / 2118.0 * 100),         // iowait +1 is idle time
+            ("debian", 75.0 / 2118.0 * 100),
             ("devcontainer", 62.0 / 2111.0 * 100),
             ("alpine-busybox", 76.0 / 2239.0 * 100),
         ]
@@ -113,7 +109,6 @@ struct MetricsParserTests {
 
         #expect(snapshot.cardDisk()?.mount == "/")
         #expect(snapshot.cardDisk(pinnedMount: "/pubkeys") == pubkeys)
-        // A pin that disappeared falls back to "/".
         #expect(snapshot.cardDisk(pinnedMount: "/gone")?.mount == "/")
     }
 
@@ -164,10 +159,8 @@ struct MetricsParserTests {
         let root = sample.disks[0]
         #expect(root == DiskUsage(mount: "/", device: "/dev/disk3s1s1", usedBytes: 13_338_596 * kib,
                                   totalBytes: 239_362_496 * kib, availableBytes: 31_105_088 * kib))
-        // APFS: the container's size is shared, so used ÷ (used + available) matches df's 31%.
         #expect(abs(try #require(root.usedFraction) - 13_338_596.0 / 44_443_684.0) < 1e-12)
 
-        // Device names with spaces.
         let autoHome = try #require(sample.disks.first { $0.mount == "/System/Volumes/Data/home" })
         #expect(autoHome.device == "map auto_home")
         #expect(autoHome.totalBytes == 0)
@@ -189,8 +182,6 @@ struct MetricsParserTests {
         #expect(lines.allSatisfy { $0.contains("No such file") })
     }
 
-    // MARK: - Truncation and structure
-
     @Test("missing @@end is truncated, whatever else is present")
     func truncated() throws {
         let full = try Fixtures.string("metrics/ubuntu-vm-1.txt")
@@ -199,7 +190,6 @@ struct MetricsParserTests {
         #expect(MetricsParser.parse(String(full.prefix(40))) == .truncated)
         #expect(MetricsParser.parse("") == .truncated)
         #expect(MetricsParser.parse(cut).sample == nil)
-        // Darwin output cut off is truncated too, not unsupported.
         let darwin = try Fixtures.string("metrics/nonlinux-darwin.txt")
         #expect(MetricsParser.parse(darwin.components(separatedBy: "@@end")[0]) == .truncated)
     }
@@ -260,13 +250,9 @@ struct MetricsParserTests {
         #expect(result.snapshot?.memUsedFraction == nil)
     }
 
-    // MARK: - Building blocks
-
     @Test("cpu line parsing: old kernels, guest columns, junk")
     func cpuLine() {
-        // 2.4-era kernel: user nice system idle only.
         #expect(CPUTimes(statLine: "cpu 10 20 30 40") == CPUTimes(total: 100, idle: 40))
-        // guest and guest_nice are already inside user/nice and are not added again.
         #expect(CPUTimes(statLine: "cpu 1 2 3 4 5 6 7 8 1000 1000") == CPUTimes(total: 36, idle: 9))
         #expect(CPUTimes(statLine: "cpu0 1 2 3 4 5") == nil)
         #expect(CPUTimes(statLine: "cpu 1 2 3") == nil)
@@ -281,7 +267,6 @@ struct MetricsParserTests {
         #expect(CPUTimes.busyPercent(from: a, to: CPUTimes(total: 200, idle: 50)) == 100)
         #expect(CPUTimes.busyPercent(from: a, to: CPUTimes(total: 200, idle: 150)) == 0)
         #expect(CPUTimes.busyPercent(from: a, to: CPUTimes(total: 200, idle: 100)) == 50)
-        // Idle jumped more than total (inconsistent counters) clamps to 0.
         #expect(CPUTimes.busyPercent(from: a, to: CPUTimes(total: 110, idle: 110)) == 0)
         #expect(CPUTimes.busyPercent(from: a, to: a) == nil)
     }
@@ -308,7 +293,6 @@ struct MetricsParserTests {
         let disk = DiskUsage(mount: "/", device: "/dev/sda1", usedBytes: 50, totalBytes: 200)
         #expect(disk.availableBytes == nil)
         #expect(disk.usedFraction == 0.25)
-        // With available known (reserved blocks), the df Capacity basis is used.
         let reserved = DiskUsage(mount: "/", device: "/dev/sda1", usedBytes: 50, totalBytes: 200, availableBytes: 50)
         #expect(reserved.usedFraction == 0.5)
     }

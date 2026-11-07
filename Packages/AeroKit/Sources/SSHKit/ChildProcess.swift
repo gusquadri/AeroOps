@@ -145,7 +145,6 @@ final class ChildProcess: @unchecked Sendable {
     private let watchesExit: Bool
     private let readBuffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 1)
 
-    // Queue-confined state.
     private var stdout: CappedOutput
     private var stderr: CappedOutput
     private var splitter: LineSplitter?
@@ -206,8 +205,6 @@ final class ChildProcess: @unchecked Sendable {
     deinit {
         readBuffer.deallocate()
     }
-
-    // MARK: - Launch
 
     /// Starts the child. `completion` runs exactly once, on a private queue, after the child was
     /// reaped and both output pipes reached EOF (or the drain grace expired).
@@ -281,7 +278,6 @@ final class ChildProcess: @unchecked Sendable {
             throw ChildLaunchError(message: "\(spec.executable): \(errorString(status))")
         }
 
-        // The child has its copies; keep only the parent's ends.
         if let stdinPipe { close(stdinPipe.read) }
         close(stdoutPipe.write)
         close(stderrPipe.write)
@@ -307,7 +303,6 @@ final class ChildProcess: @unchecked Sendable {
                 cancelled = true
                 beginTermination()
             } else {
-                // Already reaped; stop waiting for descendants holding the pipes.
                 stdoutSource?.cancel()
                 stderrSource?.cancel()
             }
@@ -321,7 +316,6 @@ final class ChildProcess: @unchecked Sendable {
         queue.async { [self] in
             guard stdinFD >= 0, !stdinClosing else { return }
             if stdinOffset >= 1 << 20 {
-                // Drop what was written so a long backlog does not keep it alive.
                 pendingStdin = pendingStdin.subdata(in: (pendingStdin.startIndex + stdinOffset)..<pendingStdin.endIndex)
                 stdinOffset = 0
             }
@@ -345,8 +339,6 @@ final class ChildProcess: @unchecked Sendable {
         queue.async { [self] in reapIfExited(exitReported: true) }
     }
 
-    // MARK: - Queue-confined
-
     private func start(stdin: Int32?, stdout: Int32, stderr: Int32) {
         stdoutSource = makeReader(fd: stdout, isStdout: true)
         stderrSource = makeReader(fd: stderr, isStdout: false)
@@ -366,7 +358,6 @@ final class ChildProcess: @unchecked Sendable {
                 beginTermination()
             }
         }
-        // The child may have exited before the process source was armed.
         reapIfExited(exitReported: false)
     }
 
@@ -388,7 +379,6 @@ final class ChildProcess: @unchecked Sendable {
     }
 
     private func readAvailable(fd: Int32, isStdout: Bool) {
-        // Bounded so one chatty stream cannot starve the other or the exit handler.
         for _ in 0..<16 {
             let count = read(fd, readBuffer.baseAddress, readBuffer.count)
             if count > 0 {
@@ -398,7 +388,6 @@ final class ChildProcess: @unchecked Sendable {
             } else if count < 0 && errno == EAGAIN {
                 return
             } else {
-                // EOF or a read error: either way this stream is done.
                 (isStdout ? stdoutSource : stderrSource)?.cancel()
                 return
             }
@@ -445,7 +434,6 @@ final class ChildProcess: @unchecked Sendable {
                 armWriter()
                 return
             } else {
-                // EPIPE: the child closed stdin; the rest is dropped.
                 pendingStdin = Data()
                 stdinOffset = 0
                 closeStdinFD()
@@ -487,7 +475,6 @@ final class ChildProcess: @unchecked Sendable {
             close(fd)
             return
         }
-        // A suspended source never runs its cancel handler.
         if stdinSourceSuspended {
             stdinSourceSuspended = false
             stdinSource.resume()
@@ -505,36 +492,44 @@ final class ChildProcess: @unchecked Sendable {
     ///   After the report this therefore blocks until the child is waitable, which is
     ///   imminent. Without the report it only checks (`WNOHANG`).
     private func reapIfExited(exitReported: Bool) {
-        guard termination == nil else { return }
+        guard termination == nil, hasExited(exitReported: exitReported) else { return }
+        if terminating { killLingeringDescendants() }
+        let result = reap()
+        exitedAt = .now
+        termination = result
+        settleAfterExit()
+    }
+
+    private func hasExited(exitReported: Bool) -> Bool {
         var info = siginfo_t()
         let options = WEXITED | WNOWAIT | (exitReported ? 0 : WNOHANG)
         var peek: Int32
         repeat { peek = waitid(P_PID, id_t(pid), &info, options) } while peek != 0 && errno == EINTR
-        if peek == 0 && info.si_pid != pid { return } // still running (only possible with WNOHANG)
-        // peek != 0 (ECHILD): someone else reaped it; waitpid below reports that.
+        let reapedByOther = peek != 0
+        return reapedByOther || info.si_pid == pid
+    }
 
-        if terminating {
-            // While the zombie exists its pid (= process group id) cannot be reused, so this is
-            // the last safe moment to take down descendants that ignored SIGTERM.
-            kill(-pid, SIGKILL)
-        }
+    private func killLingeringDescendants() {
+        kill(-pid, SIGKILL)
+    }
+
+    private static let statusLostToOtherReaper = ChildTermination.exited(-1)
+
+    private func reap() -> ChildTermination {
         var status: Int32 = 0
         var reaped: pid_t
         repeat { reaped = waitpid(pid, &status, 0) } while reaped < 0 && errno == EINTR
-        exitedAt = .now
-        if reaped == pid {
-            let signal = status & 0x7F
-            termination = signal == 0 ? .exited((status >> 8) & 0xFF) : .signaled(signal)
-        } else {
-            termination = .exited(-1) // reaped by someone else; status unknown
-        }
+        guard reaped == pid else { return Self.statusLostToOtherReaper }
+        let signal = status & 0x7F
+        return signal == 0 ? .exited((status >> 8) & 0xFF) : .signaled(signal)
+    }
 
+    private func settleAfterExit() {
         processSource?.cancel()
         timeoutTimer?.cancel()
         killTimer?.cancel()
         closeStdinFD()
         if stdoutOpen || stderrOpen {
-            // Descendants (e.g. a backgrounded `sleep`) may still hold the pipes open.
             let grace = cancelled ? .zero : spec.drainGrace
             drainTimer = makeTimer(after: grace) { [self] in
                 stdoutSource?.cancel()
@@ -568,8 +563,6 @@ final class ChildProcess: @unchecked Sendable {
             cancelled: cancelled,
             duration: (exitedAt ?? .now) - startedAt
         )
-        // Cancel everything and drop the sources, which breaks the source <-> self cycles that
-        // kept this object alive while the child ran.
         closeStdinFD()
         for source in [stdoutSource, stderrSource, stdinSource, processSource, timeoutTimer, killTimer, drainTimer] as [(any DispatchSourceProtocol)?] {
             source?.cancel()
